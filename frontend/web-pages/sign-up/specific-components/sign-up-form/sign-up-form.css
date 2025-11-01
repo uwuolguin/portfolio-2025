@@ -1,0 +1,130 @@
+#signup-section {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 60vh;
+}
+
+.signup-container {
+    background-color: #252E41;
+    padding: 2.5rem;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+}
+
+.signup-title {
+    color: #ffffff;
+    font-family: sans-serif;
+    margin-bottom: 1rem;
+    margin-top: 0rem;
+    font-size: 2rem;
+}
+
+.signup-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.input-group {
+    width: 100%;
+}
+
+.signup-input {
+    width: calc(100% - 20px);
+    padding: 10px;
+    border: none;
+    border-radius: 5px;
+    background-color: #3b455b;
+    color: #ffffff;
+    font-size: 1rem;
+    font-family: sans-serif;
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.signup-input::placeholder {
+    color: #a0a0a0;
+}
+
+.signup-input:focus {
+    outline: none;
+    background-color: #4a546d;
+    box-shadow: 0 0 0 2px #FF9800;
+}
+
+.signup-button {
+    background-color: #FF9800;
+    color: white;
+    padding: 12px;
+    border: none;
+    border-radius: 5px;
+    font-size: 1rem;
+    font-family: sans-serif;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.signup-button:hover {
+    background-color: #e68a00;
+}
+
+/* New classes for already logged in view */
+.already-logged-message {
+    color: #ffffff;
+    font-family: sans-serif;
+    font-size: 1.1rem;
+    line-height: 1.5;
+    margin-bottom: 2rem;
+}
+
+.signup-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.signup-actions .signup-button {
+    flex: 1;
+    max-width: 150px;
+}
+
+.signup-button.secondary {
+    background-color: #4a546d;
+}
+
+.signup-button.secondary:hover {
+    background-color: #5a647d;
+}
+
+@media (max-width: 600px) {
+    .signup-container {
+        padding: 1.5rem;
+        max-width: 90%;
+    }
+
+    .signup-title {
+        font-size: 1rem;
+    }
+
+    .signup-input {
+        font-size: 0.8rem;
+    }
+
+    .signup-button {
+        font-size: 0.8rem;
+        padding: 10px;
+    }
+
+    .signup-actions {
+        flex-direction: column;
+        gap: 0.8rem;
+    }
+
+    .signup-actions .signup-button {
+        max-width: none;
+    }
+}

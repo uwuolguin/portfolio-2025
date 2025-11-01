@@ -30,7 +30,7 @@ async def create_admin_user():
         return False
     
     try:
-        conn = await asyncpg.connect(settings.database_url)
+        conn = await asyncpg.connect(settings.alembic_database_url)
         
         try:
             existing = await conn.fetchval(

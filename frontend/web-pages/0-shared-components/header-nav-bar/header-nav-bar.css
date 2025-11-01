@@ -1,0 +1,123 @@
+#nav-container-component {
+    background-color: #252E41;
+    padding: 2px;
+    width: 100%
+
+}
+
+.nav-container-flex-container {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    
+}
+
+.nav-container-logo-container {
+    display: flex;
+    align-items: center;
+}
+
+.nav-container-logo-container img {
+    height: 140px; 
+}
+
+ul.nav-container-ul {
+    display: flex;
+    list-style-type: none;
+    margin: 20px;
+    padding: 0;
+    align-items: center;
+
+}
+
+a.nav-container-a {
+    color: white;
+    text-align: center;
+    padding: 6px 10px;
+    text-decoration: none;
+    font-family: sans-serif;
+    font-size: 20px;
+    transition: background-color 0.3s;
+}
+
+a.nav-container-a:hover {
+    background-color: #FF9800;
+}
+
+li.nav-container-li {
+    display: flex;
+    align-items: center; 
+}
+
+.lang-btn {
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px; 
+    width: 70px;  
+}
+
+.lang-flag {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.lang-toggle {
+    margin-left: 10px;
+}
+
+@media (max-width: 600px) {
+    #nav-container-component {
+    max-width: 100%;
+    margin: 0 auto;
+    }
+    .nav-container-logo-container img {
+    height: 110px; 
+    }
+
+    .nav-container-flex-container {
+        flex-direction: column; 
+        padding-bottom: 20px;
+    }
+
+    ul.nav-container-ul {
+        flex-direction: column;
+        align-items: center;
+        margin: 0;
+    }
+
+    li.nav-container-li {
+        width: 100%; 
+        text-align: center;
+        margin: 5px 0;
+        justify-content: center; 
+    }
+    a.nav-container-a {
+    font-size: 12px;
+    padding: 1px 1px;
+
+    }
+    .lang-flag {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        margin-top: 10px; 
+    }
+    .lang-btn {
+        border: none;
+        background: none;
+        padding: 0;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 25px; 
+        width: 50px;  
+    }
+}

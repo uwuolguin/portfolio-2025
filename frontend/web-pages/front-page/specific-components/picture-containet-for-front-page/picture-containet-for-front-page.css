@@ -1,0 +1,20 @@
+.image-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 25px;
+}
+
+.image-container img {
+  max-height: 270px;
+  margin: 0px;
+  width: 90%;
+}
+
+@media (max-width: 600px) {
+  .image-container img {
+    max-height: 100px;
+    object-fit: cover;
+    width: 100%;
+  }
+}

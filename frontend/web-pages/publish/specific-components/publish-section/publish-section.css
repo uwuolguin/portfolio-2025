@@ -1,0 +1,330 @@
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+main {
+  flex-grow: 1;
+}
+#publish-section {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.publish-container {
+    background-color: #252E41;
+    padding: 2.5rem;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    max-width: 500px;
+    text-align: center;
+    margin-top: 80px;
+    margin-bottom: 80px;
+}
+
+.publish-title {
+    color: #ffffff;
+    font-family: sans-serif;
+    margin-bottom: 1rem;
+    margin-top: 0rem;
+    font-size: 2rem;
+}
+
+.publish-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+}
+
+.input-group {
+    width: 100%;
+    position: relative;
+    transition: margin-bottom 0.3s ease;
+}
+
+.input-group.dropdown-open {
+    margin-bottom: 200px;
+}
+
+.publish-input, .publish-textarea, .publish-select {
+    width: calc(100% - 20px);
+    padding: 10px;
+    border: none;
+    border-radius: 5px;
+    background-color: #3b455b;
+    color: #ffffff;
+    font-size: 1rem;
+    font-family: sans-serif;
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.publish-input::placeholder,
+.publish-textarea::placeholder {
+    color: white;
+}
+
+.publish-input:focus, .publish-textarea:focus, .publish-select:focus {
+    outline: none;
+    background-color: #4a546d;
+    box-shadow: 0 0 0 2px #FF9800;
+}
+
+.publish-select option {
+    background-color: #3b455b;
+    color: #ffffff;
+}
+
+.publish-textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+/* Filterable Dropdown Styles */
+.filterable-dropdown {
+    position: relative;
+    width: 100%;
+    z-index: 1000;
+}
+
+.dropdown-selected {
+    width: calc(100% - 20px);
+    padding: 10px;
+    border: none;
+    border-radius: 5px;
+    background-color: #3b455b;
+    color: #ffffff;
+    font-size: 1rem;
+    font-family: sans-serif;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.dropdown-selected:hover {
+    background-color: #4a546d;
+}
+
+.dropdown-arrow {
+    color: #ffffff;
+    transition: transform 0.2s ease;
+}
+.dropdown-selected:hover .dropdown-arrow {
+    transform: rotate(180deg);
+}
+.dropdown-options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: #3b455b;
+    border: 1px solid #4a546d;
+    border-radius: 0 0 5px 5px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 9999;
+    max-height: 200px;
+    overflow: hidden;
+}
+
+.dropdown-search {
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid #4a546d;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    font-family: sans-serif;
+    outline: none;
+    box-sizing: border-box;
+    background-color: #2c3442;
+    color: #ffffff;
+}
+
+.dropdown-search::placeholder {
+    color: #a0a0a0;
+}
+
+.dropdown-search:focus {
+    border-bottom-color: #FF9800;
+    background-color: #353d4b;
+}
+
+.options-list {
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.dropdown-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    font-size: 0.9rem;
+    font-family: sans-serif;
+    color: #ffffff;
+}
+
+.dropdown-option:hover {
+    background-color: #4a546d;
+}
+
+.options-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.options-list::-webkit-scrollbar-track {
+    background: #2c3442;
+}
+
+.options-list::-webkit-scrollbar-thumb {
+    background: #4a546d;
+    border-radius: 3px;
+}
+
+.publish-button {
+    background-color: #FF9800;
+    color: white;
+    padding: 12px;
+    border: none;
+    border-radius: 5px;
+    font-size: 1rem;
+    font-family: sans-serif;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.publish-button:hover {
+    background-color: #e68a00;
+}
+
+.file-input-wrapper {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+}
+
+.file-input-hidden {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.file-input-label {
+    display: block;
+    width: calc(100% - 20px);
+    padding: 10px;
+    border: none;
+    border-radius: 5px;
+    background-color: #3b455b;
+    color: #ffffff;
+    font-size: 1rem;
+    font-family: sans-serif;
+    cursor: pointer;
+    transition: background-color 0.3s, box-shadow 0.3s;
+    text-align: left;
+}
+
+.file-input-label:hover {
+    background-color: #4a546d;
+}
+
+.file-input-label:focus-within {
+    background-color: #4a546d;
+    box-shadow: 0 0 0 2px #FF9800;
+}
+
+.file-input-label.has-file {
+    color: #FF9800;
+}
+
+.login-message {
+    color: #ffffff;
+    font-family: sans-serif;
+    font-size: 1.1rem;
+    line-height: 1.5;
+}
+
+.login-message a {
+    color: #FF9800;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.login-message a:hover {
+    color: #e68a00;
+    text-decoration: underline;
+}
+
+.already-published-message {
+    color: #ffffff;
+    font-family: sans-serif;
+    font-size: 1.1rem;
+    line-height: 1.5;
+    margin-bottom: 2rem;
+}
+
+.publish-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.publish-actions .publish-button {
+    flex: 1;
+    max-width: 200px;
+}
+
+.publish-button.secondary {
+    background-color: #4a546d;
+}
+
+.publish-button.secondary:hover {
+    background-color: #5a647d;
+}
+
+@media (max-width: 600px) {
+    .publish-container {
+        padding: 1.5rem;
+        max-width: 90%;
+    }
+
+    .publish-title {
+        font-size: 1.2rem;
+    }
+
+    .publish-input,
+    .publish-textarea,
+    .publish-select,
+    .file-input-label,
+    .dropdown-selected {
+        font-size: 0.8rem;
+    }
+
+    .dropdown-search,
+    .dropdown-option {
+        font-size: 0.8rem;
+    }
+
+    .publish-button {
+        font-size: 0.8rem;
+        padding: 10px;
+    }
+
+    .publish-actions {
+        flex-direction: column;
+        gap: 0.8rem;
+    }
+
+    .publish-actions .publish-button {
+        max-width: none;
+    }
+}

@@ -1,0 +1,20 @@
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+html {
+  overflow-x: hidden;
+}
+
+
+main {
+  flex-grow: 1;
+}
+.front-page-body {
+  background-color: #f5f6fa;
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  color: #333;
+} 

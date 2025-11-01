@@ -46,7 +46,7 @@ class DatabasePoolManager:
         
         try:
             self.write_pool = await asyncpg.create_pool(
-                dsn=settings.database_url,
+                dsn=settings.alembic_database_url,
                 min_size=settings.db_pool_min_size,
                 max_size=settings.db_pool_max_size,
                 max_queries=settings.db_pool_max_queries,

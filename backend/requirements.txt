@@ -61,8 +61,8 @@ opennsfw2==0.14.0
 opt_einsum==3.4.0
 packaging==25.0
 pillow==12.0.0
-protobuf==4.25.3
-psycopg2==2.9.11
+protobuf==3.20.3
+psycopg2-binary==2.9.11
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycparser==2.23
@@ -95,7 +95,6 @@ tensorboard==2.15.2
 tensorboard-data-server==0.7.2
 tensorflow==2.15.0
 tensorflow-estimator==2.15.0
-tensorflow-intel==2.15.0
 tensorflow-io-gcs-filesystem==0.31.0
 termcolor==3.2.0
 tifffile==2025.10.16
