@@ -1,5 +1,4 @@
-import json
-import functools
+import json, functools
 from typing import Callable, Any
 from app.cache.redis_client import redis_client
 from app.config import settings
@@ -7,44 +6,41 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-
 def cache_response(key_prefix: str, ttl: int = None):
-    """
-    Decorator to cache endpoint responses in Redis
-    Gracefully degrades if Redis is unavailable - just skips caching
-    
-    Usage:
-        @cache_response(key_prefix="products", ttl=3600)
-        async def get_products():
-            ...
-    """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
             if not redis_client.is_available():
-                logger.debug("cache_skipped_redis_unavailable", func=func.__name__)
                 return await func(*args, **kwargs)
-            
-            cache_key = f"{key_prefix}:{json.dumps(kwargs, sort_keys=True)}"
-            
+
+            safe_kw = {}
+            for k, v in kwargs.items():
+                if v is None or isinstance(v, (str, int, float, bool, list, dict)):
+                    safe_kw[k] = v
+                else:
+                    safe_kw[k] = f"<nonserializable:{v.__class__.__name__}>"
+
+            try:
+                params_str = json.dumps(safe_kw, sort_keys=True, separators=(",", ":"))
+            except Exception:
+                params_str = str(safe_kw)
+
+            cache_key = f"{key_prefix}:{params_str}"
+
+            if len(cache_key) > 200:
+                import hashlib
+                cache_key = f"{key_prefix}:{hashlib.sha256(cache_key.encode()).hexdigest()}"
+
             cached = await redis_client.get(cache_key)
             if cached:
-                logger.debug("cache_hit", key=cache_key)
                 try:
                     return json.loads(cached)
                 except json.JSONDecodeError:
-                    logger.warning("cache_decode_error", key=cache_key)
-            
-            logger.debug("cache_miss", key=cache_key)
+                    pass
+
             result = await func(*args, **kwargs)
-            
-            expire_time = ttl or settings.cache_ttl
-            try:
-                await redis_client.set(cache_key, json.dumps(result), expire=expire_time)
-            except Exception as e:
-                logger.warning("cache_set_failed", key=cache_key, error=str(e))
-            
+            await redis_client.set(cache_key, json.dumps(result), expire=ttl or settings.cache_ttl)
             return result
-        
+
         return wrapper
     return decorator
