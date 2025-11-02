@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     max_file_size: int = 10_000_000  
     allowed_file_types: List[str] = ["image/jpeg", "image/png"]
-    upload_directory: str = "files/pictures"
+    upload_directory: str = "/shared-files/pictures"
 
     # ------------------------------------------------------------------------
     # API

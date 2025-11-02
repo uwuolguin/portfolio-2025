@@ -98,9 +98,16 @@ class FileHandler:
 
     @staticmethod
     def init_upload_directory() -> None:
-        """Ensure upload directory exists."""
-        FileHandler.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info("upload_directory_initialized", path=str(FileHandler.UPLOAD_DIR))
+        """Verify upload directory exists (created by Docker volume mount)."""
+        if not FileHandler.UPLOAD_DIR.exists():
+            logger.error(
+                "upload_directory_missing",
+                path=str(FileHandler.UPLOAD_DIR),
+                message="Upload directory should be mounted via Docker volume"
+            )
+            raise RuntimeError(f"Upload directory not found: {FileHandler.UPLOAD_DIR}")
+        
+        logger.info("upload_directory_verified", path=str(FileHandler.UPLOAD_DIR))
 
     @staticmethod
     def _validate_and_process_image(

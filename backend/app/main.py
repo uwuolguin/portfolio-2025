@@ -21,15 +21,12 @@ from app.routers import users, products, communes, companies
 
 logger = structlog.get_logger(__name__)
 
-Path("files/pictures").mkdir(parents=True, exist_ok=True)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("application_startup_begin")
 
     try:
-        FileHandler.init_upload_directory()
+        FileHandler.init_upload_directory()        
         try:
             FileHandler.load_nsfw_model()
         except NSFWModelError as e:
