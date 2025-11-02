@@ -71,7 +71,7 @@ async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db)):
 
 
 @router.post("/resend-verification")
-async def resend_verification(email: str, db: asyncpg.Connection = Depends(get_db)):
+async def resend_verification(email: str, db: asyncpg.Connection = Depends(get_db),current_user: dict = Depends(require_admin)):
     """Resend verification email"""
     try:
         user = await DB.resend_verification_email(conn=db, email=email)
