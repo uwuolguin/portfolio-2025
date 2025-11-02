@@ -46,7 +46,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./backend:/app
-      - uploaded_files:/app/uploads 
+      - ./files/pictures:/app/files/pictures
     ports:
       - "8000:8000"
     depends_on:
@@ -65,7 +65,7 @@ services:
     container_name: portfolio-nginx
     volumes:
       - ./frontend/web-pages:/usr/share/nginx/html:ro
-      - uploaded_files:/usr/share/nginx/html/uploads:ro 
+      - ./files:/usr/share/nginx/html/files:ro
     ports:
       - "80:80"
     depends_on:
@@ -76,7 +76,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  uploaded_files:
 
 networks:
   portfolio-network:

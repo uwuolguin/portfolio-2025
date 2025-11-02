@@ -24,7 +24,7 @@ class FileHandler:
     Includes NSFW detection using OpenNSFW2.
     """
 
-    UPLOAD_DIR = Path("uploads")
+    UPLOAD_DIR = Path(settings.upload_directory)
     MAX_SIZE_BYTES = settings.max_file_size
     MAX_WIDTH = 4000
     MAX_HEIGHT = 4000
@@ -217,7 +217,7 @@ class FileHandler:
     ) -> str:
         """
         Save and validate uploaded image with NSFW checking.
-        Returns the file path as string.
+        Returns the file path as string relative to files/ directory.
         """
         try:
             file_bytes = await file.read()
@@ -289,7 +289,7 @@ class FileHandler:
                 nsfw_score=nsfw_score
             )
 
-            return str(save_path)
+            return f"pictures/{filename}"
 
         except HTTPException:
             raise
@@ -302,14 +302,22 @@ class FileHandler:
 
     @staticmethod
     def delete_image(image_path: str) -> bool:
-        """Delete an image file. Returns True if successful."""
+        """
+        Delete an image file. 
+        Expects path like 'pictures/filename.jpg'
+        Returns True if successful.
+        """
         try:
-            file_path = Path(image_path)
+            if image_path.startswith("files/"):
+                file_path = Path(image_path)
+            elif image_path.startswith("pictures/"):
+                file_path = Path("files") / image_path
+                
             if file_path.exists():
                 file_path.unlink()
-                logger.info("file_deleted", path=image_path)
+                logger.info("file_deleted", path=str(file_path))
                 return True
-            logger.warning("file_not_found_for_deletion", path=image_path)
+            logger.warning("file_not_found_for_deletion", path=str(file_path))
             return False
         except Exception as e:
             logger.error("file_delete_error", path=image_path, error=str(e))
@@ -317,9 +325,17 @@ class FileHandler:
 
     @staticmethod
     def get_image_url(image_path: str, request_base_url: str) -> str:
-        """Convert file path to public URL."""
-        filename = Path(image_path).name
-        return f"{request_base_url.rstrip('/')}/uploads/{filename}"
+        """
+        Convert file path to public URL.
+        Input: 'pictures/uuid.jpg'
+        Output: 'http://localhost/files/pictures/uuid.jpg'
+        """
+        if image_path.startswith("files/"):
+            relative_path = image_path[6:]
+        elif image_path.startswith("pictures/"):
+            relative_path = image_path
+            
+        return f"{request_base_url.rstrip('/')}/files/{relative_path}"
 
     @staticmethod
     def get_nsfw_status() -> dict:

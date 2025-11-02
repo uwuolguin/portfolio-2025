@@ -38,8 +38,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     # File uploads / Image processing
     # ------------------------------------------------------------------------
-    max_file_size: int = 10_000_000  # 10 MB
+    max_file_size: int = 10_000_000  
     allowed_file_types: List[str] = ["image/jpeg", "image/png"]
+    upload_directory: str = "files/pictures"
 
     # ------------------------------------------------------------------------
     # API

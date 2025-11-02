@@ -21,7 +21,7 @@ from app.routers import users, products, communes, companies
 
 logger = structlog.get_logger(__name__)
 
-Path("uploads").mkdir(parents=True, exist_ok=True)
+Path("files/pictures").mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -143,7 +143,6 @@ app.include_router(products.router, prefix=settings.api_v1_prefix)
 app.include_router(communes.router, prefix=settings.api_v1_prefix)
 app.include_router(companies.router, prefix=settings.api_v1_prefix)
 
-app.mount("/uploads", StaticFiles(directory="uploads/"), name="uploads")
 
 @app.get("/")
 async def root():
