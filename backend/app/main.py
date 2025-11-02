@@ -21,7 +21,7 @@ from app.routers import users, products, communes, companies
 
 logger = structlog.get_logger(__name__)
 
-Path("uploads/company_images").mkdir(parents=True, exist_ok=True)
+Path("uploads").mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager

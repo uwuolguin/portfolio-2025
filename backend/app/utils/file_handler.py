@@ -24,7 +24,7 @@ class FileHandler:
     Includes NSFW detection using OpenNSFW2.
     """
 
-    UPLOAD_DIR = Path("uploads/company_images")
+    UPLOAD_DIR = Path("uploads")
     MAX_SIZE_BYTES = settings.max_file_size
     MAX_WIDTH = 4000
     MAX_HEIGHT = 4000
