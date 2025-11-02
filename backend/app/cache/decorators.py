@@ -3,6 +3,7 @@ from typing import Callable, Any
 from app.cache.redis_client import redis_client
 from app.config import settings
 import structlog
+from pydantic import BaseModel
 
 logger = structlog.get_logger(__name__)
 
@@ -20,15 +21,24 @@ def cache_response(key_prefix: str, ttl: int = None):
                 try:
                     return json.loads(cached)
                 except json.JSONDecodeError:
+                    logger.warning("cache_json_decode_error", key=cache_key)
                     pass
 
             result = await func(*args, **kwargs)
             
+            if isinstance(result, list):
+                json_result = [item.model_dump() if isinstance(item, BaseModel) else item for item in result]
+            elif isinstance(result, BaseModel):
+                json_result = result.model_dump()
+            else:
+                json_result = result
+            
             await redis_client.set(
                 cache_key, 
-                json.dumps(result), 
+                json.dumps(json_result), 
                 expire=ttl or settings.cache_ttl
             )
+            
             return result
 
         return wrapper
