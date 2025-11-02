@@ -311,38 +311,38 @@ class FileHandler:
     def delete_image(image_path: str) -> bool:
         """
         Delete an image file. 
-        Expects path like 'pictures/filename.jpg'
+        Expects path like 'pictures/filename.jpg' (as stored in database)
         Returns True if successful.
         """
         try:
-            if image_path.startswith("files/"):
-                file_path = Path(image_path)
-            elif image_path.startswith("pictures/"):
-                file_path = Path("files") / image_path
-                
+            filename = Path(image_path).name
+            
+            file_path = FileHandler.UPLOAD_DIR / filename
+            
             if file_path.exists():
                 file_path.unlink()
-                logger.info("file_deleted", path=str(file_path))
+                logger.info("file_deleted", path=str(file_path), stored_as=image_path)
                 return True
-            logger.warning("file_not_found_for_deletion", path=str(file_path))
+            
+            logger.warning(
+                "file_not_found_for_deletion", 
+                stored_path=image_path,
+                expected_location=str(file_path)
+            )
             return False
+            
         except Exception as e:
-            logger.error("file_delete_error", path=image_path, error=str(e))
+            logger.error("file_delete_error", path=image_path, error=str(e), exc_info=True)
             return False
-
+    
     @staticmethod
     def get_image_url(image_path: str, request_base_url: str) -> str:
         """
         Convert file path to public URL.
-        Input: 'pictures/uuid.jpg'
+        Input: 'pictures/uuid.jpg' (as stored in database)
         Output: 'http://localhost/files/pictures/uuid.jpg'
         """
-        if image_path.startswith("files/"):
-            relative_path = image_path[6:]
-        elif image_path.startswith("pictures/"):
-            relative_path = image_path
-            
-        return f"{request_base_url.rstrip('/')}/files/{relative_path}"
+        return f"{request_base_url.rstrip('/')}/files/{image_path}"
 
     @staticmethod
     def get_nsfw_status() -> dict:
