@@ -1,6 +1,3 @@
-"""
-Cache invalidation helper - safely clears cache when DB changes
-"""
 import structlog
 from app.cache.redis_client import redis_client
 
@@ -8,50 +5,37 @@ logger = structlog.get_logger(__name__)
 
 
 class CacheManager:
-    """Handles all cache invalidation logic"""
-
     @staticmethod
-    async def _delete_pattern(pattern: str) -> int:
-        """
-        Delete all Redis keys matching a given pattern.
-        Returns number of keys deleted.
-        """
+    async def _delete_key(key: str) -> bool:
         if not redis_client.is_available() or not redis_client.redis:
-            logger.warning("redis_unavailable_skip_invalidation", pattern=pattern)
-            return 0
+            logger.warning("redis_unavailable_skip_invalidation", key=key)
+            return False
 
         try:
-            keys_deleted = 0
-            async for key in redis_client.redis.scan_iter(match=pattern, count=100):
-                await redis_client.redis.delete(key)
-                keys_deleted += 1
-            return keys_deleted
+            deleted = await redis_client.delete(key)
+            return deleted
         except Exception as e:
-            logger.warning("cache_pattern_delete_failed", pattern=pattern, error=str(e))
-            return 0
+            logger.warning("cache_key_delete_failed", key=key, error=str(e))
+            return False
 
     @staticmethod
     async def invalidate_products():
-        """Clear all product list cache keys after create/update/delete"""
-        pattern = "products:all*"
-        deleted = await CacheManager._delete_pattern(pattern)
+        key = "products:all"
+        deleted = await CacheManager._delete_key(key)
         if deleted:
-            logger.info("cache_invalidated", entity="products", keys_deleted=deleted)
-        return deleted > 0
+            logger.info("cache_invalidated", entity="products", key_deleted=key)
+        return deleted
 
-    # === COMMUNES ===
     @staticmethod
     async def invalidate_communes():
-        """Clear all commune list cache keys after create/update/delete"""
-        pattern = "communes:all*"
-        deleted = await CacheManager._delete_pattern(pattern)
+        key = "communes:all"
+        deleted = await CacheManager._delete_key(key)
         if deleted:
-            logger.info("cache_invalidated", entity="communes", keys_deleted=deleted)
-        return deleted > 0
+            logger.info("cache_invalidated", entity="communes", key_deleted=key)
+        return deleted
 
     @staticmethod
     async def invalidate_all():
-        """Nuclear option - clear entire Redis DB (use for emergencies only)"""
         if not redis_client.is_available() or not redis_client.redis:
             logger.warning("redis_unavailable_skip_flush")
             return False
