@@ -1,4 +1,5 @@
 """python -m app.services.create_admin"""
+"""docker compose exec backend python -m app.services.create_admin"""
 import asyncio
 import asyncpg
 from app.config import settings
