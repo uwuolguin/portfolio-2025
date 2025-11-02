@@ -46,7 +46,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./backend:/app
-      - ./files/pictures:/app/files/pictures
+      - ./files:/app/files
     ports:
       - "8000:8000"
     depends_on:
@@ -64,8 +64,8 @@ services:
       dockerfile: Dockerfile
     container_name: portfolio-nginx
     volumes:
-      - ./frontend/web-pages:/usr/share/nginx/html:ro
-      - ./files:/usr/share/nginx/html/files:ro
+      - ./frontend/web-pages:/usr/share/nginx/html
+      - ./files:/usr/share/nginx/html/files
     ports:
       - "80:80"
     depends_on:
