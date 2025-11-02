@@ -27,9 +27,12 @@ def cache_response(key_prefix: str, ttl: int = None):
             result = await func(*args, **kwargs)
             
             if isinstance(result, list):
-                json_result = [item.model_dump() if isinstance(item, BaseModel) else item for item in result]
+                json_result = [
+                    item.model_dump(mode='json') if isinstance(item, BaseModel) else item 
+                    for item in result
+                ]
             elif isinstance(result, BaseModel):
-                json_result = result.model_dump()
+                json_result = result.model_dump(mode='json')
             else:
                 json_result = result
             
