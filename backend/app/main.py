@@ -143,7 +143,7 @@ app.include_router(products.router, prefix=settings.api_v1_prefix)
 app.include_router(communes.router, prefix=settings.api_v1_prefix)
 app.include_router(companies.router, prefix=settings.api_v1_prefix)
 
-app.mount("/uploads", StaticFiles(directory="uploads/company_images"), name="uploads")
+app.mount("/uploads", StaticFiles(directory="uploads/"), name="uploads")
 
 @app.get("/")
 async def root():
