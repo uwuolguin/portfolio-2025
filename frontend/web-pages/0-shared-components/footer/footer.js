@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
             privacy: "Política de Privacidad",
             terms: "Términos y Condiciones",
             flag: "us",
-            img: "/uploads/logos/us.svg"
+            img: "/files/logos/us.svg"
         },
         en: {
             about: "About Us",
@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
             privacy: "Privacy Policy",
             terms: "Terms of Service",
             flag: "es",
-            img: "/uploads/logos/es.svg"
+            img: "/files/logos/es.svg" 
         }
     };
 
@@ -33,9 +33,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <a href="#">${translations[lang].terms}</a>
                 </div>
                 <div class="footer-social">
-                    <a href="#"><img src="/uploads/logos/facebook.svg" alt="Facebook"></a>
-                    <a href="#"><img src="/uploads/logos/twitter.svg" alt="Twitter"></a>
-                    <a href="#"><img src="/uploads/logos/instagram.svg" alt="Instagram"></a>
+                    <a href="#"><img src="/files/logos/facebook.svg" alt="Facebook"></a>
+                    <a href="#"><img src="/files/logos/twitter.svg" alt="Twitter"></a>
+                    <a href="#"><img src="/files/logos/instagram.svg" alt="Instagram"></a>
                 </div>
 
             <div class="footer-bottom">

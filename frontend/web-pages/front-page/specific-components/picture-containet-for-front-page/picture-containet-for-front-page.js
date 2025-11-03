@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const imageContent = `
         <div class="image-container">
-            <img src="/uploads/pictures/background-picture.jpg" 
+            <img src="/files/pictures/background-picture.jpg" 
                  alt="Description of the image">
         </div>
     `;

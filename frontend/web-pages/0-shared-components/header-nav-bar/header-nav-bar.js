@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 login: "Inicia sesión",
                 publish: "Publícate",
                 flag: "us",
-                img: "/uploads/logos/us.svg"
+                img: "/files/logos/us.svg"
             },
             en: {
                 profileView: "See profile",
@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 login: "Log in",
                 publish: "Post Ad",
                 flag: "es",
-                img: "/uploads/logos/es.svg"
+                img: "/files/logos/es.svg"
             }
     };
 
@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <nav class="nav-container-flex-container">
                     <div class="nav-container-logo-container">
                         <a href="www.google.cl">
-                            <img src="/uploads/logos/logoSVG.svg" alt="Proveo Logo" >
+                            <img src="/files/logos/logoSVG.svg" alt="Proveo Logo" >
                         </a>
                     </div>
                     <ul class="nav-container-ul">
@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <nav class="nav-container-flex-container">
                     <div class="nav-container-logo-container">
                         <a href="www.google.cl">
-                            <img src="/uploads/logos/logoSVG.svg" alt="Proveo Logo" >
+                            <img src="/files/logos/logoSVG.svg" alt="Proveo Logo" >
                         </a>
                     </div>
                     <ul class="nav-container-ul">
