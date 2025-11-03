@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     project_name: str = "Proveo API"
     debug: bool = False
-    allowed_origins: List[str] = ["http://localhost:3000"]
+    allowed_origins: List[str] = ["http://localhost", "http://localhost:80"]
 
     # ------------------------------------------------------------------------
     # Database monitoring / Retry
