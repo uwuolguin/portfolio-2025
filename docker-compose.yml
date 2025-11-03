@@ -9,7 +9,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5432"
     networks:
       - portfolio-network
     healthcheck:
@@ -22,7 +22,7 @@ services:
     image: redis:7-alpine
     container_name: portfolio-redis
     ports:
-      - "6379:6379"
+      - "6379"
     volumes:
       - redis_data:/data
     networks:
@@ -46,7 +46,7 @@ services:
       - ./backend:/app
       - ./files:/shared-files
     ports:
-      - "8000:8000"
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
