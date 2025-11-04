@@ -67,7 +67,7 @@ class Settings(BaseSettings):
 
     resend_api_key: str
     email_from: str = "noreply@proveo.com"
-    api_base_url: str = "http://localhost:8000"
+    api_base_url: str = "http://localhost"
 
     class Config:
         env_file = ".env"
