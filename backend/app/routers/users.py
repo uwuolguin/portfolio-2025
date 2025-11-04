@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query, Request
 from fastapi.responses import HTMLResponse
 from typing import List
 import asyncpg
@@ -16,11 +16,13 @@ from app.templates.email_verification import (
     verification_error_page,
     verification_server_error_page
 )
+from app.cache.rate_limit import get_rate_limiter
 from app.config import settings
 import structlog
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
+resend_limit = Depends(get_rate_limiter(route_name="resend_verification", ip_limit=2, global_limit=10))
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -71,35 +73,33 @@ async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db)):
 
 
 @router.post("/resend-verification")
-async def resend_verification(email: str, db: asyncpg.Connection = Depends(get_db),current_user: dict = Depends(require_admin)):
+async def resend_verification(
+    email: str,
+    db: asyncpg.Connection = Depends(get_db),
+    _: None = resend_limit,
+):
     """Resend verification email"""
     try:
         user = await DB.resend_verification_email(conn=db, email=email)
-        
         verification_token = user.get('verification_token')
+
         if verification_token:
             await email_service.send_verification_email(
                 to_email=user['email'],
                 token=verification_token,
                 user_name=user['name']
             )
-        
-        return {
-            "message": "Verification email sent. Please check your inbox."
-        }
-        
+
+        return {"message": "Verification email sent. Please check your inbox."}
+
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("resend_verification_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to resend verification email"
         )
-
 
 @router.post("/login", response_model=LoginResponse)
 async def login(user_data: UserLogin, response: Response, db: asyncpg.Connection = Depends(get_db)):
