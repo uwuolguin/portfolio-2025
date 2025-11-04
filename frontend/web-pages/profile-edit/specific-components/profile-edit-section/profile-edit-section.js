@@ -1,4 +1,13 @@
-import { getLanguage, getLoginState, getCompanyPublishState, getCompanyData, setCompanyData } from '../../../0-shared-components/utils/shared-functions.js';
+import { 
+    getLanguage, 
+    getLoginState, 
+    getCompanyPublishState, 
+    setCompanyData,
+    fetchProducts,
+    fetchCommunes,
+    apiRequest
+} from '../../../0-shared-components/utils/shared-functions.js';
+
 document.addEventListener('DOMContentLoaded', () => {
     const profileEditSection = document.getElementById('profile-edit-section');
 
@@ -30,10 +39,9 @@ document.addEventListener('DOMContentLoaded', () => {
             noCompanyMessage: "Primero debes publicar una empresa para poder editarla.",
             updating: "Actualizando...",
             deleting: "Eliminando...",
-            places: ["La Florida", "Lo Curro", "Los Troncos", "aaa", "bbb", "ccc", "Otra"],
-            products: ["Fiambrería", "Lácteos", "Legumbres", "aaa", "bbb", "ccc", "Otro"],
             searchCommunePlaceholder: "Buscar comuna...",
             searchProductPlaceholder: "Buscar producto...",
+            loadingError: "Error al cargar los datos de la empresa."
         },
         en: {
             title: "Edit company profile",
@@ -62,12 +70,30 @@ document.addEventListener('DOMContentLoaded', () => {
             noCompanyMessage: "You must publish a company first before you can edit it.",
             updating: "Updating...",
             deleting: "Deleting...",
-            places: ["La Florida", "Lo Curro", "Los Troncos", "aaa", "bbb", "ccc", "Other"],
-            products: ["Fiambrería", "Dairy", "Legumes", "aaa", "bbb", "ccc", "Other"],
             searchCommunePlaceholder: "Search commune...",
             searchProductPlaceholder: "Search product...",
+            loadingError: "Error loading company data."
         }
     };
+
+    // Fetch user's company data from backend
+    async function fetchMyCompany() {
+        try {
+            const response = await apiRequest('/api/v1/companies/user/my-company');
+            
+            if (response.ok) {
+                const company = await response.json();
+                return company;
+            } else if (response.status === 404) {
+                return null; // No company found
+            } else {
+                throw new Error('Failed to fetch company');
+            }
+        } catch (error) {
+            console.error('Error fetching company:', error);
+            return null;
+        }
+    }
 
     // Simple filterable dropdown function
     function createFilterableDropdown(options, placeholder, className, id, defaultText, currentValue) {
@@ -162,7 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="login-message">
                     ${t.loginRequired}
                     <br><br>
-                    <a href="../login/login.html">${t.loginHere}</a>
+                    <a href="../log-in/log-in.html">${t.loginHere}</a>
                 </div>
             </div>
         `;
@@ -188,27 +214,58 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderEditForm() {
+    async function renderEditForm() {
         const lang = getLanguage();
         const t = translations[lang];
-        const companyData = getCompanyData();
+        
+        // Show loading state
+        profileEditSection.innerHTML = `
+            <div class="profile-edit-container">
+                <h2 class="profile-edit-title">${t.title}</h2>
+                <div class="login-message">${lang === 'es' ? 'Cargando...' : 'Loading...'}</div>
+            </div>
+        `;
+        
+        // Fetch real company data from backend
+        const companyData = await fetchMyCompany();
+        
+        if (!companyData) {
+            // If no company found, sync state and show no company view
+            setCompanyPublishState(false);
+            renderNoCompany();
+            return;
+        }
+        
+        // Fetch products and communes
+        const products = await fetchProducts();
+        const communes = await fetchCommunes();
+        
+        // Find current product and commune names
+        const currentProduct = products.find(p => p.uuid === companyData.product_uuid);
+        const currentCommune = communes.find(c => c.uuid === companyData.commune_uuid);
+        
+        const productNames = products.map(p => lang === 'es' ? p.name_es : p.name_en);
+        const communeNames = communes.map(c => c.name);
+        
+        const currentProductName = currentProduct ? (lang === 'es' ? currentProduct.name_es : currentProduct.name_en) : null;
+        const currentCommuneName = currentCommune ? currentCommune.name : null;
 
         const communeDropdown = createFilterableDropdown(
-            t.places, 
+            communeNames, 
             t.searchCommunePlaceholder, 
             'commune-dropdown', 
             'commune',
             t.commune,
-            companyData?.commune
+            currentCommuneName
         );
         
         const productDropdown = createFilterableDropdown(
-            t.products, 
+            productNames, 
             t.searchProductPlaceholder, 
             'product-dropdown', 
             'product',
             t.productType,
-            companyData?.productType
+            currentProductName
         );
 
         profileEditSection.innerHTML = `
@@ -216,19 +273,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 <h2 class="profile-edit-title">${t.title}</h2>
                 <form id="profile-edit-form" class="profile-edit-form">
                     <div class="input-group">
-                        <input type="text" id="companyName" class="profile-edit-input" placeholder="${t.companyName}" value="${companyData?.companyName || ''}" required>
+                        <input type="text" id="companyName" class="profile-edit-input" placeholder="${t.companyName}" value="${companyData.name || ''}" required>
                     </div>
                     <div class="input-group">
-                        <textarea id="productDescription" class="profile-edit-textarea" placeholder="${t.productDescription}" required>${companyData?.productDescription || ''}</textarea>
+                        <textarea id="productDescription" class="profile-edit-textarea" placeholder="${t.productDescription}" required>${lang === 'es' ? (companyData.description_es || '') : (companyData.description_en || '')}</textarea>
                     </div>
                     <div class="input-group">
-                        <input type="text" id="address" class="profile-edit-input" placeholder="${t.address}" value="${companyData?.address || ''}" required>
+                        <input type="text" id="address" class="profile-edit-input" placeholder="${t.address}" value="${companyData.address || ''}" required>
                     </div>
                     <div class="input-group">
-                        <input type="tel" id="phone" class="profile-edit-input" placeholder="${t.phone}" value="${companyData?.phone || ''}" required>
+                        <input type="tel" id="phone" class="profile-edit-input" placeholder="${t.phone}" value="${companyData.phone || ''}" required>
                     </div>
                     <div class="input-group">
-                        <input type="email" id="companyEmail" class="profile-edit-input" placeholder="${t.companyEmail}" value="${companyData?.companyEmail || ''}" required>
+                        <input type="email" id="companyEmail" class="profile-edit-input" placeholder="${t.companyEmail}" value="${companyData.email || ''}" required>
                     </div>
                     <div class="input-group">
                         ${communeDropdown}
@@ -239,8 +296,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="input-group">
                         <div class="current-image-container">
                             <label class="current-image-label">${t.currentImage}</label>
-                            ${companyData?.companyImage ?
-                                `<img src="${companyData.companyImage}" alt="Company Image" class="current-image">` :
+                            ${companyData.image_url ?
+                                `<img src="${companyData.image_url}" alt="Company Image" class="current-image">` :
                                 `<div class="no-image-placeholder">${t.noImage}</div>`
                             }
                         </div>
@@ -261,6 +318,9 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
 
         initDropdowns();
+        
+        // Store company UUID for update/delete
+        const companyUUID = companyData.uuid;
 
         const form = document.getElementById("profile-edit-form");
         form.addEventListener("submit", async (e) => {
@@ -282,66 +342,72 @@ document.addEventListener('DOMContentLoaded', () => {
             const submitButton = form.querySelector('button[type="submit"]');
             const originalButtonText = submitButton.textContent;
 
-            // Disable button and show loading state
             submitButton.disabled = true;
             submitButton.textContent = t.updating;
 
             try {
+                // Get products and communes to find UUIDs
+                const products = await fetchProducts();
+                const communes = await fetchCommunes();
+                
+                const selectedProduct = products.find(p => 
+                    (lang === 'es' ? p.name_es : p.name_en) === productValue
+                );
+                const selectedCommune = communes.find(c => c.name === communeValue);
+                
+                if (!selectedProduct || !selectedCommune) {
+                    throw new Error('Invalid product or commune selection');
+                }
+                
                 const formData = new FormData();
-                formData.append('companyName', document.getElementById("companyName").value);
-                formData.append('productDescription', document.getElementById("productDescription").value);
+                formData.append('name', document.getElementById("companyName").value);
+                formData.append('product_uuid', selectedProduct.uuid);
+                formData.append('commune_uuid', selectedCommune.uuid);
                 formData.append('address', document.getElementById("address").value);
                 formData.append('phone', document.getElementById("phone").value);
-                formData.append('companyEmail', document.getElementById("companyEmail").value);
-                formData.append('commune', communeValue);
-                formData.append('productType', productValue);
+                formData.append('email', document.getElementById("companyEmail").value);
+                formData.append('lang', lang);
+                
+                // Add description
+                const description = document.getElementById("productDescription").value;
+                if (lang === 'es') {
+                    formData.append('description_es', description);
+                } else {
+                    formData.append('description_en', description);
+                }
 
                 const imageFile = document.getElementById("companyImage").files[0];
                 if (imageFile) {
-                    formData.append('companyImage', imageFile);
+                    formData.append('image', imageFile);
                 }
 
-                // Mock API delay for realistic UX
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                const response = await apiRequest(`/api/v1/companies/${companyUUID}`, {
+                    method: 'PUT',
+                    body: formData
+                });
 
-                // Mock success response
-                const mockSuccess = Math.random() > 0.1; // 90% success rate for testing
-
-                if (mockSuccess) {
-                    const updatedData = {
-                        companyName: document.getElementById("companyName").value,
-                        productDescription: document.getElementById("productDescription").value,
-                        address: document.getElementById("address").value,
-                        phone: document.getElementById("phone").value,
-                        companyEmail: document.getElementById("companyEmail").value,
-                        commune: communeValue,
-                        productType: productValue,
-                        companyImage: imageFile ? URL.createObjectURL(imageFile) : companyData?.companyImage || null,
-                    };
-
-                    console.log("Updating company data:", updatedData);
-
-                    // Update company data
-                    setCompanyData(updatedData);
-
-                    // Show success message
-                    showMessage(t.updateSuccess, 'success');
-
-                    // Re-render form with updated data
-                    setTimeout(() => {
-                        renderEditForm();
-                    }, 2000);
-
-                } else {
-                    // Mock error for testing
-                    throw new Error("Mock update error");
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || 'Update failed');
                 }
+                
+                const updatedCompany = await response.json();
+                
+                console.log("Company updated:", updatedCompany);
+
+                // Update local cache
+                setCompanyData(updatedCompany);
+
+                showMessage(t.updateSuccess, 'success');
+
+                setTimeout(() => {
+                    renderEditForm();
+                }, 2000);
 
             } catch (error) {
                 console.error('Error updating company:', error);
-                showMessage(t.updateError, 'error');
+                showMessage(t.updateError + '\n' + error.message, 'error');
             } finally {
-                // Re-enable button and restore original text
                 submitButton.disabled = false;
                 submitButton.textContent = originalButtonText;
             }
@@ -362,33 +428,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 deleteButton.textContent = t.deleting;
 
                 try {
-                    // Mock API delay for realistic UX
-                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    const response = await apiRequest(`/api/v1/companies/${companyUUID}`, {
+                        method: 'DELETE'
+                    });
 
-                    // Mock success response
-                    const mockSuccess = Math.random() > 0.1; // 90% success rate for testing
-
-                    if (mockSuccess) {
-                        console.log("Deleting company");
-
-                        // Clear company data and publish state
-                        setCompanyData(null);
-
-                        // Show success message
-                        showMessage(t.deleteSuccess, 'success');
-
-                        // Redirect to publish page after delay
-                        setTimeout(() => {
-                            window.location.href = '../publish/publish.html';
-                        }, 2000);
-
-                    } else {
-                        throw new Error("Mock delete error");
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'Delete failed');
                     }
+
+                    console.log("Company deleted");
+
+                    // Clear company data and publish state
+                    setCompanyData(null);
+
+                    // Show success message
+                    showMessage(t.deleteSuccess, 'success');
+
+                    // Redirect to publish page after delay
+                    setTimeout(() => {
+                        window.location.href = '../publish/publish.html';
+                    }, 2000);
 
                 } catch (error) {
                     console.error('Error deleting company:', error);
-                    showMessage(t.deleteError, 'error');
+                    showMessage(t.deleteError + '\n' + error.message, 'error');
 
                     deleteButton.disabled = false;
                     deleteButton.textContent = originalButtonText;
@@ -435,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5000);
     }
 
-    function renderContent() {
+    async function renderContent() {
         const isLoggedIn = getLoginState();
         const hasPublishedCompany = getCompanyPublishState();
 
@@ -444,7 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (!hasPublishedCompany) {
             renderNoCompany();
         } else {
-            renderEditForm();
+            await renderEditForm();
         }
     }
 
@@ -452,5 +516,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener("userHasLogged", renderContent);
     document.addEventListener("companyPublishStateChange", renderContent);
     document.addEventListener("companyDataChange", renderContent);
+    
     renderContent();
 });

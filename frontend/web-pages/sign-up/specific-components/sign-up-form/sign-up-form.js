@@ -93,7 +93,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const submitButton = signupForm.querySelector('.signup-button');
                 const originalButtonText = submitButton.textContent;
                 
-                // Disable button and show loading state
                 submitButton.disabled = true;
                 submitButton.textContent = lang === 'es' ? 'Registrando...' : 'Signing up...';
                 
@@ -102,34 +101,43 @@ document.addEventListener('DOMContentLoaded', () => {
                     const email = document.getElementById('email').value;
                     const password = document.getElementById('password').value;
                     
-                    // TODO: Replace this mock with actual API call
-                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    const response = await fetch('/api/v1/users/signup', {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-Correlation-ID': `signup_${Date.now()}`
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({ name, email, password }),
+                    });
                     
-                    // Mock success response (90% success rate for testing)
-                    const mockSuccess = Math.random() > 0.1;
-                    
-                    if (mockSuccess) {
-                        console.log("Attempting to sign up with name:", name, "and email:", email);
-                        
-                        // Set login state to true (auto-login after signup)
-                        setLoginState(true);
-                        
-                        // Show success message
-                        alert(t.signupSuccess);
-                        
-                        // Redirect to main page
-                        window.location.href = '../front-page/front-page.html';
-                        
-                    } else {
-                        // Mock error for testing
-                        throw new Error("Mock signup error");
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'Signup failed');
                     }
+                    
+                    const data = await response.json();
+                    
+                    // Show success message with email verification notice
+                    alert(lang === 'es' ? 
+                        `¡Cuenta creada exitosamente! Se ha enviado un correo de verificación a ${email}. Por favor revisa tu bandeja de entrada.` :
+                        `Account created successfully! A verification email has been sent to ${email}. Please check your inbox.`);
+                    
+                    // Redirect to login
+                    window.location.href = '../log-in/log-in.html';
                     
                 } catch (error) {
                     console.error('Signup error:', error);
-                    alert(t.signupError);
+                    
+                    let errorMsg = t.signupError;
+                    if (error.message.includes('already registered')) {
+                        errorMsg = lang === 'es' ? 
+                            'Este correo ya está registrado.' : 
+                            'This email is already registered.';
+                    }
+                    
+                    alert(errorMsg);
                 } finally {
-                    // Re-enable button and restore original text
                     submitButton.disabled = false;
                     submitButton.textContent = originalButtonText;
                 }

@@ -1,5 +1,4 @@
-import { getLanguage, getLoginState, setLoginState } from '../../../0-shared-components/utils/shared-functions.js';
-
+import { getLanguage, getLoginState, setLoginState, setCSRFToken } from '../../../0-shared-components/utils/shared-functions.js';
 document.addEventListener('DOMContentLoaded', () => {
     const loginSection = document.getElementById('login-section');
 
@@ -13,7 +12,6 @@ document.addEventListener('DOMContentLoaded', () => {
             alreadyLoggedMessage: "Ya tienes una sesión activa. ¿Qué te gustaría hacer?",
             goToMainPage: "Ir a la página principal",
             logout: "Cerrar sesión",
-            // NEW TRANSLATIONS
             resendVerificationLink: "¿No recibiste el email de verificación?",
             resendButton: "Reenviar verificación",
             resendSuccess: "Email de verificación enviado. Revisa tu bandeja de entrada.",
@@ -30,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
             alreadyLoggedMessage: "You have an active session. What would you like to do?",
             goToMainPage: "Go to main page",
             logout: "Log out",
-            // NEW TRANSLATIONS
             resendVerificationLink: "Didn't receive the verification email?",
             resendButton: "Resend verification",
             resendSuccess: "Verification email sent. Check your inbox.",
@@ -95,7 +92,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         loginSection.innerHTML = loginFormContent;
 
-        // Attach event listener to the login form
         const loginForm = document.getElementById('login-form');
         if (loginForm) {
             loginForm.addEventListener('submit', async (e) => {
@@ -111,25 +107,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     const username = document.getElementById('username').value;
                     const password = document.getElementById('password').value;
                     
-                    // TODO: Replace with actual API call to /api/v1/users/login
-                    // const loginResponse = await fetch('/api/v1/users/login', {
-                    //     method: 'POST',
-                    //     headers: { 'Content-Type': 'application/json' },
-                    //     credentials: 'include', // Important for cookies
-                    //     body: JSON.stringify({ email: username, password }),
-                    // });
+                    const response = await fetch('/api/v1/users/login', {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-Correlation-ID': `login_${Date.now()}`
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({ email: username, password }),
+                    });
 
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    
-                    const mockSuccess = Math.random() > 0.1;
-                    
-                    if (mockSuccess) {
-                        console.log("Attempting to log in with username:", username);
-                        setLoginState(true);
-                        window.location.href = '../front-page/front-page.html';
-                    } else {
-                        throw new Error("Mock login error");
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'Login failed');
                     }
+                    
+                    const data = await response.json();
+                    
+                    setCSRFToken(data.csrf_token);
+                    
+                    setLoginState(true);
+                    
+                    if (!data.user.email_verified) {
+                        alert(lang === 'es' ? 
+                            'Por favor verifica tu correo electrónico antes de continuar.' :
+                            'Please verify your email before continuing.');
+                    }
+                    
+                    window.location.href = '../front-page/front-page.html';
                     
                 } catch (error) {
                     console.error('Login error:', error);
@@ -144,20 +149,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // NEW: Attach event listener to resend verification button
         const resendBtn = document.getElementById('resend-verification-btn');
         if (resendBtn) {
             resendBtn.addEventListener('click', async () => {
                 const email = document.getElementById('username').value.trim();
                 
-                // Validate email field is filled
                 if (!email) {
                     alert(t.emailRequired);
                     document.getElementById('username').focus();
                     return;
                 }
                 
-                // Basic email validation
                 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
                 if (!emailRegex.test(email)) {
                     alert(lang === 'es' ? 
@@ -171,15 +173,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 resendBtn.textContent = t.resending;
                 
                 try {
-                    // API call to resend verification
                     const response = await fetch('/api/v1/users/resend-verification', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-Correlation-ID': `resend_verification_${Date.now()}`
+                        },
+                        credentials: 'include',
                         body: JSON.stringify({ email }),
                     });
                     
                     if (!response.ok) {
-                        throw new Error('Resend failed');
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'Resend failed');
                     }
                     
                     alert(t.resendSuccess);

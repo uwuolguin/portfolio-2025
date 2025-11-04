@@ -1,4 +1,8 @@
-import { getLoginState, getLanguage,getCompanyPublishState,setLanguage } from '../utils/shared-functions.js';
+import { getLoginState, getLanguage, getCompanyPublishState, setLanguage, setLoginState, checkAuthStatus } from '../utils/shared-functions.js';
+document.addEventListener('DOMContentLoaded', async () => {
+    await checkAuthStatus();
+    renderNav();
+});
 document.addEventListener('DOMContentLoaded', () => {
     const navContainer = document.getElementById('nav-container-component');
     
@@ -72,15 +76,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     }
 
-    // TODO: Use event delegation for all navbar actions (lang toggle, login, logout)
-    //       This avoids reattaching listeners after every render.
-    navContainer.addEventListener("click", (e) => {
+    navContainer.addEventListener("click", async (e) => {
         const btn = e.target.closest("#lang-btn");
         if (btn) {
             const currentLang = getLanguage();
             const newLang = currentLang === "es" ? "en" : "es";
-            setLanguage(newLang)
+            setLanguage(newLang);
             renderNav();
+            return;
+        }
+        
+        // Handle logout
+        const logoutLink = e.target.closest('a[href="#"]');
+        if (logoutLink && logoutLink.textContent.includes('Cerrar sesión') || logoutLink.textContent.includes('Log out')) {
+            e.preventDefault();
+            
+            try {
+                const response = await fetch('/api/v1/users/logout', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'X-Correlation-ID': `logout_${Date.now()}`
+                    }
+                });
+                
+                if (response.ok) {
+                    setLoginState(false);
+                    window.location.href = '../front-page/front-page.html';
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Force logout even if request fails
+                setLoginState(false);
+                window.location.href = '../front-page/front-page.html';
+            }
         }
     });
 

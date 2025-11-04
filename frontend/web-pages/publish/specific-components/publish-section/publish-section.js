@@ -1,5 +1,13 @@
-import { getLanguage, getLoginState, getCompanyPublishState, setCompanyPublishState } from '../../../0-shared-components/utils/shared-functions.js';
-
+import { 
+    getLanguage, 
+    getLoginState, 
+    getCompanyPublishState, 
+    setCompanyPublishState,
+    getCSRFToken,
+    fetchProducts,
+    fetchCommunes,
+    apiRequest
+} from '../../../0-shared-components/utils/shared-functions.js';
 document.addEventListener('DOMContentLoaded', () => {
     const publishSection = document.getElementById('publish-section');
 
@@ -169,12 +177,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderPublishForm() {
+    async function renderPublishForm() {
         const lang = getLanguage();
         const t = translations[lang];
+        
+        const products = await fetchProducts();
+        const communes = await fetchCommunes();
+        
+        const productNames = products.map(p => lang === 'es' ? p.name_es : p.name_en);
+        const communeNames = communes.map(c => c.name);
 
         const communeDropdown = createFilterableDropdown(
-            t.places, 
+            communeNames, 
             t.searchCommunePlaceholder, 
             'commune-dropdown', 
             'commune',
@@ -182,7 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         
         const productDropdown = createFilterableDropdown(
-            t.products, 
+            productNames, 
             t.searchProductPlaceholder, 
             'product-dropdown', 
             'product',
@@ -253,47 +267,62 @@ document.addEventListener('DOMContentLoaded', () => {
             submitButton.textContent = lang === 'es' ? 'Publicando...' : 'Publishing...';
             
             try {
+                // Get products and communes to find UUIDs
+                const products = await fetchProducts();
+                const communes = await fetchCommunes();
+                
+                const selectedProduct = products.find(p => 
+                    (lang === 'es' ? p.name_es : p.name_en) === productValue
+                );
+                const selectedCommune = communes.find(c => c.name === communeValue);
+                
+                if (!selectedProduct || !selectedCommune) {
+                    throw new Error('Invalid product or commune selection');
+                }
+                
                 const formData = new FormData();
-                formData.append('companyName', document.getElementById("companyName").value);
-                formData.append('productDescription', document.getElementById("productDescription").value);
-                formData.append('commune', communeValue);
-                formData.append('productType', productValue);
+                formData.append('name', document.getElementById("companyName").value);
+                formData.append('product_uuid', selectedProduct.uuid);
+                formData.append('commune_uuid', selectedCommune.uuid);
                 formData.append('address', document.getElementById("address").value);
                 formData.append('phone', document.getElementById("phone").value);
-                formData.append('companyEmail', document.getElementById("companyEmail").value);
+                formData.append('email', document.getElementById("companyEmail").value);
+                formData.append('lang', lang);
+                
+                // Add description in the appropriate language
+                const description = document.getElementById("productDescription").value;
+                if (lang === 'es') {
+                    formData.append('description_es', description);
+                } else {
+                    formData.append('description_en', description);
+                }
                 
                 const imageFile = document.getElementById("companyImage").files[0];
                 if (imageFile) {
-                    formData.append('companyImage', imageFile);
+                    formData.append('image', imageFile);
                 }
 
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                
-                const mockSuccess = Math.random() > 0.1;
-                
-                if (mockSuccess) {
-                    console.log("Publishing data:", {
-                        companyName: document.getElementById("companyName").value,
-                        productDescription: document.getElementById("productDescription").value,
-                        commune: communeValue,
-                        productType: productValue,
-                        address: document.getElementById("address").value,
-                        phone: document.getElementById("phone").value,
-                        companyEmail: document.getElementById("companyEmail").value,
-                        companyImage: imageFile || null,
-                    });
-                    
-                    setCompanyPublishState(true);
-                    alert(t.publishSuccess);
-                    renderAlreadyPublished();
-                    
-                } else {
-                    throw new Error("Mock publish error");
+                const response = await apiRequest('/api/v1/companies/', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || 'Publish failed');
                 }
+                
+                const company = await response.json();
+                
+                console.log("Company published:", company);
+                
+                setCompanyPublishState(true);
+                alert(t.publishSuccess);
+                renderAlreadyPublished();
                 
             } catch (error) {
                 console.error('Error publishing company:', error);
-                alert(t.publishError);
+                alert(t.publishError + '\n' + error.message);
             } finally {
                 submitButton.disabled = false;
                 submitButton.textContent = originalButtonText;

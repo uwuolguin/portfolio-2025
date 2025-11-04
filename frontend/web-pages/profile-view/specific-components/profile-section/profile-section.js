@@ -1,5 +1,10 @@
-import { getLanguage, getLoginState, getCompanyPublishState } from '../../../0-shared-components/utils/shared-functions.js';
-
+import { 
+    getLanguage, 
+    getLoginState, 
+    getCompanyPublishState,
+    getUserData,
+    apiRequest
+} from '../../../0-shared-components/utils/shared-functions.js';
 document.addEventListener('DOMContentLoaded', () => {
     const profileSection = document.getElementById('profile-section');
 
@@ -50,23 +55,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Mock user data - In a real app, this would come from an API
-    const mockUserData = {
-        name: "Juan Pérez",
-        email: "juan.perez@email.com"
-    };
+    // Fetch real user data
+    async function fetchUserData() {
+        try {
+            const response = await apiRequest('/api/v1/users/me');
+            if (response.ok) {
+                return await response.json();
+            }
+            return null;
+        } catch (error) {
+            console.error('Error fetching user data:', error);
+            return null;
+        }
+    }
 
-    // Mock company data with example image for demonstration
-    const mockCompanyDataWithImage = {
-        companyName: "Panadería El Buen Pan",
-        productDescription: "Elaboramos pan artesanal fresco todos los días, con ingredientes naturales y recetas tradicionales. Especialistas en pan integral, pasteles y productos de repostería.",
-        address: "Av. Los Leones 1234, Providencia",
-        phone: "+56 9 8765 4321",
-        companyEmail: "contacto@elbuenpan.cl",
-        commune: "Providencia",
-        productType: "Panadería",
-        companyImageBase64: "https://images.unsplash.com/photo-1509440159596-0249088772ff?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1000&q=80"
-    };
+    // Fetch user's company data
+    async function fetchMyCompany() {
+        try {
+            const response = await apiRequest('/api/v1/companies/user/my-company');
+            if (response.ok) {
+                return await response.json();
+            } else if (response.status === 404) {
+                return null; // No company found
+            }
+            return null;
+        } catch (error) {
+            console.error('Error fetching company:', error);
+            return null;
+        }
+    }
 
     // Function to get published company data
     function getPublishedCompanyData() {
@@ -80,27 +97,39 @@ document.addEventListener('DOMContentLoaded', () => {
         alert(lang === 'es' ? 'Funcionalidad de actualizar perfil - TODO' : 'Update profile functionality - TODO');
     }
 
-    function handleDeleteProfile() {
+    async function handleDeleteProfile() {
         const lang = getLanguage();
         const t = translations[lang];
         
         if (confirm(t.confirmDelete)) {
             try {
-                console.log("Deleting profile...");
-                // Clear published company data
-                localStorage.removeItem('publishedCompanyData');
-                localStorage.setItem("isLoggedIn", "false");
-                localStorage.setItem("hasPublishedCompany", "false");
+                const response = await apiRequest('/api/v1/users/me', {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || 'Delete failed');
+                }
+
+                console.log("User account deleted");
+                
+                // Clear all local storage
+                localStorage.clear();
+                
                 alert(t.profileDeleted);
-                location.reload();
+                
+                // Redirect to main page
+                window.location.href = '../front-page/front-page.html';
+                
             } catch (error) {
                 console.error('Error deleting profile:', error);
-                alert(t.deleteError);
+                alert(t.deleteError + '\n' + error.message);
             }
         }
     }
 
-    function renderProfileContent() {
+    async function renderProfileContent() {
         const lang = getLanguage();
         const t = translations[lang];
         const isLoggedIn = getLoginState();
@@ -114,8 +143,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="login-message">
                         ${t.loginRequired}
                         <br><br>
-                        <a href="../login/login.html" class="login-link">${t.loginHere}</a>
+                        <a href="../log-in/log-in.html" class="login-link">${t.loginHere}</a>
                     </div>
+                </div>
+            `;
+            return;
+        }
+
+        // Fetch real user data
+        const userData = await fetchUserData();
+        
+        if (!userData) {
+            profileSection.innerHTML = `
+                <div class="profile-container">
+                    <h2 class="profile-title">${t.title}</h2>
+                    <div class="login-message">Error loading profile data</div>
                 </div>
             `;
             return;
@@ -127,8 +169,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="profile-container">
                     <h2 class="profile-title">${t.title}</h2>
                     <div class="user-details">
-                        <div class="user-name">${mockUserData.name}</div>
-                        <div class="user-email">${mockUserData.email}</div>
+                        <div class="user-name">${userData.name}</div>
+                        <div class="user-email">${userData.email}</div>
                     </div>
                     <div class="login-message">
                         ${t.publishFirst}
@@ -136,92 +178,102 @@ document.addEventListener('DOMContentLoaded', () => {
                         <a href="../publish/publish.html" class="login-link">${t.publishCompanyHere}</a>
                     </div>
                     <div class="profile-actions">
-                        <button class="profile-button update-button" id="updateProfileBtn">${t.updateProfile}</button>
                         <button class="profile-button delete-button" id="deleteProfileBtn">${t.deleteProfile}</button>
                     </div>
                 </div>
             `;
-        } else {
-            // Case 3: User logged in and has published a company
-            const companyData = getPublishedCompanyData();
             
-            // Use mock data with example image if no real data exists (for demonstration)
-            const displayData = companyData || mockCompanyDataWithImage;
-            
-            profileSection.innerHTML = `
-                <div class="profile-container">
-                    <h2 class="profile-title">${t.title}</h2>
-                    <div class="profile-content">
-                        <div class="user-details">
-                            <div class="user-name">${mockUserData.name}</div>
-                            <div class="user-email">${mockUserData.email}</div>
-                        </div>
-                        
-                        <div class="profile-info">
-                            <div class="info-item">
-                                <label class="info-label">${t.companyName}</label>
-                                <div class="info-value">${displayData?.companyName || t.noData}</div>
-                            </div>
-                            
-                            <div class="info-item">
-                                <label class="info-label">${t.productDescription}</label>
-                                <div class="info-value">${displayData?.productDescription || t.noData}</div>
-                            </div>
-                            
-                            <div class="info-item">
-                                <label class="info-label">${t.address}</label>
-                                <div class="info-value">${displayData?.address || t.noData}</div>
-                            </div>
-                            
-                            <div class="info-item">
-                                <label class="info-label">${t.phone}</label>
-                                <div class="info-value">${displayData?.phone || t.noData}</div>
-                            </div>
-                            
-                            <div class="info-item">
-                                <label class="info-label">${t.companyEmail}</label>
-                                <div class="info-value">${displayData?.companyEmail || t.noData}</div>
-                            </div>
-                            
-                            <div class="info-item">
-                                <label class="info-label">${t.commune}</label>
-                                <div class="info-value">${displayData?.commune || t.noData}</div>
-                            </div>
-                            
-                            <div class="info-item">
-                                <label class="info-label">${t.productType}</label>
-                                <div class="info-value">${displayData?.productType || t.noData}</div>
-                            </div>
-                            
-                            <div class="info-item">
-                                <label class="info-label">${t.companyImage}</label>
-                                ${displayData?.companyImageBase64 ? `
-                                    <img src="${displayData.companyImageBase64}" alt="Company Image" class="company-image-preview">
-                                ` : `
-                                    <div class="info-value">${t.noData}</div>
-                                `}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="profile-actions">
-                        <button class="profile-button update-button" id="updateProfileBtn">${t.updateProfile}</button>
-                        <button class="profile-button delete-button" id="deleteProfileBtn">${t.deleteProfile}</button>
-                    </div>
-                </div>
-            `;
-        }
-
-        // Add event listeners for buttons (only if user is logged in)
-        if (isLoggedIn) {
-            const updateBtn = document.getElementById('updateProfileBtn');
             const deleteBtn = document.getElementById('deleteProfileBtn');
-            
-            if (updateBtn) {
-                updateBtn.addEventListener('click', handleUpdateProfile);
-            }
             if (deleteBtn) {
                 deleteBtn.addEventListener('click', handleDeleteProfile);
             }
+            
+            return;
+        }
+        
+        // Case 3: User logged in and has published a company
+        const companyData = await fetchMyCompany();
+        
+        if (!companyData) {
+            // If API says no company but localStorage says yes, sync the state
+            setCompanyPublishState(false);
+            renderProfileContent(); // Re-render
+            return;
+        }
+        
+        profileSection.innerHTML = `
+            <div class="profile-container">
+                <h2 class="profile-title">${t.title}</h2>
+                <div class="profile-content">
+                    <div class="user-details">
+                        <div class="user-name">${userData.name}</div>
+                        <div class="user-email">${userData.email}</div>
+                    </div>
+                    
+                    <div class="profile-info">
+                        <div class="info-item">
+                            <label class="info-label">${t.companyName}</label>
+                            <div class="info-value">${companyData.name || t.noData}</div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <label class="info-label">${t.productDescription}</label>
+                            <div class="info-value">${lang === 'es' ? companyData.description_es : companyData.description_en || t.noData}</div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <label class="info-label">${t.address}</label>
+                            <div class="info-value">${companyData.address || t.noData}</div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <label class="info-label">${t.phone}</label>
+                            <div class="info-value">${companyData.phone || t.noData}</div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <label class="info-label">${t.companyEmail}</label>
+                            <div class="info-value">${companyData.email || t.noData}</div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <label class="info-label">${t.commune}</label>
+                            <div class="info-value">${companyData.commune_name || t.noData}</div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <label class="info-label">${t.productType}</label>
+                            <div class="info-value">${lang === 'es' ? companyData.product_name_es : companyData.product_name_en || t.noData}</div>
+                        </div>
+                        
+                        <div class="info-item">
+                            <label class="info-label">${t.companyImage}</label>
+                            ${companyData.image_url ? `
+                                <img src="${companyData.image_url}" alt="Company Image" class="company-image-preview">
+                            ` : `
+                                <div class="info-value">${t.noData}</div>
+                            `}
+                        </div>
+                    </div>
+                </div>
+                <div class="profile-actions">
+                    <button class="profile-button update-button" id="updateProfileBtn">${t.updateProfile}</button>
+                    <button class="profile-button delete-button" id="deleteProfileBtn">${t.deleteProfile}</button>
+                </div>
+            </div>
+        `;
+
+        // Add event listeners
+        const updateBtn = document.getElementById('updateProfileBtn');
+        const deleteBtn = document.getElementById('deleteProfileBtn');
+        
+        if (updateBtn) {
+            updateBtn.addEventListener('click', () => {
+                window.location.href = '../profile-edit/profile-edit.html';
+            });
+        }
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', handleDeleteProfile);
         }
     }
 

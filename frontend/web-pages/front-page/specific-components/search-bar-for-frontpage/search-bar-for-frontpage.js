@@ -1,5 +1,4 @@
-// Enhanced search-bar-for-frontpage.js
-import { getLanguage } from '../../../0-shared-components/utils/shared-functions.js';
+import { getLanguage, fetchProducts, fetchCommunes } from '../../../0-shared-components/utils/shared-functions.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const searchContainer = document.getElementById('search-container');
@@ -106,21 +105,31 @@ document.addEventListener('DOMContentLoaded', () => {
         document.addEventListener('click', closeAllDropdowns);
     }
 
-    function renderSearchBar() {
+    async function renderSearchBar() {
         const currentLang = getLanguage();
-        const filterOptionsPlaces = translations[currentLang].places;
-        const filterOptionsProducts = translations[currentLang].products;
+        const t = translations[currentLang];
+        
+        // Fetch products and communes from API
+        const products = await fetchProducts();
+        const communes = await fetchCommunes();
+        
+        // Add "All" option at the beginning
+        const allCommunesText = currentLang === 'es' ? 'Todas Las Comunas' : 'All Communes';
+        const allProductsText = currentLang === 'es' ? 'Todos Los Productos' : 'All Products';
+        
+        const communeNames = [allCommunesText, ...communes.map(c => c.name)];
+        const productNames = [allProductsText, ...products.map(p => currentLang === 'es' ? p.name_es : p.name_en)];
 
         const placesDropdown = createFilterableDropdown(
-            filterOptionsPlaces, 
-            translations[currentLang].searchPlaceholder, 
+            communeNames, 
+            t.searchPlaceholder, 
             'places-dropdown', 
             'places'
         );
         
         const productsDropdown = createFilterableDropdown(
-            filterOptionsProducts, 
-            translations[currentLang].searchProductPlaceholder, 
+            productNames, 
+            t.searchProductPlaceholder, 
             'products-dropdown', 
             'products'
         );
@@ -130,19 +139,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${placesDropdown}
                 ${productsDropdown}
                 <div class="search-input-container">
-                    <input type="text" placeholder="${translations[currentLang].placeholder}">
+                    <input type="text" id="search-query" placeholder="${t.placeholder}">
                 </div>
-                <button class="search-button">${translations[currentLang].button}</button>
+                <button class="search-button" id="search-btn">${t.button}</button>
             </div>
         `;
 
         searchContainer.innerHTML = searchBarContent;
         initializeDropdownFunctionality();
+        
+        // Add search button functionality
+        document.getElementById('search-btn')?.addEventListener('click', () => {
+            // Trigger results update
+            document.dispatchEvent(new CustomEvent('searchTriggered'));
+        });
+        
+        // Also trigger search on Enter key
+        document.getElementById('search-query')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.dispatchEvent(new CustomEvent('searchTriggered'));
+            }
+        });
     }
 
     document.addEventListener("languageChange", () => {
         renderSearchBar();
     });
-    
+
+    // Listen for search trigger
+    document.addEventListener("searchTriggered", () => {
+        // Trigger results refresh (result-container will handle this)
+        document.dispatchEvent(new CustomEvent('resultsRefresh'));
+    });
+
     renderSearchBar();
 });
