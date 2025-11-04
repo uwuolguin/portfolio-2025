@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
             cardsHtml += `
                 <div class="business-card">
                     <div class="card-picture">
-                        <img src="${company.image}" alt="Product Image ${company.id}">
+                        <img src="http://localhost/files/${company.image}" alt="Product Image ${company.id}">
                     </div>
                     <div class="card-details">
                         <h3 class="business-name">${company.name}</h3>
