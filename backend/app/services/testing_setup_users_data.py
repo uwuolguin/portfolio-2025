@@ -250,28 +250,36 @@ async def seed_test_data():
     try:
         conn = await asyncpg.connect(settings.alembic_database_url)
         
-        commune_uuid = str(uuid.uuid4())
+        commune_uuid_1 = str(uuid.uuid4())
+        commune_uuid_2 = str(uuid.uuid4())
         commune_insert_query = "INSERT INTO proveo.communes (name,uuid) VALUES ($1,$2) RETURNING uuid,name,created_at"
-        commune = await conn.fetchrow(commune_insert_query, "commune", commune_uuid)
+        commune_1 = await conn.fetchrow(commune_insert_query, "commune", commune_uuid_1)
+        commune_2 = await conn.fetchrow(commune_insert_query, "commune2", commune_uuid_2)
 
-        product_uuid = str(uuid.uuid4())
-        insert_query = "INSERT INTO proveo.products (uuid,name_es,name_en) VALUES ($1,$2,$3) RETURNING uuid,name_es,name_en,created_at"
-        product = await conn.fetchrow(insert_query, product_uuid, "producto", "product")
-
+        product_uuid_1 = str(uuid.uuid4())
+        product_uuid_2 = str(uuid.uuid4())
+        product_insert_query = "INSERT INTO proveo.products (uuid,name_es,name_en) VALUES ($1,$2,$3) RETURNING uuid,name_es,name_en,created_at"
+        product_1 = await conn.fetchrow(product_insert_query, product_uuid_1, "producto", "product")
+        product_2 = await conn.fetchrow(product_insert_query, product_uuid_2, "producto2", "product2")
         
-        if not product or not commune:
+        if not product_1 or not product_2 or not commune_1 or not commune_2:
             print("❌ Error: Database must have at least one product and one commune")
             print("   Please run migrations and add initial data first")
             return False
         
-        print(f"📦 Using product UUID: {product_uuid}")
-        print(f"🏘️  Using commune UUID: {commune_uuid}\n")
         
         created_users = 0
         created_companies = 0
         
         for i, user_data in enumerate(TEST_USERS):
             try:
+                if i <6:
+                    product_uuid=product_uuid_1
+                    commune_uuid=commune_uuid_1
+                else:
+                    product_uuid=product_uuid_2
+                    commune_uuid=commune_uuid_2
+
                 # Check if user already exists
                 existing = await conn.fetchval(
                     "SELECT uuid FROM proveo.users WHERE uuid = $1 OR email = $2",
