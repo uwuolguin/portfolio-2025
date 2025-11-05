@@ -56,7 +56,7 @@ async def create_company(
             description_es, description_en = await translate_field("company_description", description_es, None)
         else:
             description_es, description_en = await translate_field("company_description", None, description_en)
-        image_path = await FileHandler.save_image(file=image, company_uuid=str(user_uuid))
+        image_path = await FileHandler.save_image(file=image, user_uuid=str(user_uuid))
         try:
             company = await DB.create_company(
                 conn=db,

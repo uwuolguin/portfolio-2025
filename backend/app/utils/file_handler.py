@@ -219,7 +219,7 @@ class FileHandler:
     @staticmethod
     async def save_image(
         file: UploadFile,
-        company_uuid: Optional[str] = None,
+        user_uuid: Optional[str] = None,
         **kwargs
     ) -> str:
         """
@@ -246,7 +246,7 @@ class FileHandler:
                         "nsfw_image_rejected",
                         nsfw_score=nsfw_score,
                         threshold=FileHandler.NSFW_THRESHOLD,
-                        company_uuid=company_uuid,
+                        user_uuid=user_uuid,
                         reason="explicit_content_detected"
                     )
                     raise HTTPException(
@@ -256,7 +256,7 @@ class FileHandler:
                 else:
                     logger.error(
                         "nsfw_check_failed_blocking_upload",
-                        company_uuid=company_uuid,
+                        user_uuid=user_uuid,
                         reason="nsfw_model_unavailable"
                     )
                     raise HTTPException(
@@ -273,11 +273,11 @@ class FileHandler:
             else:
                 logger.warning(
                     "image_uploaded_without_nsfw_check",
-                    company_uuid=company_uuid,
+                    user_uuid=user_uuid,
                     score=nsfw_score
                 )
 
-            filename = f"{company_uuid or uuid.uuid4()}.{ext}"
+            filename = f"{user_uuid or uuid.uuid4()}.{ext}"
             save_path = FileHandler.UPLOAD_DIR / filename
             tmp_path = save_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
 
