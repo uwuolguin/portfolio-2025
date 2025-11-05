@@ -10,6 +10,6 @@ echo "🚀 Running Alembic migrations... uwu"
 docker compose exec backend alembic upgrade head
 
 echo "👤 Creating admin user...uwu"
-docker compose exec backend python -m app.services.create_admin
+docker compose exec backend python -m app.services.testing_setup_users_data
 
 echo "✅ Backend initialization complete uwu"
