@@ -1,6 +1,6 @@
 import json, functools
 from typing import Callable, Any
-from app.cache.redis_client import redis_client
+from app.redis.redis_client import redis_client
 from app.config import settings
 import structlog
 from pydantic import BaseModel

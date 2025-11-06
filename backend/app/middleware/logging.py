@@ -12,7 +12,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     """
     
     # Paths to exclude from logging (reduce noise)
-    EXCLUDE_PATHS = {"/health", "/favicon.ico"}
+    EXCLUDE_PATHS = {"/health", "/favicon.ico", "/"}
     
     # Sensitive headers to redact from logs
     SENSITIVE_HEADERS = {
@@ -84,7 +84,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             
             # Security indicators
             suspicious_path=self._is_suspicious_path(request.url.path),
-            unusual_method=request.method not in ["GET", "POST", "PUT", "DELETE", "PATCH"],
+            unusual_method=request.method not in ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
             high_duration=duration > 5.0,
         )
         
@@ -104,6 +104,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             "SELECT", "UNION", "DROP", "INSERT",
             ".php", ".asp", ".jsp", ".cgi",
             "wp-admin", "wp-login", "phpmyadmin",
+            "xmlrpc", ".env", ".git"
         ]
         
         path_lower = path.lower()

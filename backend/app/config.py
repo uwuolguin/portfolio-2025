@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     api_v1_prefix: str = "/api/v1"
     project_name: str = "Proveo API"
-    debug: bool = False
+    debug: bool = True
     allowed_origins: List[str] = ["http://localhost", "http://localhost:80"]
 
     # ------------------------------------------------------------------------

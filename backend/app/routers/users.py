@@ -16,7 +16,7 @@ from app.templates.email_verification import (
     verification_error_page,
     verification_server_error_page
 )
-from app.cache.rate_limit import get_rate_limiter
+from app.redis.rate_limit import get_rate_limiter
 from app.config import settings
 import structlog
 

@@ -7,12 +7,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentPage = 1;
 
     const renderCards = (companies) => {
-        const startIndex = (currentPage - 1) * cardsPerPage;
-        const endIndex = startIndex + cardsPerPage;
-        const companiesToDisplay = companies.slice(startIndex, endIndex);
 
         let cardsHtml = '';
-        companiesToDisplay.forEach(company => {
+        companies.forEach(company => {
             cardsHtml += `
                 <div class="business-card">
                     <div class="card-picture">

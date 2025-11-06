@@ -6,8 +6,8 @@ from app.database.connection import get_db
 from app.database.transactions import DB
 from app.auth.dependencies import  verify_csrf, require_admin
 from app.schemas.communes import CommuneCreate, CommuneUpdate, CommuneResponse
-from app.cache.decorators import cache_response
-from app.cache.cache_manager import cache_manager
+from app.redis.decorators import cache_response
+from app.redis.cache_manager import cache_manager
 import structlog
 
 logger = structlog.get_logger(__name__)

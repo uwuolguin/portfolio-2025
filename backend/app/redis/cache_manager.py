@@ -1,5 +1,5 @@
 import structlog
-from app.cache.redis_client import redis_client
+from app.redis.redis_client import redis_client
 
 logger = structlog.get_logger(__name__)
 

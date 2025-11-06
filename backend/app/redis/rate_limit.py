@@ -1,6 +1,6 @@
 import time
 from fastapi import Request, HTTPException, status, Depends
-from app.cache.redis_client import redis_client
+from app.redis.redis_client import redis_client
 import structlog
 
 logger = structlog.get_logger(__name__)

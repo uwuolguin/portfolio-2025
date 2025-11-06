@@ -7,8 +7,8 @@ from app.database.transactions import DB
 from app.utils.translator import translate_field
 from app.auth.dependencies import verify_csrf, require_admin 
 from app.schemas.products import ProductCreate, ProductUpdate, ProductResponse
-from app.cache.decorators import cache_response
-from app.cache.cache_manager import cache_manager
+from app.redis.decorators import cache_response
+from app.redis.cache_manager import cache_manager
 import structlog
 
 logger = structlog.get_logger(__name__)
