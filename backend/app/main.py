@@ -145,7 +145,7 @@ async def global_rate_limit_middleware(request: Request, call_next):
     # Apply rate limiting to API routes
     if request.url.path.startswith("/api/"):
         try:
-            from app.cache.rate_limit import enforce_rate_limit
+            from app.redis.rate_limit import enforce_rate_limit
             await enforce_rate_limit(
                 request=request,
                 route_name="global",

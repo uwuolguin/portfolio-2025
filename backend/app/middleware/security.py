@@ -106,7 +106,7 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     
     WARNING: This is a simple in-memory implementation for development/testing.
     For production with multiple workers/containers, use Redis-based rate limiting
-    (see app.cache.rate_limit.py for the proper implementation).
+    (see app.redis.rate_limit.py for the proper implementation).
     """
     
     def __init__(self, app, max_requests: int = 100, window_seconds: int = 60):
