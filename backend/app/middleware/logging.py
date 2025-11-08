@@ -22,6 +22,23 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         "x-api-key",
     }
     
+    @staticmethod
+    def _is_suspicious_path(path: str) -> bool:
+        """
+        Detect common attack patterns in URL paths
+        """
+        suspicious_patterns = [
+            "..", "~", "/etc/", "/proc/", "/sys/",
+            "eval(", "exec(", "system(", "<script",
+            "SELECT", "UNION", "DROP", "INSERT",
+            ".php", ".asp", ".jsp", ".cgi",
+            "wp-admin", "wp-login", "phpmyadmin",
+            "xmlrpc", ".env", ".git"
+        ]
+        
+        path_lower = path.lower()
+        return any(pattern.lower() in path_lower for pattern in suspicious_patterns)
+    
     async def dispatch(self, request: Request, call_next):
         # Skip logging for excluded paths
         if request.url.path in self.EXCLUDE_PATHS:
@@ -93,19 +110,3 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         
         return response
     
-    @staticmethod
-    def _is_suspicious_path(path: str) -> bool:
-        """
-        Detect common attack patterns in URL paths
-        """
-        suspicious_patterns = [
-            "..", "~", "/etc/", "/proc/", "/sys/",
-            "eval(", "exec(", "system(", "<script",
-            "SELECT", "UNION", "DROP", "INSERT",
-            ".php", ".asp", ".jsp", ".cgi",
-            "wp-admin", "wp-login", "phpmyadmin",
-            "xmlrpc", ".env", ".git"
-        ]
-        
-        path_lower = path.lower()
-        return any(pattern.lower() in path_lower for pattern in suspicious_patterns)
