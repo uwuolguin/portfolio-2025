@@ -104,6 +104,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentLang = getLanguage();
         const t = translations[currentLang];
         
+        // Store current values before re-rendering
+        const currentQuery = document.getElementById('search-query')?.value || '';
+        const currentCommuneValue = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected')?.getAttribute('data-value') || '';
+        const currentProductValue = document.querySelector('[data-dropdown-id="product"] .dropdown-selected')?.getAttribute('data-value') || '';
+        
         // Fetch products and communes from API
         const products = await fetchProducts();
         const communes = await fetchCommunes();
@@ -134,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${placesDropdown}
                 ${productsDropdown}
                 <div class="search-input-container">
-                    <input type="text" id="search-query" placeholder="${t.placeholder}">
+                    <input type="text" id="search-query" placeholder="${t.placeholder}" value="${currentQuery}">
                 </div>
                 <button class="search-button" id="search-btn">${t.button}</button>
             </div>
@@ -143,9 +148,27 @@ document.addEventListener('DOMContentLoaded', () => {
         searchContainer.innerHTML = searchBarContent;
         initializeDropdownFunctionality();
         
+        // Restore previous selections
+        if (currentCommuneValue && currentCommuneValue !== allCommunesText) {
+            const communeDropdown = document.querySelector('[data-dropdown-id="commune"]');
+            if (communeDropdown && communeNames.includes(currentCommuneValue)) {
+                const selected = communeDropdown.querySelector('.dropdown-selected');
+                selected.innerHTML = `${currentCommuneValue} <span class="dropdown-arrow">▼</span>`;
+                selected.setAttribute('data-value', currentCommuneValue);
+            }
+        }
+        
+        if (currentProductValue && currentProductValue !== allProductsText) {
+            const productDropdown = document.querySelector('[data-dropdown-id="product"]');
+            if (productDropdown && productNames.includes(currentProductValue)) {
+                const selected = productDropdown.querySelector('.dropdown-selected');
+                selected.innerHTML = `${currentProductValue} <span class="dropdown-arrow">▼</span>`;
+                selected.setAttribute('data-value', currentProductValue);
+            }
+        }
+        
         // Add search button functionality
         document.getElementById('search-btn')?.addEventListener('click', () => {
-            // Trigger results update
             document.dispatchEvent(new CustomEvent('searchTriggered'));
         });
         
