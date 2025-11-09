@@ -34,6 +34,7 @@ def upgrade() -> None:
         u.name AS user_name,
         u.email AS user_email,
         cm.name AS commune_name,
+        -- Full-text search vector for keyword matching
         to_tsvector('spanish',
             coalesce(cast(c.name AS text),'') || ' ' ||
             coalesce(c.description_es,'') || ' ' ||
@@ -47,14 +48,43 @@ def upgrade() -> None:
             coalesce(c.name,'') || ' ' ||
             coalesce(c.description_en,'') || ' ' ||
             coalesce(p.name_en,'')
-        ) AS search_vector
+        ) AS search_vector,
+        -- NEW: Concatenated searchable text for LIKE/ILIKE queries
+        LOWER(
+            coalesce(c.name, '') || ' ' ||
+            coalesce(c.description_es, '') || ' ' ||
+            coalesce(c.description_en, '') || ' ' ||
+            coalesce(p.name_es, '') || ' ' ||
+            coalesce(p.name_en, '') || ' ' ||
+            coalesce(cm.name, '') || ' ' ||
+            coalesce(c.address, '') || ' ' ||
+            coalesce(u.name, '')
+        ) AS searchable_text
     FROM proveo.companies c
     LEFT JOIN proveo.products p ON p.uuid = c.product_uuid
     LEFT JOIN proveo.users u ON u.uuid = c.user_uuid
     LEFT JOIN proveo.communes cm ON cm.uuid = c.commune_uuid;
     """)
+    
+    # Index for full-text search (existing)
     op.execute("""
     CREATE INDEX idx_company_search_vector
     ON proveo.company_search
     USING GIN (search_vector);
     """)
+    
+    # NEW: Index for text pattern matching
+    op.execute("""
+    CREATE INDEX idx_company_searchable_text
+    ON proveo.company_search
+    USING GIN (searchable_text gin_trgm_ops);
+    """)
+    
+    # Enable trigram extension for better pattern matching
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+
+
+def downgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS proveo.idx_company_searchable_text;")
+    op.execute("DROP INDEX IF EXISTS proveo.idx_company_search_vector;")
+    op.execute("DROP MATERIALIZED VIEW IF EXISTS proveo.company_search;")

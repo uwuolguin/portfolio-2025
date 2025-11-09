@@ -700,28 +700,47 @@ class DB:
         limit: int = 20,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        base_query = """
-            SELECT company_id, company_name, company_description_es, company_description_en,
-                address, company_email, product_name_es, product_name_en,
-                phone, image_url, user_name, user_email, commune_name,
-                ts_rank(search_vector, tsquery) AS rank
-            FROM proveo.company_search, to_tsquery($1, $2) tsquery
-            WHERE ($2 = '' OR search_vector @@ tsquery)
         """
-        params = []
-        lang_config = 'spanish' if lang == 'es' else 'english'
-        formatted_query = ' & '.join(query.split()) if query else ''
-        params.extend([lang_config, formatted_query])
+        Hybrid search: Uses ILIKE for partial matching when query is present,
+        falls back to listing all when query is empty.
+        Filters by exact commune/product match.
+        """
+        
+        # Base query structure
+        if query:
+            base_query = """
+                SELECT company_id, company_name, company_description_es, company_description_en,
+                    address, company_email, product_name_es, product_name_en,
+                    phone, image_url, user_name, user_email, commune_name,
+                    1.0 AS rank
+                FROM proveo.company_search
+                WHERE searchable_text ILIKE $1
+            """
+            params = [f"%{query.lower()}%"]
+        else:
+            # No search query - list all companies
+            base_query = """
+                SELECT company_id, company_name, company_description_es, company_description_en,
+                    address, company_email, product_name_es, product_name_en,
+                    phone, image_url, user_name, user_email, commune_name,
+                    1.0 AS rank
+                FROM proveo.company_search
+                WHERE 1=1
+            """
+            params = []
 
-
+        # Add commune filter (exact match, case-insensitive)
         if commune:
-            base_query += " AND LOWER(commune_name) LIKE LOWER($%d)" % (len(params) + 1)
-            params.append(f"%{commune}%")
+            base_query += f" AND LOWER(commune_name) = LOWER(${len(params) + 1})"
+            params.append(commune)
+        
+        # Add product filter (exact match for either language, case-insensitive)
         if product:
-            base_query += " AND (LOWER(product_name_es) LIKE LOWER($%d) OR LOWER(product_name_en) LIKE LOWER($%d))" % (len(params) + 1, len(params) + 2)
-            params.extend([f"%{product}%", f"%{product}%"])
+            base_query += f" AND (LOWER(product_name_es) = LOWER(${len(params) + 1}) OR LOWER(product_name_en) = LOWER(${len(params) + 2}))"
+            params.extend([product, product])
 
-        base_query += " ORDER BY rank DESC LIMIT $%d OFFSET $%d" % (len(params) + 1, len(params) + 2)
+        # Add ordering, limit, and offset
+        base_query += f" ORDER BY company_name ASC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
         params.extend([limit, offset])
 
         rows = await conn.fetch(base_query, *params)
