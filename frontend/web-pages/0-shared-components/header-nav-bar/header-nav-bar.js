@@ -56,14 +56,14 @@ document.addEventListener('DOMContentLoaded', () => {
             : `
                 <nav class="nav-container-flex-container">
                     <div class="nav-container-logo-container">
-                        <a href="www.google.cl">
+                        <a href="http://localhost/front-page/front-page.html">
                             <img src="/files/logos/logoSVG.svg" alt="Proveo Logo" >
                         </a>
                     </div>
                     <ul class="nav-container-ul">
-                        <li class="nav-container-li"><a href="#" class="nav-container-a">${translations[lang].register}</a></li>
-                        <li class="nav-container-li"><a href="#" class="nav-container-a">${translations[lang].login}</a></li>
-                        <li class="nav-container-li"><a href="#" class="nav-container-a">${translations[lang].publish}</a></li>
+                        <li class="nav-container-li"><a href="http://localhost/sign-up/sign-up.html" class="nav-container-a">${translations[lang].register}</a></li>
+                        <li class="nav-container-li"><a href="http://localhost/log-in/log-in.html" class="nav-container-a">${translations[lang].login}</a></li>
+                        <li class="nav-container-li"><a href="http://localhost/publish/publish.html" class="nav-container-a">${translations[lang].publish}</a></li>
                         <li class="nav-container-li lang-toggle">
                             <button id="lang-btn" class="lang-btn">
                                 <img src="${translations[lang].img}" alt="${translations[lang].flag}" class="lang-flag">

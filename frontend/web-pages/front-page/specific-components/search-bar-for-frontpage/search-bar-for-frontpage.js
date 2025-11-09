@@ -5,16 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const translations = {
         es: {
-            places: ["Todas Las Comunas", "La Florida", "Lo Curro", "Los Troncos", "Otra"],
-            products: ["Todos Los Productos", "Fiambrería", "Lácteos", "Legumbres", "Otro"],
             placeholder: "Introduzca un término de búsqueda.",
             button: "Buscar",
             searchPlaceholder: "Buscar comuna...",
             searchProductPlaceholder: "Buscar producto..."
         },
         en: {
-            places: ["All Communes", "La Florida", "Lo Curro", "Los Troncos", "Other"],
-            products: ["All Products", "Fiambrería", "Dairy", "Legumes", "Other"],
             placeholder: "Enter a search term.",
             button: "Search",
             searchPlaceholder: "Search commune...",
@@ -49,7 +45,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const selected = dropdown.querySelector('.dropdown-selected');
             const options = dropdown.querySelector('.dropdown-options');
             const search = dropdown.querySelector('.dropdown-search');
-            const optionsList = dropdown.querySelector('.options-list');
             const allOptions = dropdown.querySelectorAll('.dropdown-option');
             
             // Toggle dropdown
