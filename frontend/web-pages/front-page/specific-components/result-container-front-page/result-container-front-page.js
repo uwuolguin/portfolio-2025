@@ -68,9 +68,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 offset: ((currentPage - 1) * cardsPerPage).toString()
             });
             
+            // Only add filters if they're not the "All" options
+            const allCommunesText = currentLanguage === 'es' ? 'Todas Las Comunas' : 'All Communes';
+            const allProductsText = currentLanguage === 'es' ? 'Todos Los Productos' : 'All Products';
+            
             if (searchQuery) params.append('q', searchQuery);
-            if (communeFilter) params.append('commune', communeFilter);
-            if (productFilter) params.append('product', productFilter);
+            if (communeFilter && communeFilter !== allCommunesText) params.append('commune', communeFilter);
+            if (productFilter && productFilter !== allProductsText) params.append('product', productFilter);
             
             const response = await apiRequest(`/api/v1/companies/search?${params.toString()}`);
             
@@ -139,6 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAndRender();
     });
 
+    // Listen for search trigger - reset to first page and refresh results
     document.addEventListener("searchTriggered", () => {
         currentPage = 1; // Reset to first page
         fetchAndRender();

@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function createFilterableDropdown(options, placeholder, className, id) {
         const dropdownHTML = `
             <div class="filterable-dropdown ${className}" data-dropdown-id="${id}">
-                <div class="dropdown-selected" data-value="${options[0].toLowerCase().replace(/ /g, '-')}">
+                <div class="dropdown-selected" data-value="">
                     ${options[0]}
                     <span class="dropdown-arrow">▼</span>
                 </div>
@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="text" class="dropdown-search" placeholder="${placeholder}" autocomplete="off">
                     <div class="options-list">
                         ${options.map(option => `
-                            <div class="dropdown-option" data-value="${option.toLowerCase().replace(/ /g, '-')}">${option}</div>
+                            <div class="dropdown-option" data-value="${option}">${option}</div>
                         `).join('')}
                     </div>
                 </div>
@@ -118,15 +118,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const placesDropdown = createFilterableDropdown(
             communeNames, 
             t.searchPlaceholder, 
-            'places-dropdown', 
-            'places'
+            'commune-dropdown', 
+            'commune'
         );
         
         const productsDropdown = createFilterableDropdown(
             productNames, 
             t.searchProductPlaceholder, 
-            'products-dropdown', 
-            'products'
+            'product-dropdown', 
+            'product'
         );
 
         const searchBarContent = `
