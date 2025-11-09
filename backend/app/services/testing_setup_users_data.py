@@ -8,7 +8,6 @@ import asyncio
 import asyncpg
 from app.config import settings
 from app.auth.jwt import get_password_hash
-from datetime import datetime, timezone
 import uuid
 
 TEST_USERS = [
