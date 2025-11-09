@@ -1,6 +1,10 @@
-import { getLoginState, getLanguage, getCompanyPublishState, setLanguage, setLoginState, checkAuthStatus } from '../utils/shared-functions.js';
+import { getLoginState, getLanguage, getCompanyPublishState, setLanguage, setLoginState, checkAuthStatus, checkCompanyStatus } from '../utils/shared-functions.js';
+
 document.addEventListener('DOMContentLoaded', async () => {
-    await checkAuthStatus();
+    const isLoggedIn = await checkAuthStatus();
+    if (isLoggedIn) {
+        await checkCompanyStatus();
+    }
     renderNav();
 });
 document.addEventListener('DOMContentLoaded', () => {
@@ -37,14 +41,14 @@ document.addEventListener('DOMContentLoaded', () => {
             ? `
                 <nav class="nav-container-flex-container">
                     <div class="nav-container-logo-container">
-                        <a href="www.google.cl">
+                        <a href="http://localhost/front-page/front-page.html">
                             <img src="/files/logos/logoSVG.svg" alt="Proveo Logo" >
                         </a>
                     </div>
                     <ul class="nav-container-ul">
-                        <li class="nav-container-li"><a href="#" class="nav-container-a">${translations[lang].profileView}</a></li>
-                        ${getCompanyPublishState() ? `<li class="nav-container-li"><a href="#" class="nav-container-a">${translations[lang].companyEdit}</a></li>` : ""}
-                        ${!getCompanyPublishState() ? `<li class="nav-container-li"><a href="#" class="nav-container-a">${translations[lang].publish}</a></li>` : ""}
+                        <li class="nav-container-li"><a href="http://localhost/profile-view/profile-view.html" class="nav-container-a">${translations[lang].profileView}</a></li>
+                        ${getCompanyPublishState() ? `<li class="nav-container-li"><a href="http://localhost/profile-edit/profile-edit.html" class="nav-container-a">${translations[lang].companyEdit}</a></li>` : ""}
+                        ${!getCompanyPublishState() ? `<li class="nav-container-li"><a href="http://localhost/publish/publish.html" class="nav-container-a">${translations[lang].publish}</a></li>` : ""}
                         <li class="nav-container-li"><a href="#" class="nav-container-a">${translations[lang].logout}</a></li>
                         <li class="nav-container-li lang-toggle">
                             <button id="lang-btn" class="lang-btn">

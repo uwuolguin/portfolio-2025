@@ -16,11 +16,16 @@
                 const userData = await response.json();
                 localStorage.setItem("isLoggedIn", "true");
                 localStorage.setItem("userData", JSON.stringify(userData));
+                
+                await checkCompanyStatus();
+                
                 return true;
             } else {
                 localStorage.setItem("isLoggedIn", "false");
                 localStorage.removeItem("userData");
                 localStorage.removeItem("csrf_token");
+                localStorage.removeItem("companyData");
+                localStorage.setItem("hasPublishedCompany", "false");
                 return false;
             }
         } catch (error) {
@@ -28,6 +33,57 @@
             localStorage.setItem("isLoggedIn", "false");
             return false;
         }
+    }
+    
+    export async function checkCompanyStatus() {
+        if (!getLoginState()) {
+            setCompanyPublishState(false);
+            return false;
+        }
+        
+        try {
+            const response = await fetch('/api/v1/companies/user/my-company', {
+                credentials: 'include',
+                headers: {
+                    'X-Correlation-ID': `company_check_${Date.now()}`
+                }
+            });
+            
+            if (response.ok) {
+                const companyData = await response.json();
+                setCompanyData(companyData);
+                setCompanyPublishState(true);
+                return true;
+            } else if (response.status === 404) {
+                // No company found
+                setCompanyData(null);
+                setCompanyPublishState(false);
+                return false;
+            } else {
+                console.error('Company check failed:', response.status);
+                return false;
+            }
+        } catch (error) {
+            console.error('Company check failed:', error);
+            return false;
+        }
+    }
+
+    export function getLoginState() {
+        const value = localStorage.getItem("isLoggedIn");
+        return value === "true";
+    }
+
+    export function setLoginState(hasLogged) {
+        localStorage.setItem("isLoggedIn", hasLogged.toString());
+        
+        if (!hasLogged) {
+            localStorage.removeItem("userData");
+            localStorage.removeItem("csrf_token");
+            localStorage.setItem("hasPublishedCompany", "false");
+        }
+        
+        document.dispatchEvent(new CustomEvent("userHasLogged"));
     }
 
     export function getLoginState() {

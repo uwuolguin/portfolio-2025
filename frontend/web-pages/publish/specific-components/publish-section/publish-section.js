@@ -3,7 +3,7 @@ import {
     getLoginState, 
     getCompanyPublishState, 
     setCompanyPublishState,
-    getCSRFToken,
+    setCompanyData,
     fetchProducts,
     fetchCommunes,
     apiRequest
@@ -30,10 +30,10 @@ document.addEventListener('DOMContentLoaded', () => {
             alreadyPublished: "Ya has publicado una empresa.",
             viewProfile: "Ver mi perfil",
             alreadyPublishedMessage: "Tu empresa ya está publicada.",
-            places: ["La Florida", "Lo Curro", "Los Troncos","aaa","bbb","ccc", "Otra"],
-            products: ["Fiambrería", "Lácteos", "Legumbres",,"aaa","bbb","ccc",  "Otro"],
             searchCommunePlaceholder: "Buscar comuna...",
-            searchProductPlaceholder: "Buscar producto..."
+            searchProductPlaceholder: "Buscar producto...",
+            loading: "Cargando...",
+            imageRequired: "Por favor selecciona una imagen"
         },
         en: {
             title: "Publish your company",
@@ -53,14 +53,13 @@ document.addEventListener('DOMContentLoaded', () => {
             alreadyPublished: "You have already published a company.",
             viewProfile: "View my profile",
             alreadyPublishedMessage: "Your company is already published.",
-            places: ["La Florida", "Lo Curro", "Los Troncos",,"aaa","bbb","ccc",  "Other"],
-            products: ["Fiambrería", "Dairy", "Legumes", ,"aaa","bbb","ccc", "Other"],
             searchCommunePlaceholder: "Search commune...",
-            searchProductPlaceholder: "Search product..."
+            searchProductPlaceholder: "Search product...",
+            loading: "Loading...",
+            imageRequired: "Please select an image"
         }
     };
 
-    // Simple filterable dropdown function
     function createFilterableDropdown(options, placeholder, className, id, defaultText) {
         const dropdownHTML = `
             <div class="filterable-dropdown ${className}" data-dropdown-id="${id}">
@@ -81,7 +80,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return dropdownHTML;
     }
 
-    // Initialize dropdown functionality with dynamic push
     function initDropdowns() {
         const dropdowns = document.querySelectorAll('.filterable-dropdown');
         
@@ -94,11 +92,9 @@ document.addEventListener('DOMContentLoaded', () => {
             selected.addEventListener('click', (e) => {
                 e.stopPropagation();
                 
-                // Close all dropdowns first and remove open classes
                 document.querySelectorAll('.dropdown-options').forEach(opt => opt.style.display = 'none');
                 document.querySelectorAll('.input-group').forEach(group => group.classList.remove('dropdown-open'));
                 
-                // Toggle current dropdown
                 if (options.style.display === 'block') {
                     options.style.display = 'none';
                     dropdown.closest('.input-group').classList.remove('dropdown-open');
@@ -131,7 +127,6 @@ document.addEventListener('DOMContentLoaded', () => {
             options.addEventListener('click', (e) => e.stopPropagation());
         });
         
-        // Close dropdowns when clicking outside
         document.addEventListener('click', () => {
             document.querySelectorAll('.dropdown-options').forEach(options => {
                 options.style.display = 'none';
@@ -152,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="login-message">
                     ${t.loginRequired}
                     <br><br>
-                    <a href="../login/login.html">${t.loginHere}</a>
+                    <a href="../log-in/log-in.html">${t.loginHere}</a>
                 </div>
             </div>
         `;
@@ -181,172 +176,211 @@ document.addEventListener('DOMContentLoaded', () => {
         const lang = getLanguage();
         const t = translations[lang];
         
-        const products = await fetchProducts();
-        const communes = await fetchCommunes();
-        
-        const productNames = products.map(p => lang === 'es' ? p.name_es : p.name_en);
-        const communeNames = communes.map(c => c.name);
-
-        const communeDropdown = createFilterableDropdown(
-            communeNames, 
-            t.searchCommunePlaceholder, 
-            'commune-dropdown', 
-            'commune',
-            t.commune
-        );
-        
-        const productDropdown = createFilterableDropdown(
-            productNames, 
-            t.searchProductPlaceholder, 
-            'product-dropdown', 
-            'product',
-            t.productType
-        );
-
+        // Show loading state
         publishSection.innerHTML = `
             <div class="publish-container">
                 <h2 class="publish-title">${t.title}</h2>
-                <form id="publish-form" class="publish-form">
-                    <div class="input-group">
-                        <input type="text" id="companyName" class="publish-input" placeholder="${t.companyName}" required>
-                    </div>
-                    <div class="input-group">
-                        <textarea id="productDescription" class="publish-textarea" placeholder="${t.productDescription}" required></textarea>
-                    </div>
-                    <div class="input-group">
-                        <input type="text" id="address" class="publish-input" placeholder="${t.address}" required>
-                    </div>
-                    <div class="input-group">
-                        <input type="tel" id="phone" class="publish-input" placeholder="${t.phone}" required>
-                    </div>
-                    <div class="input-group">
-                        <input type="text" id="companyEmail" class="publish-input" placeholder="${t.companyEmail}" required>
-                    </div>
-                    <div class="input-group">
-                        <div class="file-input-wrapper">
-                            <input type="file" id="companyImage" class="file-input-hidden" accept="image/*">
-                            <label for="companyImage" class="file-input-label" id="fileLabel">
-                                ${t.selectImage}
-                            </label>
-                        </div>
-                    </div>                    
-                    <div class="input-group">
-                        ${communeDropdown}
-                    </div>
-                    <div class="input-group">
-                        ${productDropdown}
-                    </div>
-                    <button type="submit" class="publish-button">${t.publishButton}</button>
-                </form>
+                <div class="login-message">${t.loading}</div>
             </div>
         `;
-
-        initDropdowns();
-
-        const form = document.getElementById("publish-form");
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
+        
+        try {
+            // Fetch data
+            const [products, communes] = await Promise.all([
+                fetchProducts(),
+                fetchCommunes()
+            ]);
             
-            const communeValue = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected').getAttribute('data-value');
-            const productValue = document.querySelector('[data-dropdown-id="product"] .dropdown-selected').getAttribute('data-value');
+            console.log('Products loaded:', products);
+            console.log('Communes loaded:', communes);
             
-            if (!communeValue) {
-                alert(lang === 'es' ? 'Por favor selecciona una comuna' : 'Please select a commune');
-                return;
+            if (!products || products.length === 0) {
+                throw new Error('No products available');
             }
             
-            if (!productValue) {
-                alert(lang === 'es' ? 'Por favor selecciona un tipo de producto' : 'Please select a product type');
-                return;
+            if (!communes || communes.length === 0) {
+                throw new Error('No communes available');
             }
             
-            const submitButton = document.getElementById("publish-form").querySelector('.publish-button');
-            const originalButtonText = submitButton.textContent;
+            const productNames = products.map(p => lang === 'es' ? p.name_es : p.name_en);
+            const communeNames = communes.map(c => c.name);
+
+            const communeDropdown = createFilterableDropdown(
+                communeNames, 
+                t.searchCommunePlaceholder, 
+                'commune-dropdown', 
+                'commune',
+                t.commune
+            );
             
-            submitButton.disabled = true;
-            submitButton.textContent = lang === 'es' ? 'Publicando...' : 'Publishing...';
-            
-            try {
-                // Get products and communes to find UUIDs
-                const products = await fetchProducts();
-                const communes = await fetchCommunes();
+            const productDropdown = createFilterableDropdown(
+                productNames, 
+                t.searchProductPlaceholder, 
+                'product-dropdown', 
+                'product',
+                t.productType
+            );
+
+            publishSection.innerHTML = `
+                <div class="publish-container">
+                    <h2 class="publish-title">${t.title}</h2>
+                    <form id="publish-form" class="publish-form">
+                        <div class="input-group">
+                            <input type="text" id="companyName" class="publish-input" placeholder="${t.companyName}" required>
+                        </div>
+                        <div class="input-group">
+                            <textarea id="productDescription" class="publish-textarea" placeholder="${t.productDescription}" required></textarea>
+                        </div>
+                        <div class="input-group">
+                            <input type="text" id="address" class="publish-input" placeholder="${t.address}" required>
+                        </div>
+                        <div class="input-group">
+                            <input type="tel" id="phone" class="publish-input" placeholder="${t.phone}" required>
+                        </div>
+                        <div class="input-group">
+                            <input type="email" id="companyEmail" class="publish-input" placeholder="${t.companyEmail}" required>
+                        </div>
+                        <div class="input-group">
+                            <div class="file-input-wrapper">
+                                <input type="file" id="companyImage" class="file-input-hidden" accept="image/*" required>
+                                <label for="companyImage" class="file-input-label" id="fileLabel">
+                                    ${t.selectImage}
+                                </label>
+                            </div>
+                        </div>                    
+                        <div class="input-group">
+                            ${communeDropdown}
+                        </div>
+                        <div class="input-group">
+                            ${productDropdown}
+                        </div>
+                        <button type="submit" class="publish-button">${t.publishButton}</button>
+                    </form>
+                </div>
+            `;
+
+            initDropdowns();
+
+            const form = document.getElementById("publish-form");
+            form.addEventListener("submit", async (e) => {
+                e.preventDefault();
                 
-                const selectedProduct = products.find(p => 
-                    (lang === 'es' ? p.name_es : p.name_en) === productValue
-                );
-                const selectedCommune = communes.find(c => c.name === communeValue);
+                const communeValue = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected').getAttribute('data-value');
+                const productValue = document.querySelector('[data-dropdown-id="product"] .dropdown-selected').getAttribute('data-value');
                 
-                if (!selectedProduct || !selectedCommune) {
-                    throw new Error('Invalid product or commune selection');
+                if (!communeValue) {
+                    alert(lang === 'es' ? 'Por favor selecciona una comuna' : 'Please select a commune');
+                    return;
                 }
                 
-                const formData = new FormData();
-                formData.append('name', document.getElementById("companyName").value);
-                formData.append('product_uuid', selectedProduct.uuid);
-                formData.append('commune_uuid', selectedCommune.uuid);
-                formData.append('address', document.getElementById("address").value);
-                formData.append('phone', document.getElementById("phone").value);
-                formData.append('email', document.getElementById("companyEmail").value);
-                formData.append('lang', lang);
-                
-                // Add description in the appropriate language
-                const description = document.getElementById("productDescription").value;
-                if (lang === 'es') {
-                    formData.append('description_es', description);
-                } else {
-                    formData.append('description_en', description);
+                if (!productValue) {
+                    alert(lang === 'es' ? 'Por favor selecciona un tipo de producto' : 'Please select a product type');
+                    return;
                 }
                 
                 const imageFile = document.getElementById("companyImage").files[0];
-                if (imageFile) {
+                if (!imageFile) {
+                    alert(t.imageRequired);
+                    return;
+                }
+                
+                const submitButton = form.querySelector('.publish-button');
+                const originalButtonText = submitButton.textContent;
+                
+                submitButton.disabled = true;
+                submitButton.textContent = lang === 'es' ? 'Publicando...' : 'Publishing...';
+                
+                try {
+                    const selectedProduct = products.find(p => 
+                        (lang === 'es' ? p.name_es : p.name_en) === productValue
+                    );
+                    const selectedCommune = communes.find(c => c.name === communeValue);
+                    
+                    if (!selectedProduct || !selectedCommune) {
+                        throw new Error('Invalid product or commune selection');
+                    }
+                    
+                    const formData = new FormData();
+                    formData.append('name', document.getElementById("companyName").value);
+                    formData.append('product_uuid', selectedProduct.uuid);
+                    formData.append('commune_uuid', selectedCommune.uuid);
+                    formData.append('address', document.getElementById("address").value);
+                    formData.append('phone', document.getElementById("phone").value);
+                    formData.append('email', document.getElementById("companyEmail").value);
+                    formData.append('lang', lang);
+                    
+                    const description = document.getElementById("productDescription").value;
+                    if (lang === 'es') {
+                        formData.append('description_es', description);
+                    } else {
+                        formData.append('description_en', description);
+                    }
+                    
                     formData.append('image', imageFile);
+
+                    const response = await apiRequest('/api/v1/companies/', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'Publish failed');
+                    }
+                    
+                    const company = await response.json();
+                    
+                    console.log("Company published:", company);
+                    
+                    // Store company data and set publish state
+                    setCompanyData(company);
+                    setCompanyPublishState(true);
+                    
+                    alert(t.publishSuccess);
+                    
+                    // Redirect to profile view
+                    window.location.href = '../profile-view/profile-view.html';
+                    
+                } catch (error) {
+                    console.error('Error publishing company:', error);
+                    alert(t.publishError + '\n' + error.message);
+                } finally {
+                    submitButton.disabled = false;
+                    submitButton.textContent = originalButtonText;
                 }
+            });
 
-                const response = await apiRequest('/api/v1/companies/', {
-                    method: 'POST',
-                    body: formData
-                });
+            const fileInput = document.getElementById("companyImage");
+            const fileLabel = document.getElementById("fileLabel");
 
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.detail || 'Publish failed');
+            fileInput.addEventListener("change", (e) => {
+                const fileName = e.target.files[0]?.name;
+                
+                if (fileName) {
+                    fileLabel.textContent = `✅ ${fileName}`;
+                    fileLabel.classList.add("has-file");
+                } else {
+                    fileLabel.textContent = t.selectImage;
+                    fileLabel.classList.remove("has-file");
                 }
-                
-                const company = await response.json();
-                
-                console.log("Company published:", company);
-                
-                setCompanyPublishState(true);
-                alert(t.publishSuccess);
-                renderAlreadyPublished();
-                
-            } catch (error) {
-                console.error('Error publishing company:', error);
-                alert(t.publishError + '\n' + error.message);
-            } finally {
-                submitButton.disabled = false;
-                submitButton.textContent = originalButtonText;
-            }
-        });
-
-        const fileInput = document.getElementById("companyImage");
-        const fileLabel = document.getElementById("fileLabel");
-
-        fileInput.addEventListener("change", (e) => {
-            const fileName = e.target.files[0]?.name;
-            const t = translations[lang];
+            });
             
-            if (fileName) {
-                fileLabel.textContent = `✅ ${fileName}`;
-                fileLabel.classList.add("has-file");
-            } else {
-                fileLabel.textContent = t.selectImage;
-                fileLabel.classList.remove("has-file");
-            }
-        });
+        } catch (error) {
+            console.error('Error loading form data:', error);
+            publishSection.innerHTML = `
+                <div class="publish-container">
+                    <h2 class="publish-title">${t.title}</h2>
+                    <div class="login-message" style="color: #ff6b6b;">
+                        Error loading form data: ${error.message}
+                        <br><br>
+                        <button onclick="location.reload()" class="publish-button">Retry</button>
+                    </div>
+                </div>
+            `;
+        }
     }
 
-    function renderContent() {
+    async function renderContent() {
         const isLoggedIn = getLoginState();
         const hasPublishedCompany = getCompanyPublishState();
 
@@ -355,7 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (hasPublishedCompany) {
             renderAlreadyPublished();
         } else {
-            renderPublishForm();
+            await renderPublishForm();
         }
     }
 

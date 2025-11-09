@@ -15,97 +15,97 @@ TEST_USERS = [
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440001",
         "name": "Test User 01",
-        "email": "testuser01@proveo.test",
+        "email": "testuser01@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440002",
         "name": "Test User 02",
-        "email": "testuser02@proveo.test",
+        "email": "testuser02@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440003",
         "name": "Test User 03",
-        "email": "testuser03@proveo.test",
+        "email": "testuser03@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440004",
         "name": "Test User 04",
-        "email": "testuser04@proveo.test",
+        "email": "testuser04@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440005",
         "name": "Test User 05",
-        "email": "testuser05@proveo.test",
+        "email": "testuser05@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440006",
         "name": "Test User 06",
-        "email": "testuser06@proveo.test",
+        "email": "testuser06@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440007",
         "name": "Test User 07",
-        "email": "testuser07@proveo.test",
+        "email": "testuser07@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440008",
         "name": "Test User 08",
-        "email": "testuser08@proveo.test",
+        "email": "testuser08@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440009",
         "name": "Test User 09",
-        "email": "testuser09@proveo.test",
+        "email": "testuser09@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440010",
         "name": "Test User 10",
-        "email": "testuser10@proveo.test",
+        "email": "testuser10@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440011",
         "name": "Test User 11",
-        "email": "testuser11@proveo.test",
+        "email": "testuser11@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440012",
         "name": "Test User 12",
-        "email": "testuser12@proveo.test",
+        "email": "testuser12@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440013",
         "name": "Test User 13",
-        "email": "testuser13@proveo.test",
+        "email": "testuser13@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440014",
         "name": "Test User 14",
-        "email": "testuser14@proveo.test",
+        "email": "testuser14@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440015",
         "name": "Test User 15",
-        "email": "testuser15@proveo.test",
+        "email": "testuser15@proveo.com",
         "password": "TestPass123!"
     },
     {
         "uuid": "550e8400-e29b-41d4-a716-446655440016",
         "name": "Test User 16",
-        "email": "testuser16@proveo.test",
+        "email": "testuser16@proveo.com",
         "password": "TestPass123!"
     }
 ]
@@ -387,7 +387,7 @@ def print_env_template():
 
 
 if __name__ == "__main__":
-    print("🚀 Proveo Test Data Seeder\n")
+    print("🚀 proveo.com Data Seeder\n")
     
     # Print credentials template first
     print_env_template()
