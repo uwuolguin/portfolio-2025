@@ -3,10 +3,8 @@
 Revision ID: c70f6d3ab4ec
 Revises: 28de81bc6b20
 Create Date: 2025-09-28 23:45:28.175115
-
 """
 from typing import Sequence, Union
-
 from alembic import op
 import sqlalchemy as sa
 
@@ -17,6 +15,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS proveo.company_search;")
     op.execute("""
     CREATE MATERIALIZED VIEW proveo.company_search AS
@@ -49,7 +48,7 @@ def upgrade() -> None:
             coalesce(c.description_en,'') || ' ' ||
             coalesce(p.name_en,'')
         ) AS search_vector,
-        -- NEW: Concatenated searchable text for LIKE/ILIKE queries
+        -- Concatenated searchable text for LIKE/ILIKE queries
         LOWER(
             coalesce(c.name, '') || ' ' ||
             coalesce(c.description_es, '') || ' ' ||
@@ -65,23 +64,19 @@ def upgrade() -> None:
     LEFT JOIN proveo.users u ON u.uuid = c.user_uuid
     LEFT JOIN proveo.communes cm ON cm.uuid = c.commune_uuid;
     """)
-    
-    # Index for full-text search (existing)
+
+    # 3. Create indexes
     op.execute("""
     CREATE INDEX idx_company_search_vector
     ON proveo.company_search
     USING GIN (search_vector);
     """)
-    
-    # NEW: Index for text pattern matching
+
     op.execute("""
     CREATE INDEX idx_company_searchable_text
     ON proveo.company_search
     USING GIN (searchable_text gin_trgm_ops);
     """)
-    
-    # Enable trigram extension for better pattern matching
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
 
 
 def downgrade() -> None:

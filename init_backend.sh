@@ -1,5 +1,6 @@
 #!/bin/bash or git bash
 set -e
+trap 'echo "Error occurred. Press enter to exit."; read' ERR
 
 echo "⏳ Waiting for containers to be healthy... uwu"
 docker compose ps
@@ -13,3 +14,4 @@ echo "👤 Creating admin user...uwu"
 docker compose exec backend python -m app.services.testing_setup_users_data
 
 echo "✅ Backend initialization complete uwu"
+
