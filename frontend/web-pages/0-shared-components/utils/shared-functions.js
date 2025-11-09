@@ -34,7 +34,7 @@
             return false;
         }
     }
-    
+
     export async function checkCompanyStatus() {
         if (!getLoginState()) {
             setCompanyPublishState(false);
@@ -67,23 +67,6 @@
             console.error('Company check failed:', error);
             return false;
         }
-    }
-
-    export function getLoginState() {
-        const value = localStorage.getItem("isLoggedIn");
-        return value === "true";
-    }
-
-    export function setLoginState(hasLogged) {
-        localStorage.setItem("isLoggedIn", hasLogged.toString());
-        
-        if (!hasLogged) {
-            localStorage.removeItem("userData");
-            localStorage.removeItem("csrf_token");
-            localStorage.setItem("hasPublishedCompany", "false");
-        }
-        
-        document.dispatchEvent(new CustomEvent("userHasLogged"));
     }
 
     export function getLoginState() {
