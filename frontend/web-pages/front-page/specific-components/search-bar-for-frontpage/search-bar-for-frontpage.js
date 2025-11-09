@@ -161,11 +161,5 @@ document.addEventListener('DOMContentLoaded', () => {
         renderSearchBar();
     });
 
-    // Listen for search trigger
-    document.addEventListener("searchTriggered", () => {
-        // Trigger results refresh (result-container will handle this)
-        document.dispatchEvent(new CustomEvent('resultsRefresh'));
-    });
-
     renderSearchBar();
 });

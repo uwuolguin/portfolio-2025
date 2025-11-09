@@ -138,14 +138,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener("languageChange", () => {
         fetchAndRender();
     });
-    // Listen for search trigger
+
     document.addEventListener("searchTriggered", () => {
         currentPage = 1; // Reset to first page
-        fetchAndRender();
-    });
-
-    // Listen for results refresh
-    document.addEventListener("resultsRefresh", () => {
         fetchAndRender();
     });
 
