@@ -15,7 +15,7 @@ from app.middleware.security import (
     HTTPSRedirectMiddleware,
 )
 from app.utils.file_handler import FileHandler, NSFWModelError
-from app.routers import users, products, communes, companies
+from app.routers import users, products, communes, companies, health
 
 logger = structlog.get_logger(__name__)
 
@@ -163,28 +163,4 @@ app.include_router(users.router, prefix=settings.api_v1_prefix)
 app.include_router(products.router, prefix=settings.api_v1_prefix)
 app.include_router(communes.router, prefix=settings.api_v1_prefix)
 app.include_router(companies.router, prefix=settings.api_v1_prefix)
-
-@app.get("/")
-async def root():
-    """API root endpoint"""
-    return {
-        "message": "Proveo API",
-        "version": "1.0.0",
-        "status": "operational",
-    }
-
-
-@app.get("/health")
-async def health():
-    """Basic health check"""
-    return {
-        "status": "healthy",
-        "nsfw_checking": FileHandler._nsfw_available,
-        "redis_available": redis_client.is_available(),
-    }
-
-
-@app.get("/nsfw-status")
-async def nsfw_status():
-    """Check NSFW model status (for monitoring/debugging)"""
-    return FileHandler.get_nsfw_status()
+app.include_router(health.router, prefix=settings.api_v1_prefix)
