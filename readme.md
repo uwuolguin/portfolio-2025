@@ -18,7 +18,6 @@ A full-stack marketplace platform connecting businesses with service providers i
 - [🚢 Deployment](#-deployment)
 - [🗺️ Roadmap](#-roadmap)
 - [📄 License](#-license)
-- [👤 Author](#-author)
 - [🙏 Acknowledgments](#-acknowledgments)
 - [📞 Support](#-support)
 
@@ -511,16 +510,6 @@ docker-compose logs -f --timestamps backend
 - [ ] Set up domain name
 - [ ] Configure firewall rules
 
-### Docker Production Build
-
-```bash
-# Build images
-docker-compose build
-
-# Start in production mode
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
-
 ### Environment Variables (Production)
 
 ```env
@@ -579,15 +568,6 @@ This project is for portfolio demonstration purposes.
 
 ---
 
-## 👤 Author
-
-**Your Name**
-- Portfolio: [your-portfolio.com](https://your-portfolio.com)
-- LinkedIn: [linkedin.com/in/yourprofile](https://linkedin.com/in/yourprofile)
-- GitHub: [@yourusername](https://github.com/yourusername)
-
----
-
 ## 🙏 Acknowledgments
 
 - FastAPI for the excellent framework
@@ -597,11 +577,5 @@ This project is for portfolio demonstration purposes.
 - The open-source community
 
 ---
-
-## 📞 Support
-
-For questions or issues:
-- Open an issue on GitHub
-- Email: your.email@example.com
 
 **Note**: This is a portfolio project. For production use, additional security hardening and testing is recommended.
