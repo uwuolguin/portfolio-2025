@@ -1,4 +1,7 @@
 services:
+  # ===========================
+  # Database
+  # ===========================
   postgres:
     image: postgres:15-alpine
     container_name: portfolio-postgres
@@ -18,9 +21,13 @@ services:
       timeout: 5s
       retries: 5
 
+  # ===========================
+  # Cache / Rate Limiting
+  # ===========================
   redis:
     image: redis:7-alpine
     container_name: portfolio-redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379"
     volumes:
@@ -33,29 +40,113 @@ services:
       timeout: 3s
       retries: 5
 
+  # ===========================
+  # Object Storage (MinIO)
+  # ===========================
+  minio:
+    image: minio/minio:latest
+    container_name: portfolio-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000"      # API port
+      - "9001:9001" # Web console (optional, for debugging)
+    networks:
+      - portfolio-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================
+  # Image Storage Service
+  # ===========================
+  image-service:
+    build:
+      context: ./image-service
+      dockerfile: Dockerfile
+    container_name: portfolio-image-service
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: images
+      MINIO_SECURE: "false"
+      MAX_FILE_SIZE: 10000000  # 10MB
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - portfolio-network
+    ports:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================
+  # Backend API
+  # ===========================
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: portfolio-backend
     environment:
+      # Database
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-portfolio}
       - ALEMBIC_DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-portfolio}
+      
+      # Redis
       - REDIS_URL=redis://redis:6379/0
+      
+      # Image Service
+      - IMAGE_SERVICE_URL=http://image-service:8080
+      
+      # JWT & Security
+      - SECRET_KEY=${SECRET_KEY}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=120
+      
+      # Email
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - EMAIL_FROM=${EMAIL_FROM:-noreply@proveo.com}
+      - API_BASE_URL=${API_BASE_URL:-http://localhost}
+      - VERIFICATION_TOKEN_EMAIL_TIME=24
+      
+      # API Config
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://localhost:80}
+      - DEBUG=${DEBUG:-false}
+    
     volumes:
       - ./backend:/app
-      - ./files:/shared-files
+    
     ports:
       - "8000"
+    
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      image-service:
+        condition: service_healthy
+    
     networks:
       - portfolio-network
+    
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # ===========================
+  # Reverse Proxy (Nginx)
+  # ===========================
   nginx:
     build:
       context: ./nginx
@@ -68,13 +159,29 @@ services:
       - "80:80"
     depends_on:
       - backend
+      - image-service
     networks:
       - portfolio-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+# ===========================
+# Volumes
+# ===========================
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
+  minio_data:
+    driver: local
 
+# ===========================
+# Networks
+# ===========================
 networks:
   portfolio-network:
     driver: bridge
