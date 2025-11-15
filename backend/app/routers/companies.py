@@ -14,35 +14,22 @@ import structlog
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/companies", tags=["companies"])
 
-@router.get("/search", response_model=List[CompanySearchResponse], summary="Search companies (Public)")
+@router.get("/search", response_model=List[CompanySearchResponse])
 async def search_companies(
-    q: Optional[str] = Query(None, min_length=1),
-    lang: str = Query("es", pattern="^(es|en)$"),
-    commune: Optional[str] = Query(None),
-    product: Optional[str] = Query(None),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    db: asyncpg.Connection = Depends(get_db)
-):
-    try:
-        results = await DB.search_companies(conn=db, query=q or "", lang=lang, commune=commune, product=product, limit=limit, offset=offset)
-        return [CompanySearchResponse(**res) for res in results]
-    except Exception as e:
-        logger.error("company_search_error", error=str(e), exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to search companies")
+
 
 @router.post("/", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 async def create_company(
     request: Request,
-    name: str = Form(..., min_length=1, max_length=100),
+    name: str = Form(...),
     product_uuid: UUID = Form(...),
     commune_uuid: UUID = Form(...),
-    description_es: Optional[str] = Form(None, max_length=100),
-    description_en: Optional[str] = Form(None, max_length=100),
-    address: str = Form(..., min_length=5, max_length=100),
-    phone: str = Form(..., max_length=100),
-    email: str = Form(..., max_length=100),
-    lang: str = Form(..., pattern="^(es|en)$"),
+    description_es: Optional[str] = Form(None),
+    description_en: Optional[str] = Form(None),
+    address: str = Form(...),
+    phone: str = Form(...),
+    email: str = Form(...),
+    lang: str = Form(...),
     image: UploadFile = File(...),
     current_user: dict = Depends(require_verified_email),
     db: asyncpg.Connection = Depends(get_db),
@@ -50,14 +37,18 @@ async def create_company(
 ):
     try:
         user_uuid = UUID(current_user["sub"])
-        if not description_es and not description_en:
-            raise HTTPException(status_code=400, detail="At least one description must be provided")
+        
+        # Translate if needed
         if lang == "es":
             description_es, description_en = await translate_field("company_description", description_es, None)
         else:
             description_es, description_en = await translate_field("company_description", None, description_en)
-        image_path = await FileHandler.save_image(file=image, user_uuid=str(user_uuid))
+        
+        # Upload image (validates, checks NSFW, uploads to service)
+        image_id = await FileHandler.save_image(file=image, user_uuid=str(user_uuid))
+        
         try:
+            # Create company with image_id instead of path
             company = await DB.create_company(
                 conn=db,
                 user_uuid=user_uuid,
@@ -69,15 +60,24 @@ async def create_company(
                 address=address,
                 phone=phone,
                 email=email,
-                image_url=image_path
+                image_url=image_id  # Store image_id instead of path
             )
+            
+            # Build response with full image URL
             response_data = dict(company)
-            response_data["image_url"] = FileHandler.get_image_url(image_path, str(request.base_url).rstrip('/'))
-            logger.info("company_created", company_uuid=str(company["uuid"]), user_uuid=str(user_uuid))
+            response_data["image_url"] = FileHandler.get_image_url(
+                image_id, 
+                str(request.base_url).rstrip('/')
+            )
+            
+            logger.info("company_created", company_uuid=str(company["uuid"]))
             return CompanyResponse(**response_data)
+            
         except Exception as db_error:
-            FileHandler.delete_image(image_path)
+            # If database fails, clean up uploaded image
+            await FileHandler.delete_image(image_id)
             raise db_error
+            
     except HTTPException:
         raise
     except Exception as e:
@@ -88,15 +88,15 @@ async def create_company(
 async def update_company(
     company_uuid: UUID,
     request: Request,
-    name: Optional[str] = Form(None, min_length=1, max_length=100),
+    name: Optional[str] = Form(None),
     product_uuid: Optional[UUID] = Form(None),
     commune_uuid: Optional[UUID] = Form(None),
-    description_es: Optional[str] = Form(None, max_length=100),
-    description_en: Optional[str] = Form(None, max_length=100),
-    address: Optional[str] = Form(None, min_length=5, max_length=100),
-    phone: Optional[str] = Form(None, max_length=100),
-    email: Optional[str] = Form(None, max_length=100),
-    lang: Optional[str] = Form(None, pattern="^(es|en)$"),
+    description_es: Optional[str] = Form(None),
+    description_en: Optional[str] = Form(None),
+    address: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    lang: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     current_user: dict = Depends(require_verified_email),
     db: asyncpg.Connection = Depends(get_db),
@@ -104,19 +104,33 @@ async def update_company(
 ):
     try:
         user_uuid = UUID(current_user["sub"])
+        
+        # Translate if needed
         final_description_es, final_description_en = description_es, description_en
         if (description_es or description_en) and lang:
             if lang == "es":
-                final_description_es, final_description_en = await translate_field("company_description", description_es, None)
+                final_description_es, final_description_en = await translate_field(
+                    "company_description", description_es, None
+                )
             else:
-                final_description_es, final_description_en = await translate_field("company_description", None, description_en)
-        new_image_path = None
-        old_image_path = None
+                final_description_es, final_description_en = await translate_field(
+                    "company_description", None, description_en
+                )
+        
+        # Handle image update
+        new_image_id = None
+        old_image_id = None
+        
         if image:
+            # Get old image ID
             old_company = await DB.get_company_by_uuid(conn=db, company_uuid=company_uuid)
             if old_company:
-                old_image_path = old_company.get("image_url")
-            new_image_path = await FileHandler.save_image(file=image, company_uuid=str(company_uuid))
+                old_image_id = old_company.get("image_url")
+            
+            # Upload new image
+            new_image_id = await FileHandler.save_image(file=image, user_uuid=str(user_uuid))
+        
+        # Update company
         company = await DB.update_company_by_uuid(
             conn=db,
             company_uuid=company_uuid,
@@ -127,16 +141,25 @@ async def update_company(
             address=address,
             phone=phone,
             email=email,
-            image_url=new_image_path,
+            image_url=new_image_id,
             product_uuid=product_uuid,
             commune_uuid=commune_uuid
         )
-        if new_image_path and old_image_path and old_image_path != new_image_path:
-            FileHandler.delete_image(old_image_path)
+        
+        # Delete old image if we uploaded a new one
+        if new_image_id and old_image_id and old_image_id != new_image_id:
+            await FileHandler.delete_image(old_image_id)
+        
+        # Build response with full URL
         response_data = dict(company)
-        response_data["image_url"] = FileHandler.get_image_url(company["image_url"], str(request.base_url).rstrip('/'))
-        logger.info("company_updated", company_uuid=str(company_uuid), user_uuid=str(user_uuid), new_image=bool(new_image_path))
+        response_data["image_url"] = FileHandler.get_image_url(
+            company["image_url"], 
+            str(request.base_url).rstrip('/')
+        )
+        
+        logger.info("company_updated", company_uuid=str(company_uuid))
         return CompanyResponse(**response_data)
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -152,19 +175,33 @@ async def delete_company(
 ):
     try:
         user_uuid = UUID(current_user["sub"])
+        
+        # Get company to get image_id
         company = await DB.get_company_by_uuid(conn=db, company_uuid=company_uuid)
+        
         if company and company.get("user_uuid") == user_uuid:
-            image_path = company.get("image_url")
-            result = await DB.delete_company_by_uuid(conn=db, company_uuid=company_uuid, user_uuid=user_uuid)
-            if result and image_path:
-                FileHandler.delete_image(image_path)
-                return {"message": "Company successfully deleted", "uuid": str(company_uuid)}
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found or no permission")
+            image_id = company.get("image_url")
+            
+            # Delete from database
+            result = await DB.delete_company_by_uuid(
+                conn=db, 
+                company_uuid=company_uuid, 
+                user_uuid=user_uuid
+            )
+            
+            # Delete image from storage service
+            if result and image_id:
+                await FileHandler.delete_image(image_id)
+            
+            return {"message": "Company successfully deleted", "uuid": str(company_uuid)}
+        
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error("delete_company_error", error=str(e), exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete company")
+        raise HTTPException(status_code=500, detail="Failed to delete company")
 
 @router.get("/user/my-company", response_model=CompanyResponse)
 async def get_my_company(request: Request, current_user: dict = Depends(get_current_user), db: asyncpg.Connection = Depends(get_db)):
