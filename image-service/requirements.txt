@@ -3,3 +3,5 @@ uvicorn[standard]==0.38.0
 minio==7.2.15
 structlog==25.4.0
 python-multipart==0.0.20
+pydantic==2.12.3
+pydantic-settings==2.11.0
