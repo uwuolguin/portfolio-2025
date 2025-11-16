@@ -14,7 +14,6 @@ from app.middleware.security import (
     SecurityHeadersMiddleware,
     HTTPSRedirectMiddleware,
 )
-from app.utils.file_handler import FileHandler, NSFWModelError
 from app.routers import users, products, communes, companies, health
 
 logger = structlog.get_logger(__name__)
@@ -24,21 +23,13 @@ async def lifespan(app: FastAPI):
     logger.info("application_startup_begin")
 
     try:
-        FileHandler.init_upload_directory()        
-        try:
-            FileHandler.load_nsfw_model()
-        except NSFWModelError as e:
-            logger.critical("nsfw_model_critical_failure", error=str(e))
-            logger.warning(
-                "starting_without_nsfw_protection",
-                message="Images will not be checked for inappropriate content"
-            )
-
+        # Initialize database pools
         await init_db_pools()
         logger.info("database_pools_initialized")
 
+        # Connect to Redis
         await redis_client.connect()
-        logger.info("application_startup_complete", nsfw_available=FileHandler._nsfw_available)
+        logger.info("application_startup_complete")
 
     except Exception as e:
         logger.critical("application_startup_failed", error=str(e), exc_info=True)
@@ -49,9 +40,11 @@ async def lifespan(app: FastAPI):
     logger.info("application_shutdown_begin")
 
     try:
+        # Close database pools
         await close_db_pools()
         logger.info("database_pools_closed")
 
+        # Disconnect from Redis
         await redis_client.disconnect()
         logger.info("redis_disconnected")
 
