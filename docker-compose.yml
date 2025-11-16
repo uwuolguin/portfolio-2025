@@ -78,6 +78,14 @@ services:
       MINIO_BUCKET: images
       MINIO_SECURE: "false"
       MAX_FILE_SIZE: 10000000  # 10MB
+      
+      # NSFW Detection Settings
+      NSFW_ENABLED: ${NSFW_ENABLED:-true}
+      NSFW_THRESHOLD: ${NSFW_THRESHOLD:-0.75}
+      NSFW_FAIL_CLOSED: ${NSFW_FAIL_CLOSED:-true}
+      
+      LOG_LEVEL: ${IMAGE_SERVICE_LOG_LEVEL:-INFO}
+      DEBUG: ${IMAGE_SERVICE_DEBUG:-false}
     depends_on:
       minio:
         condition: service_healthy

@@ -9,6 +9,7 @@ import os
 from contextlib import asynccontextmanager
 
 from config import settings
+from image_validator import ImageValidator, NSFWModelError
 
 structlog.configure(
     processors=[
@@ -31,18 +32,32 @@ minio_client = Minio(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application startup and shutdown"""
     try:
+        # Create bucket if not exists
         if not await run_in_threadpool(minio_client.bucket_exists, settings.minio_bucket):
             await run_in_threadpool(minio_client.make_bucket, settings.minio_bucket)
             logger.info("bucket_created", bucket=settings.minio_bucket)
         else:
             logger.info("bucket_exists", bucket=settings.minio_bucket)
 
+        # Initialize NSFW model
+        if settings.nsfw_enabled:
+            nsfw_success = await run_in_threadpool(ImageValidator.init_nsfw_model)
+            if not nsfw_success and settings.nsfw_fail_closed:
+                logger.warning(
+                    "nsfw_model_init_failed_fail_closed_mode",
+                    message="Uploads will be blocked if NSFW check cannot run"
+                )
+        else:
+            logger.info("nsfw_detection_disabled")
+
         logger.info(
             "image_service_started",
             endpoint=settings.minio_endpoint,
             bucket=settings.minio_bucket,
             max_file_size_mb=settings.max_file_size / 1_000_000,
+            nsfw_status=ImageValidator.get_nsfw_status()
         )
     except Exception as e:
         logger.error("startup_failed", error=str(e), exc_info=True)
@@ -99,13 +114,14 @@ async def find_object_by_id(company_id: str) -> Optional[str]:
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint with NSFW status"""
     try:
         await run_in_threadpool(minio_client.bucket_exists, settings.minio_bucket)
         return {
             "status": "healthy",
             "service": "image-storage",
             "bucket": settings.minio_bucket,
+            "nsfw": ImageValidator.get_nsfw_status()
         }
     except Exception as e:
         logger.error("health_check_failed", error=str(e))
@@ -118,11 +134,17 @@ async def health_check():
 @app.post("/upload")
 async def upload_image(
     file: UploadFile = File(...),
-    company_id: str = None,  # CHANGED: now company_id instead of user_id
+    company_id: str = None,
 ):
     """
-    Upload an image to MinIO using company_id as filename
-    Returns: company_id (as image_id for backward compatibility), url, size
+    Upload an image to MinIO with validation and NSFW detection
+    
+    Process:
+    1. Validate and process image (resize, optimize)
+    2. Check for NSFW content
+    3. Upload to MinIO
+    
+    Returns: company_id (as image_id), url, size, nsfw_score
     """
     if not company_id:
         raise HTTPException(
@@ -130,39 +152,60 @@ async def upload_image(
             detail="company_id is required"
         )
     
-    # Validate content type
-    ctype = file.content_type
-    if ctype not in settings.allowed_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type: {ctype}",
-        )
-
     spooled = file.file
 
     try:
-        # Check file size
-        await run_in_threadpool(spooled.seek, 0, os.SEEK_END)
-        size = await run_in_threadpool(spooled.tell)
+        # Step 1: Read raw bytes
         await run_in_threadpool(spooled.seek, 0)
+        file_bytes = await run_in_threadpool(spooled.read)
+        
+        logger.info(
+            "upload_started",
+            company_id=company_id,
+            size_kb=len(file_bytes) / 1024,
+            content_type=file.content_type
+        )
 
-        if size > settings.max_file_size:
+        # Step 2: Validate and process image
+        try:
+            processed_bytes, ext = await run_in_threadpool(
+                ImageValidator.validate_and_process_image,
+                file_bytes,
+                file.content_type or "image/jpeg"
+            )
+        except ValueError as e:
+            logger.warning("image_validation_failed", error=str(e))
             raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"File too large. Max {settings.max_file_size / 1_000_000}MB",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
             )
 
-        # Determine extension
-        ext = {
-            "image/jpeg": ".jpg",
-            "image/png": ".png",
-            "image/webp": ".webp",
-        }[ctype]
+        # Step 3: NSFW check on processed bytes
+        nsfw_score, check_performed = await run_in_threadpool(
+            ImageValidator.check_nsfw_content,
+            processed_bytes
+        )
 
-        # Build object name using ONLY company_id
-        object_name = build_object_name(company_id, ext)
-        
-        # Delete old image if exists (different extension)
+        if nsfw_score > settings.nsfw_threshold:
+            if check_performed:
+                logger.warning(
+                    "nsfw_image_rejected",
+                    nsfw_score=nsfw_score,
+                    company_id=company_id
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Image rejected: inappropriate content detected (confidence: {nsfw_score:.1%})"
+                )
+            else:
+                # NSFW check failed to run - fail closed
+                logger.error("nsfw_check_failed_blocking_upload", company_id=company_id)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Content moderation service unavailable. Please try again later."
+                )
+
+        # Step 4: Delete old image if exists (different extension)
         for old_ext in [".jpg", ".png", ".webp"]:
             if old_ext != ext:
                 old_object_name = build_object_name(company_id, old_ext)
@@ -176,27 +219,44 @@ async def upload_image(
                 except:
                     pass  # Old image doesn't exist, that's fine
 
-        # Upload to MinIO
+        # Step 5: Upload to MinIO
+        object_name = build_object_name(company_id, ext)
+        
+        # Determine content type from extension
+        content_type_map = {
+            ".jpg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp"
+        }
+        upload_content_type = content_type_map.get(ext, "image/jpeg")
+        
+        from io import BytesIO
+        upload_stream = BytesIO(processed_bytes)
+        
         await run_in_threadpool(
             minio_client.put_object,
             settings.minio_bucket,
             object_name,
-            spooled,
-            length=size,
-            content_type=ctype,
+            upload_stream,
+            length=len(processed_bytes),
+            content_type=upload_content_type,
         )
 
         logger.info(
             "upload_success",
             company_id=company_id,
-            size=size,
+            size=len(processed_bytes),
             object_name=object_name,
+            nsfw_score=nsfw_score,
+            nsfw_check_performed=check_performed
         )
 
         return {
-            "image_id": company_id,  # Return company_id as image_id
+            "image_id": company_id,
             "url": f"/images/{company_id}",
-            "size": size,
+            "size": len(processed_bytes),
+            "nsfw_score": nsfw_score if check_performed else None,
+            "nsfw_checked": check_performed
         }
 
     except HTTPException:
