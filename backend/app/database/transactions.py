@@ -567,6 +567,11 @@ class DB:
         rows = await conn.fetch(query, user_uuid)
         return [dict(row) for row in rows]
 
+# ============================================================================
+# REPLACE THIS METHOD IN backend/app/database/transactions.py
+# Find the create_company method (around line 350) and replace it with this:
+# ============================================================================
+
     @staticmethod
     @db_retry()
     async def create_company(
@@ -580,37 +585,66 @@ class DB:
         address: Optional[str],
         phone: Optional[str],
         email: Optional[str],
-        image_url: Optional[str]
+        image_url: Optional[str],
+        company_uuid: str  # ADDED: Accept pre-generated UUID from caller
     ) -> Dict[str, Any]:
+        """
+        Create a new company with pre-generated UUID
+        
+        IMPORTANT CHANGE: 
+        - company_uuid parameter is now REQUIRED (was auto-generated before)
+        - This must match the image filename uploaded to storage
+        - Caller (companies.py router) generates UUID before upload
+        """
         async with transaction(conn):
+            # Check if user already has a company
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
                 user_uuid
             )
             if existing_company:
                 raise ValueError("Each user can only create one company. Please update your existing company.")
+            
+            # Validate product exists
             product_exists = await conn.fetchval("SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid)
             if not product_exists:
                 raise ValueError(f"Product with UUID {product_uuid} does not exist")
+            
+            # Validate commune exists
             commune_exists = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
             if not commune_exists:
                 raise ValueError(f"Commune with UUID {commune_uuid} does not exist")
-            uuid_id = str(uuid.uuid4())
+            
+            # CRITICAL CHANGE: Use provided company_uuid instead of generating uuid_id = str(uuid.uuid4())
+            # Old code had: uuid_id = str(uuid.uuid4())
+            # New code: use the company_uuid parameter passed from router
+            
             insert_query = """
                 INSERT INTO proveo.companies
                     (user_uuid, product_uuid, commune_uuid, name, description_es, description_en,
-                     address, phone, email, image_url,uuid)
+                    address, phone, email, image_url, uuid)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                 RETURNING uuid
             """
             row = await conn.fetchrow(
-                insert_query, user_uuid, product_uuid, commune_uuid, name,
-                description_es, description_en, address, phone, email, image_url, uuid_id
+                insert_query, 
+                user_uuid, 
+                product_uuid, 
+                commune_uuid, 
+                name,
+                description_es, 
+                description_en, 
+                address, 
+                phone, 
+                email, 
+                image_url, 
+                company_uuid  # CHANGED: Use provided UUID instead of uuid_id
             )
+            
             logger.info("company_created", company_uuid=str(row["uuid"]), user_uuid=str(user_uuid))
             await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
             return await DB.get_company_by_uuid(conn, row["uuid"])
-
+        
     @staticmethod
     @db_retry()
     async def update_company_by_uuid(

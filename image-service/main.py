@@ -5,7 +5,6 @@ from typing import Optional
 from minio import Minio
 from minio.error import S3Error
 import structlog
-import uuid
 import os
 from contextlib import asynccontextmanager
 
@@ -63,29 +62,34 @@ app = FastAPI(
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-def build_object_name(image_id: str, user_id: Optional[str], ext: str) -> str:
-    """Build MinIO object path"""
-    if user_id:
-        return f"{user_id}/{image_id}{ext}"
-    return f"{image_id}{ext}"
+def build_object_name(company_id: str, ext: str) -> str:
+    """
+    Build MinIO object path using ONLY company_id
+    Format: {company_id}.{ext}
+    Example: 550e8400-e29b-41d4-a716-446655440001.jpg
+    """
+    return f"{company_id}{ext}"
 
 
-async def find_object_by_id(image_id: str) -> Optional[str]:
-    """Find object in MinIO by image_id (searches all extensions)"""
+async def find_object_by_id(company_id: str) -> Optional[str]:
+    """
+    Find object in MinIO by company_id (searches all extensions)
+    """
     try:
         objects = await run_in_threadpool(
             lambda: list(minio_client.list_objects(settings.minio_bucket, recursive=True))
         )
 
-        suffixes = (f"{image_id}.jpg", f"{image_id}.png", f"{image_id}.webp")
+        # Search for company_id with any extension
+        suffixes = (f"{company_id}.jpg", f"{company_id}.png", f"{company_id}.webp")
 
         for obj in objects:
-            if obj.object_name.endswith(suffixes):
+            if obj.object_name in suffixes:
                 return obj.object_name
 
         return None
     except S3Error as e:
-        logger.error("find_object_failed", image_id=image_id, error=str(e))
+        logger.error("find_object_failed", company_id=company_id, error=str(e))
         return None
 
 
@@ -97,7 +101,6 @@ async def find_object_by_id(image_id: str) -> Optional[str]:
 async def health_check():
     """Health check endpoint"""
     try:
-        # Test MinIO connection
         await run_in_threadpool(minio_client.bucket_exists, settings.minio_bucket)
         return {
             "status": "healthy",
@@ -115,12 +118,18 @@ async def health_check():
 @app.post("/upload")
 async def upload_image(
     file: UploadFile = File(...),
-    user_id: Optional[str] = None,
+    company_id: str = None,  # CHANGED: now company_id instead of user_id
 ):
     """
-    Upload an image to MinIO
-    Returns: image_id, url, size
+    Upload an image to MinIO using company_id as filename
+    Returns: company_id (as image_id for backward compatibility), url, size
     """
+    if not company_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="company_id is required"
+        )
+    
     # Validate content type
     ctype = file.content_type
     if ctype not in settings.allowed_types:
@@ -150,9 +159,22 @@ async def upload_image(
             "image/webp": ".webp",
         }[ctype]
 
-        # Generate unique ID and object name
-        image_id = str(uuid.uuid4())
-        object_name = build_object_name(image_id, user_id, ext)
+        # Build object name using ONLY company_id
+        object_name = build_object_name(company_id, ext)
+        
+        # Delete old image if exists (different extension)
+        for old_ext in [".jpg", ".png", ".webp"]:
+            if old_ext != ext:
+                old_object_name = build_object_name(company_id, old_ext)
+                try:
+                    await run_in_threadpool(
+                        minio_client.remove_object,
+                        settings.minio_bucket,
+                        old_object_name
+                    )
+                    logger.info("old_image_deleted", object_name=old_object_name)
+                except:
+                    pass  # Old image doesn't exist, that's fine
 
         # Upload to MinIO
         await run_in_threadpool(
@@ -166,15 +188,14 @@ async def upload_image(
 
         logger.info(
             "upload_success",
-            image_id=image_id,
-            user_id=user_id,
+            company_id=company_id,
             size=size,
             object_name=object_name,
         )
 
         return {
-            "image_id": image_id,
-            "url": f"/images/{image_id}",
+            "image_id": company_id,  # Return company_id as image_id
+            "url": f"/images/{company_id}",
             "size": size,
         }
 
@@ -193,14 +214,14 @@ async def upload_image(
             pass
 
 
-@app.get("/images/{image_id}")
-async def get_image(image_id: str):
+@app.get("/images/{company_id}")
+async def get_image(company_id: str):
     """
-    Stream an image from MinIO
+    Stream an image from MinIO using company_id
     Efficient for large files - uses chunked streaming
     """
-    # Find the object
-    object_name = await find_object_by_id(image_id)
+    # Find the object by company_id
+    object_name = await find_object_by_id(company_id)
 
     if not object_name:
         raise HTTPException(
@@ -234,7 +255,6 @@ async def get_image(image_id: str):
                         break
                     yield chunk
             finally:
-                # Cleanup
                 try:
                     await run_in_threadpool(obj.close)
                 except Exception:
@@ -246,7 +266,7 @@ async def get_image(image_id: str):
 
         headers = {
             "Cache-Control": "public, max-age=2592000",  # 30 days
-            "Content-Disposition": f'inline; filename="{image_id}"',
+            "Content-Disposition": f'inline; filename="{company_id}"',
         }
 
         if length is not None:
@@ -263,7 +283,7 @@ async def get_image(image_id: str):
     except Exception as e:
         logger.error(
             "get_image_failed",
-            image_id=image_id,
+            company_id=company_id,
             error=str(e),
             exc_info=True,
         )
@@ -273,10 +293,10 @@ async def get_image(image_id: str):
         )
 
 
-@app.delete("/images/{image_id}")
-async def delete_image(image_id: str):
-    """Delete an image from MinIO"""
-    object_name = await find_object_by_id(image_id)
+@app.delete("/images/{company_id}")
+async def delete_image(company_id: str):
+    """Delete an image from MinIO using company_id"""
+    object_name = await find_object_by_id(company_id)
 
     if not object_name:
         raise HTTPException(
@@ -289,17 +309,17 @@ async def delete_image(image_id: str):
             minio_client.remove_object, settings.minio_bucket, object_name
         )
 
-        logger.info("delete_success", image_id=image_id, object_name=object_name)
+        logger.info("delete_success", company_id=company_id, object_name=object_name)
 
         return {
             "status": "deleted",
-            "image_id": image_id,
+            "image_id": company_id,
         }
 
     except Exception as e:
         logger.error(
             "delete_failed",
-            image_id=image_id,
+            company_id=company_id,
             error=str(e),
             exc_info=True,
         )
@@ -310,16 +330,13 @@ async def delete_image(image_id: str):
 
 
 @app.get("/images")
-async def list_images(user_id: Optional[str] = None):
-    """List all images (optionally filtered by user_id)"""
+async def list_images():
+    """List all images in the bucket"""
     try:
-        prefix = f"{user_id}/" if user_id else None
-
         objects = await run_in_threadpool(
             lambda: list(
                 minio_client.list_objects(
                     settings.minio_bucket,
-                    prefix=prefix,
                     recursive=True,
                 )
             )

@@ -1,11 +1,13 @@
 """
 Companies Router - Complete Implementation
 Handles all company CRUD operations with image management
+CORRECTED: Uses company_uuid for image storage
 """
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, Query, Form
 from typing import List, Optional
 from uuid import UUID
 import asyncpg
+import uuid
 
 from app.config import settings
 from app.database.connection import get_db
@@ -103,9 +105,10 @@ async def create_company(
     
     Flow:
     1. Translate description if only one language provided
-    2. Upload & validate image (NSFW check)
-    3. Create DB record
-    4. On DB failure: cleanup uploaded image
+    2. Generate company UUID
+    3. Upload image using company UUID as filename
+    4. Create DB record with that UUID
+    5. On DB failure: cleanup uploaded image
     """
     try:
         user_uuid = UUID(current_user["sub"])
@@ -141,14 +144,17 @@ async def create_company(
             lang=lang
         )
         
-        # Step 2: Upload image (validates, checks NSFW, uploads to service)
+        # Step 2: Generate company UUID BEFORE uploading image
+        company_uuid_str = str(uuid.uuid4())
+        
+        # Step 3: Upload image using company_id (validates, checks NSFW, uploads)
         image_id = await FileHandler.save_image(
             file=image, 
-            user_uuid=str(user_uuid)
+            company_id=company_uuid_str  # Use company UUID as filename
         )
         
         try:
-            # Step 3: Create company in database
+            # Step 4: Create company in database with pre-generated UUID
             company = await DB.create_company(
                 conn=db,
                 user_uuid=user_uuid,
@@ -160,13 +166,14 @@ async def create_company(
                 address=address,
                 phone=phone,
                 email=email,
-                image_url=image_id  # Store image_id (not path)
+                image_url=image_id,  # Store company_uuid (same as image_id)
+                company_uuid=company_uuid_str  # Pass pre-generated UUID
             )
             
             # Build response with full image URL
             response_data = dict(company)
             response_data["image_url"] = FileHandler.get_image_url(
-                image_id, 
+                image_id,  # company_uuid
                 str(request.base_url).rstrip('/')
             )
             
@@ -181,7 +188,7 @@ async def create_company(
             
         except ValueError as ve:
             # Business rule violation (e.g., user already has company)
-            await FileHandler.delete_image(image_id)
+            await FileHandler.delete_image(company_uuid_str)
             logger.warning(
                 "company_creation_failed_business_rule",
                 user_uuid=str(user_uuid),
@@ -194,7 +201,7 @@ async def create_company(
             
         except Exception as db_error:
             # Database error - cleanup uploaded image
-            await FileHandler.delete_image(image_id)
+            await FileHandler.delete_image(company_uuid_str)
             logger.error(
                 "company_creation_failed_db_error",
                 user_uuid=str(user_uuid),
@@ -244,9 +251,8 @@ async def update_company(
     
     Flow:
     1. Translate if description provided
-    2. Upload new image if provided
+    2. Upload new image if provided (uses company_uuid, automatically overwrites old)
     3. Update database
-    4. Delete old image only if update succeeds
     """
     try:
         user_uuid = UUID(current_user["sub"])
@@ -277,10 +283,9 @@ async def update_company(
         
         # Step 2: Handle image update
         new_image_id = None
-        old_image_id = None
         
         if image:
-            # Get old image ID before uploading new one
+            # Get company to verify ownership
             old_company = await DB.get_company_by_uuid(
                 conn=db, 
                 company_uuid=company_uuid
@@ -299,12 +304,11 @@ async def update_company(
                     detail="You can only update your own company"
                 )
             
-            old_image_id = old_company.get("image_url")
-            
-            # Upload new image
+            # Upload new image using company_uuid
+            # Note: This automatically overwrites the old image since we use company_uuid
             new_image_id = await FileHandler.save_image(
                 file=image, 
-                user_uuid=str(user_uuid)
+                company_id=str(company_uuid)  # Use company UUID
             )
         
         try:
@@ -324,19 +328,10 @@ async def update_company(
                 commune_uuid=commune_uuid
             )
             
-            # Step 4: Delete old image only after successful DB update
-            if new_image_id and old_image_id and old_image_id != new_image_id:
-                deleted = await FileHandler.delete_image(old_image_id)
-                logger.info(
-                    "old_image_deleted",
-                    old_image_id=old_image_id,
-                    deleted=deleted
-                )
-            
             # Build response with full URL
             response_data = dict(company)
             response_data["image_url"] = FileHandler.get_image_url(
-                company["image_url"], 
+                company["image_url"],  # company_uuid
                 str(request.base_url).rstrip('/')
             )
             
@@ -351,7 +346,7 @@ async def update_company(
         except PermissionError as pe:
             # User doesn't own this company
             if new_image_id:
-                await FileHandler.delete_image(new_image_id)
+                await FileHandler.delete_image(str(company_uuid))
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=str(pe)
@@ -360,16 +355,16 @@ async def update_company(
         except ValueError as ve:
             # Business rule violation
             if new_image_id:
-                await FileHandler.delete_image(new_image_id)
+                await FileHandler.delete_image(str(company_uuid))
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(ve)
             )
             
         except Exception as db_error:
-            # Database error - cleanup new image
+            # Database error - cleanup new image if uploaded
             if new_image_id:
-                await FileHandler.delete_image(new_image_id)
+                await FileHandler.delete_image(str(company_uuid))
             logger.error(
                 "company_update_failed",
                 company_uuid=str(company_uuid),
@@ -401,7 +396,7 @@ async def delete_company(
     Flow:
     1. Verify ownership
     2. Delete from database (soft delete)
-    3. Delete image from storage service
+    3. Delete image from storage service using company_uuid
     """
     try:
         user_uuid = UUID(current_user["sub"])
@@ -412,7 +407,7 @@ async def delete_company(
             user_uuid=str(user_uuid)
         )
         
-        # Get company to verify ownership and get image_id
+        # Get company to verify ownership
         company = await DB.get_company_by_uuid(
             conn=db, 
             company_uuid=company_uuid
@@ -430,7 +425,7 @@ async def delete_company(
                 detail="You can only delete your own company"
             )
         
-        image_id = company.get("image_url")
+        image_id = company.get("image_url")  # This is company_uuid
         
         # Delete from database
         result = await DB.delete_company_by_uuid(
@@ -447,7 +442,7 @@ async def delete_company(
         
         # Delete image from storage service
         if image_id:
-            deleted = await FileHandler.delete_image(image_id)
+            deleted = await FileHandler.delete_image(image_id)  # company_uuid
             logger.info(
                 "company_image_deleted",
                 company_uuid=str(company_uuid),
@@ -505,7 +500,7 @@ async def get_my_company(
         # Build response with full image URL
         response_data = dict(company)
         response_data["image_url"] = FileHandler.get_image_url(
-            company["image_url"], 
+            company["image_url"],  # company_uuid
             str(request.base_url).rstrip('/')
         )
         
@@ -558,7 +553,7 @@ async def admin_list_all_companies(
         for company in companies:
             company_data = dict(company)
             company_data["image_url"] = FileHandler.get_image_url(
-                company["image_url"], 
+                company["image_url"],  # company_uuid
                 base_url
             )
             response_companies.append(CompanyResponse(**company_data))
@@ -598,7 +593,7 @@ async def admin_delete_company(
     
     Flow:
     1. Delete from database (admin permission check inside DB layer)
-    2. Delete image from storage service
+    2. Delete image from storage service using company_uuid
     """
     try:
         logger.info(
@@ -614,11 +609,11 @@ async def admin_delete_company(
             admin_email=current_user["email"]
         )
         
-        image_id = result.get("image_url")
+        image_id = result.get("image_url")  # This is company_uuid
         
         # Delete image from storage service
         if image_id:
-            deleted = await FileHandler.delete_image(image_id)
+            deleted = await FileHandler.delete_image(image_id)  # company_uuid
             logger.info(
                 "admin_deleted_company_image",
                 company_uuid=str(company_uuid),
