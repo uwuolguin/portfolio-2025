@@ -5,11 +5,10 @@ from typing import Optional
 from minio import Minio
 from minio.error import S3Error
 import structlog
-import os
 from contextlib import asynccontextmanager
 
 from config import settings
-from image_validator import ImageValidator, NSFWModelError
+from image_validator import ImageValidator
 
 structlog.configure(
     processors=[
@@ -34,14 +33,12 @@ minio_client = Minio(
 async def lifespan(app: FastAPI):
     """Application startup and shutdown"""
     try:
-        # Create bucket if not exists
         if not await run_in_threadpool(minio_client.bucket_exists, settings.minio_bucket):
             await run_in_threadpool(minio_client.make_bucket, settings.minio_bucket)
             logger.info("bucket_created", bucket=settings.minio_bucket)
         else:
             logger.info("bucket_exists", bucket=settings.minio_bucket)
 
-        # Initialize NSFW model
         if settings.nsfw_enabled:
             nsfw_success = await run_in_threadpool(ImageValidator.init_nsfw_model)
             if not nsfw_success and settings.nsfw_fail_closed:
@@ -74,9 +71,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
 def build_object_name(company_id: str, ext: str) -> str:
     """
     Build MinIO object path using ONLY company_id
@@ -88,24 +82,34 @@ def build_object_name(company_id: str, ext: str) -> str:
 
 async def find_object_by_id(company_id: str) -> Optional[str]:
     """
-    Find object in MinIO by company_id (searches all extensions)
+    Find object in MinIO by company_id using configured extensions.
+    Tries each possible {company_id}{ext} and returns the first that exists.
     """
-    try:
-        objects = await run_in_threadpool(
-            lambda: list(minio_client.list_objects(settings.minio_bucket, recursive=True))
-        )
+    exts = set(settings.ext_by_format.values())
 
-        # Search for company_id with any extension
-        suffixes = (f"{company_id}.jpg", f"{company_id}.png", f"{company_id}.webp")
+    for ext in exts:
+        object_name = f"{company_id}{ext}"
+        try:
+            # just check if it exists
+            await run_in_threadpool(
+                minio_client.stat_object,
+                settings.minio_bucket,
+                object_name,
+            )
+            return object_name
+        except S3Error as e:
+            # Not found or other error — skip to next ext
+            # If you want, you can log only non-404 errors
+            if getattr(e, "code", None) not in ("NoSuchKey", "NoSuchObject", "NoSuchBucket"):
+                logger.warning(
+                    "stat_object_error",
+                    company_id=company_id,
+                    object_name=object_name,
+                    error=str(e),
+                )
+            continue
 
-        for obj in objects:
-            if obj.object_name in suffixes:
-                return obj.object_name
-
-        return None
-    except S3Error as e:
-        logger.error("find_object_failed", company_id=company_id, error=str(e))
-        return None
+    return None
 
 
 # ============================================================================
