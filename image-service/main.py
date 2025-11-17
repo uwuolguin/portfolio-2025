@@ -175,7 +175,7 @@ async def upload_image(
             processed_bytes, ext = await run_in_threadpool(
                 ImageValidator.validate_and_process_image,
                 file_bytes,
-                file.content_type or "image/jpeg"
+                file.content_type
             )
         except ValueError as e:
             logger.warning("image_validation_failed", error=str(e))
@@ -210,7 +210,7 @@ async def upload_image(
                 )
 
         # Step 4: Delete old image if exists (different extension)
-        for old_ext in [".jpg", ".png", ".webp"]:
+        for old_ext in [".jpg", ".png"]:
             if old_ext != ext:
                 old_object_name = build_object_name(company_id, old_ext)
                 try:
@@ -229,10 +229,9 @@ async def upload_image(
         # Determine content type from extension
         content_type_map = {
             ".jpg": "image/jpeg",
-            ".png": "image/png",
-            ".webp": "image/webp"
+            ".png": "image/png"
         }
-        upload_content_type = content_type_map.get(ext, "image/jpeg")
+        upload_content_type = content_type_map.get(ext)
         
         from io import BytesIO
         upload_stream = BytesIO(processed_bytes)
@@ -258,6 +257,7 @@ async def upload_image(
         return {
             "image_id": company_id,
             "url": f"/images/{company_id}",
+            "extension": ext,
             "size": len(processed_bytes),
             "nsfw_score": nsfw_score if check_performed else None,
             "nsfw_checked": check_performed
@@ -278,39 +278,38 @@ async def upload_image(
             pass
 
 
-@app.get("/images/{company_id}")
-async def get_image(company_id: str):
+@app.get("/images/{filename}")
+async def get_image(filename: str):
     """
-    Stream an image from MinIO using company_id
-    Efficient for large files - uses chunked streaming
+    Stream an image from MinIO using filename (company_id.ext)
+    
+    Examples:
+        /images/550e8400-e29b-41d4-a716-446655440001.jpg
+        /images/abc-123.png
     """
-    # Find the object by company_id
-    object_name = await find_object_by_id(company_id)
-
-    if not object_name:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found",
-        )
-
+    object_name = filename  # Use filename directly - no guessing!
+    
     try:
-        # Get object metadata
+        # Check if exists
         try:
             stat = await run_in_threadpool(
                 minio_client.stat_object, settings.minio_bucket, object_name
             )
             length = stat.size
             ctype = stat.content_type or "application/octet-stream"
-        except Exception:
-            length = None
-            ctype = "application/octet-stream"
+        except S3Error as e:
+            if getattr(e, "code", None) in ("NoSuchKey", "NoSuchObject"):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Image not found"
+                )
+            raise
 
-        # Get object stream
+        # Stream the object
         obj = await run_in_threadpool(
             minio_client.get_object, settings.minio_bucket, object_name
         )
 
-        # Stream generator
         async def stream_generator():
             try:
                 while True:
@@ -329,8 +328,8 @@ async def get_image(company_id: str):
                     pass
 
         headers = {
-            "Cache-Control": "public, max-age=2592000",  # 30 days
-            "Content-Disposition": f'inline; filename="{company_id}"',
+            "Cache-Control": "public, max-age=2592000",
+            "Content-Disposition": f'inline; filename="{filename}"',
         }
 
         if length is not None:
@@ -347,7 +346,7 @@ async def get_image(company_id: str):
     except Exception as e:
         logger.error(
             "get_image_failed",
-            company_id=company_id,
+            filename=filename,
             error=str(e),
             exc_info=True,
         )
@@ -355,7 +354,6 @@ async def get_image(company_id: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Retrieval failed",
         )
-
 
 @app.delete("/images/{company_id}")
 async def delete_image(company_id: str):

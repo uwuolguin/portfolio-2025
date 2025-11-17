@@ -15,6 +15,7 @@ class CompanyResponse(BaseModel):
     phone: str
     email: str
     image_url: str
+    image_extension: str
     created_at: datetime
     updated_at: datetime
     user_name: str

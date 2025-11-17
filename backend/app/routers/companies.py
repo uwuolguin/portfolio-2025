@@ -148,13 +148,13 @@ async def create_company(
         company_uuid_str = str(uuid.uuid4())
         
         # Step 3: Upload image using company_id (validates, checks NSFW, uploads)
-        image_id = await FileHandler.save_image(
+        image_id, image_ext = await FileHandler.save_image(
             file=image, 
-            company_id=company_uuid_str  # Use company UUID as filename
+            company_id=company_uuid_str
         )
         
         try:
-            # Step 4: Create company in database with pre-generated UUID
+           
             company = await DB.create_company(
                 conn=db,
                 user_uuid=user_uuid,
@@ -166,8 +166,9 @@ async def create_company(
                 address=address,
                 phone=phone,
                 email=email,
-                image_url=image_id,  # Store company_uuid (same as image_id)
-                company_uuid=company_uuid_str  # Pass pre-generated UUID
+                image_url=image_id,
+                image_extension=image_ext,
+                company_uuid=company_uuid_str
             )
             
             # Build response with full image URL
@@ -283,6 +284,7 @@ async def update_company(
         
         # Step 2: Handle image update
         new_image_id = None
+        new_image_ext = None
         
         if image:
             # Get company to verify ownership
@@ -306,9 +308,9 @@ async def update_company(
             
             # Upload new image using company_uuid
             # Note: This automatically overwrites the old image since we use company_uuid
-            new_image_id = await FileHandler.save_image(
+            new_image_id, new_image_ext = await FileHandler.save_image(
                 file=image, 
-                company_id=str(company_uuid)  # Use company UUID
+                company_id=str(company_uuid)
             )
         
         try:
@@ -324,6 +326,7 @@ async def update_company(
                 phone=phone,
                 email=email,
                 image_url=new_image_id,
+                image_extension=new_image_ext,
                 product_uuid=product_uuid,
                 commune_uuid=commune_uuid
             )

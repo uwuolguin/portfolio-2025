@@ -567,10 +567,6 @@ class DB:
         rows = await conn.fetch(query, user_uuid)
         return [dict(row) for row in rows]
 
-# ============================================================================
-# REPLACE THIS METHOD IN backend/app/database/transactions.py
-# Find the create_company method (around line 350) and replace it with this:
-# ============================================================================
 
     @staticmethod
     @db_retry()
@@ -579,14 +575,15 @@ class DB:
         user_uuid: UUID,
         product_uuid: UUID,
         commune_uuid: UUID,
-        name: str,
-        description_es: Optional[str],
-        description_en: Optional[str],
-        address: Optional[str],
-        phone: Optional[str],
-        email: Optional[str],
-        image_url: Optional[str],
-        company_uuid: str  # ADDED: Accept pre-generated UUID from caller
+        name: str,                      
+        description_es: str,            
+        description_en: str,            
+        address: str,                   
+        phone: str,                     
+        email: str,                     
+        image_url: str,                 
+        image_extension: str,           
+        company_uuid: str               
     ) -> Dict[str, Any]:
         """
         Create a new company with pre-generated UUID
@@ -597,7 +594,6 @@ class DB:
         - Caller (companies.py router) generates UUID before upload
         """
         async with transaction(conn):
-            # Check if user already has a company
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
                 user_uuid
@@ -605,27 +601,21 @@ class DB:
             if existing_company:
                 raise ValueError("Each user can only create one company. Please update your existing company.")
             
-            # Validate product exists
             product_exists = await conn.fetchval("SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid)
             if not product_exists:
                 raise ValueError(f"Product with UUID {product_uuid} does not exist")
             
-            # Validate commune exists
             commune_exists = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
             if not commune_exists:
                 raise ValueError(f"Commune with UUID {commune_uuid} does not exist")
             
-            # CRITICAL CHANGE: Use provided company_uuid instead of generating uuid_id = str(uuid.uuid4())
-            # Old code had: uuid_id = str(uuid.uuid4())
-            # New code: use the company_uuid parameter passed from router
             
             insert_query = """
                 INSERT INTO proveo.companies
                     (user_uuid, product_uuid, commune_uuid, name, description_es, description_en,
-                    address, phone, email, image_url, uuid)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-                RETURNING uuid
-            """
+                    address, phone, email, image_url, image_extension, uuid)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                RETURNING uuid """
             row = await conn.fetchrow(
                 insert_query, 
                 user_uuid, 
@@ -637,8 +627,9 @@ class DB:
                 address, 
                 phone, 
                 email, 
-                image_url, 
-                company_uuid  # CHANGED: Use provided UUID instead of uuid_id
+                image_url,
+                image_extension,
+                company_uuid 
             )
             
             logger.info("company_created", company_uuid=str(row["uuid"]), user_uuid=str(user_uuid))
@@ -657,6 +648,7 @@ class DB:
         address: Optional[str] = None,
         phone: Optional[str] = None,
         email: Optional[str] = None,
+        image_extension: Optional[str] = None,
         image_url: Optional[str] = None,
         product_uuid: Optional[UUID] = None,
         commune_uuid: Optional[UUID] = None
@@ -672,7 +664,7 @@ class DB:
             param_count = 1
             for field, value in [
                 ("name", name), ("description_es", description_es), ("description_en", description_en),
-                ("address", address), ("phone", phone), ("email", email), ("image_url", image_url)
+                ("address", address), ("phone", phone), ("email", email), ("image_url", image_url),("image_extension", image_extension)
             ]:
                 if value is not None:
                     update_fields.append(f"{field}=${param_count}")
@@ -709,15 +701,22 @@ class DB:
             company_query = "SELECT * FROM proveo.companies WHERE uuid=$1 AND user_uuid=$2"
             company = await conn.fetchrow(company_query, company_uuid, user_uuid)
             if not company:
-                logger.warning("company_delete_failed", company_uuid=str(company_uuid), user_uuid=str(user_uuid), reason="not_found_or_not_owned")
                 return False
+            
             insert_deleted = """
                 INSERT INTO proveo.companies_deleted
                     (uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
-                     description_en, address, phone, email, image_url, created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                    description_en, address, phone, email, image_url, image_extension, 
+                    created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             """
-            await conn.execute(insert_deleted, *[company[f] for f in company.keys()])
+            await conn.execute(insert_deleted, 
+                company["uuid"], company["user_uuid"], company["product_uuid"],
+                company["commune_uuid"], company["name"], company["description_es"],
+                company["description_en"], company["address"], company["phone"],
+                company["email"], company["image_url"], company["image_extension"],
+                company["created_at"], company["updated_at"]
+            )
             await conn.execute("DELETE FROM proveo.companies WHERE uuid=$1", company_uuid)
             logger.info("company_deleted", company_uuid=str(company_uuid))
             await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
@@ -740,7 +739,6 @@ class DB:
         Filters by exact commune/product match.
         """
         
-        # Base query structure
         if query:
             base_query = """
                 SELECT company_id, company_name, company_description_es, company_description_en,
@@ -752,7 +750,6 @@ class DB:
             """
             params = [f"%{query.lower()}%"]
         else:
-            # No search query - list all companies
             base_query = """
                 SELECT company_id, company_name, company_description_es, company_description_en,
                     address, company_email, product_name_es, product_name_en,
@@ -763,17 +760,14 @@ class DB:
             """
             params = []
 
-        # Add commune filter (exact match, case-insensitive)
         if commune:
             base_query += f" AND LOWER(commune_name) = LOWER(${len(params) + 1})"
             params.append(commune)
         
-        # Add product filter (exact match for either language, case-insensitive)
         if product:
             base_query += f" AND (LOWER(product_name_es) = LOWER(${len(params) + 1}) OR LOWER(product_name_en) = LOWER(${len(params) + 2}))"
             params.extend([product, product])
 
-        # Add ordering, limit, and offset
         base_query += f" ORDER BY company_name ASC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
         params.extend([limit, offset])
 

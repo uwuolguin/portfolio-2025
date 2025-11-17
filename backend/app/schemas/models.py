@@ -51,8 +51,10 @@ class Company(Base):
     phone = Column(String(100), nullable=False)
     email = Column(String(100), nullable=False)
     image_url = Column(String(10000), nullable=False)
+    image_extension = Column(String(10), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
 
 class UserDeleted(Base):
     __tablename__ = "users_deleted"
@@ -100,6 +102,7 @@ class CompanyDeleted(Base):
     address = Column(String(100), nullable=False)
     phone = Column(String(100), nullable=False)
     email = Column(String(100), nullable=False)
+    image_extension = Column(String(10), nullable=False)
     image_url = Column(String(10000), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False)

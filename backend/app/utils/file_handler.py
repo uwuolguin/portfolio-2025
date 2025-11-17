@@ -5,7 +5,7 @@ Simplified File Handler
 - Just sends files to image service and handles responses
 """
 import structlog
-from typing import Optional
+from typing import Optional,Tuple
 
 from fastapi import UploadFile, HTTPException, status
 from app.config import settings
@@ -26,54 +26,42 @@ class FileHandler:
     async def save_image(
         file: UploadFile,
         company_id: str
-    ) -> str:
+    ) -> Tuple[str, str]:
         """
         Upload image to Image Service
         
-        The image service will:
-        - Validate format (JPEG/PNG/WebP)
-        - Check file size (<10MB)
-        - Optimize image
-        - Detect NSFW content
-        - Store in MinIO
-        
-        Args:
-            file: UploadFile from FastAPI
-            company_id: UUID of the company (used as filename)
-        
         Returns:
-            image_id: Same as company_id (for backward compatibility)
+            Tuple of (image_id, extension) - e.g., ("uuid", ".jpg")
         
         Raises:
             HTTPException: If upload fails or validation fails
         """
         try:
-            # Read file bytes
             file_bytes = await file.read()
-            await file.seek(0)  # Reset for potential re-reads
+            await file.seek(0)
             
             logger.info("uploading_to_image_service",
-                       size_kb=len(file_bytes) / 1024,
-                       content_type=file.content_type,
-                       company_id=company_id)
+                    size_kb=len(file_bytes) / 1024,
+                    content_type=file.content_type,
+                    company_id=company_id)
             
-            # Upload to image service (validates, checks NSFW, stores)
             result = await image_service_client.upload_image(
                 file_bytes=file_bytes,
-                filename=f"{company_id}.jpg",  # Extension will be determined by service
-                content_type=file.content_type or "image/jpeg",
+                filename=company_id, 
+                content_type=file.content_type ,
                 user_id=company_id
             )
+            
+            extension = result.get('extension')
             
             logger.info(
                 "image_saved_successfully",
                 image_id=result['image_id'],
-                size=result['size'],
-                nsfw_checked=result.get('nsfw_checked', False),
-                nsfw_score=result.get('nsfw_score')
+                extension=extension,
+                size=result['size']
             )
             
-            return result['image_id']
+            return result['image_id'], extension
 
         except HTTPException:
             raise
@@ -83,7 +71,6 @@ class FileHandler:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to save image: {str(e)}"
             )
-
     @staticmethod
     async def delete_image(image_id: str) -> bool:
         """
@@ -98,16 +85,17 @@ class FileHandler:
         return await image_service_client.delete_image(image_id)
     
     @staticmethod
-    def get_image_url(image_id: str, request_base_url: str) -> str:
+    def get_image_url(image_id: str, extension: str, request_base_url: str) -> str:
         """
-        Convert image_id to public URL
-        Goes through nginx reverse proxy to image service
+        Build public image URL with extension
         
         Args:
-            image_id: ID of the image (company_id)
-            request_base_url: Base URL from the request
+            image_id: UUID of the image
+            extension: File extension (e.g., ".jpg")
+            request_base_url: Base URL from request
         
         Returns:
-            Full URL like "http://localhost/images/uuid"
+            Full URL like "http://localhost/images/uuid.jpg"
         """
-        return image_service_client.get_image_url(image_id, request_base_url)
+        base = request_base_url.rstrip('/')
+        return f"{base}/images/{image_id}{extension}"
