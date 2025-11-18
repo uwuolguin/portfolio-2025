@@ -1,7 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, status,Form
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
-from typing import Optional
 from minio import Minio
 from minio.error import S3Error
 import structlog
@@ -71,50 +70,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-def build_object_name(company_id: str, ext: str) -> str:
-    """
-    Build MinIO object path using ONLY company_id
-    Format: {company_id}.{ext}
-    Example: 550e8400-e29b-41d4-a716-446655440001.jpg
-    """
-    return f"{company_id}{ext}"
-
-
-async def find_object_by_id(company_id: str) -> Optional[str]:
-    """
-    Find object in MinIO by company_id using configured extensions.
-    Tries each possible {company_id}{ext} and returns the first that exists.
-    """
-    exts = set(settings.ext_by_format.values())
-
-    for ext in exts:
-        object_name = f"{company_id}{ext}"
-        try:
-            # just check if it exists
-            await run_in_threadpool(
-                minio_client.stat_object,
-                settings.minio_bucket,
-                object_name,
-            )
-            return object_name
-        except S3Error as e:
-            # Not found or other error — skip to next ext
-            # If you want, you can log only non-404 errors
-            if getattr(e, "code", None) not in ("NoSuchKey", "NoSuchObject", "NoSuchBucket"):
-                logger.warning(
-                    "stat_object_error",
-                    company_id=company_id,
-                    object_name=object_name,
-                    error=str(e),
-                )
-            continue
-
-    return None
-
-
-# ============================================================================
-# ENDPOINTS
-# ============================================================================
 
 @app.get("/health")
 async def health_check():
@@ -138,7 +93,7 @@ async def health_check():
 @app.post("/upload")
 async def upload_image(
     file: UploadFile = File(...),
-    company_id: str = None,
+    company_id: str = Form(...),
 ):
     """
     Upload an image to MinIO with validation and NSFW detection
@@ -146,20 +101,14 @@ async def upload_image(
     Process:
     1. Validate and process image (resize, optimize)
     2. Check for NSFW content
-    3. Upload to MinIO
+    3. Delete old image if exists (different extension)
+    4. Upload to MinIO
     
-    Returns: company_id (as image_id), url, size, nsfw_score
+    Returns: company_id, extension, url, size, nsfw_score
     """
-    if not company_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="company_id is required"
-        )
-    
     spooled = file.file
 
     try:
-        # Step 1: Read raw bytes
         await run_in_threadpool(spooled.seek, 0)
         file_bytes = await run_in_threadpool(spooled.read)
         
@@ -170,7 +119,6 @@ async def upload_image(
             content_type=file.content_type
         )
 
-        # Step 2: Validate and process image
         try:
             processed_bytes, ext = await run_in_threadpool(
                 ImageValidator.validate_and_process_image,
@@ -184,7 +132,6 @@ async def upload_image(
                 detail=str(e)
             )
 
-        # Step 3: NSFW check on processed bytes
         nsfw_score, check_performed = await run_in_threadpool(
             ImageValidator.check_nsfw_content,
             processed_bytes
@@ -202,7 +149,6 @@ async def upload_image(
                     detail=f"Image rejected: inappropriate content detected (confidence: {nsfw_score:.1%})"
                 )
             else:
-                # NSFW check failed to run - fail closed
                 logger.error("nsfw_check_failed_blocking_upload", company_id=company_id)
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -212,7 +158,7 @@ async def upload_image(
         # Step 4: Delete old image if exists (different extension)
         for old_ext in [".jpg", ".png"]:
             if old_ext != ext:
-                old_object_name = build_object_name(company_id, old_ext)
+                old_object_name = f"{company_id}{old_ext}"
                 try:
                     await run_in_threadpool(
                         minio_client.remove_object,
@@ -224,14 +170,14 @@ async def upload_image(
                     pass  # Old image doesn't exist, that's fine
 
         # Step 5: Upload to MinIO
-        object_name = build_object_name(company_id, ext)
+        object_name = f"{company_id}{ext}"
         
         # Determine content type from extension
         content_type_map = {
             ".jpg": "image/jpeg",
             ".png": "image/png"
         }
-        upload_content_type = content_type_map.get(ext)
+        upload_content_type = content_type_map.get(ext, "application/octet-stream")
         
         from io import BytesIO
         upload_stream = BytesIO(processed_bytes)
@@ -248,6 +194,7 @@ async def upload_image(
         logger.info(
             "upload_success",
             company_id=company_id,
+            extension=ext,
             size=len(processed_bytes),
             object_name=object_name,
             nsfw_score=nsfw_score,
@@ -256,8 +203,8 @@ async def upload_image(
 
         return {
             "image_id": company_id,
-            "url": f"/images/{company_id}",
-            "extension": ext,
+            "extension": ext,  # Backend stores this
+            "url": f"/images/{company_id}{ext}",
             "size": len(processed_bytes),
             "nsfw_score": nsfw_score if check_performed else None,
             "nsfw_checked": check_performed
@@ -281,13 +228,16 @@ async def upload_image(
 @app.get("/images/{filename}")
 async def get_image(filename: str):
     """
-    Stream an image from MinIO using filename (company_id.ext)
+    Stream an image from MinIO using full filename (company_id + extension)
+    
+    Backend provides complete filename: {company_id}.jpg or {company_id}.png
+    No guessing needed - just use the filename directly
     
     Examples:
         /images/550e8400-e29b-41d4-a716-446655440001.jpg
         /images/abc-123.png
     """
-    object_name = filename  # Use filename directly - no guessing!
+    object_name = filename  # Use filename directly from URL
     
     try:
         # Check if exists
@@ -355,33 +305,50 @@ async def get_image(filename: str):
             detail="Retrieval failed",
         )
 
-@app.delete("/images/{company_id}")
-async def delete_image(company_id: str):
-    """Delete an image from MinIO using company_id"""
-    object_name = await find_object_by_id(company_id)
 
-    if not object_name:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found",
-        )
-
+@app.delete("/images/{filename}")
+async def delete_image(filename: str):
+    """
+    Delete an image from MinIO using full filename (company_id + extension)
+    
+    Backend provides complete filename when calling this endpoint
+    """
+    object_name = filename
+    
     try:
+        # Check if exists first
+        try:
+            await run_in_threadpool(
+                minio_client.stat_object,
+                settings.minio_bucket,
+                object_name,
+            )
+        except S3Error as e:
+            if getattr(e, "code", None) in ("NoSuchKey", "NoSuchObject"):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Image not found",
+                )
+            raise
+        
+        # Delete the object
         await run_in_threadpool(
             minio_client.remove_object, settings.minio_bucket, object_name
         )
 
-        logger.info("delete_success", company_id=company_id, object_name=object_name)
+        logger.info("delete_success", filename=filename)
 
         return {
             "status": "deleted",
-            "image_id": company_id,
+            "filename": filename,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             "delete_failed",
-            company_id=company_id,
+            filename=filename,
             error=str(e),
             exc_info=True,
         )
@@ -393,7 +360,7 @@ async def delete_image(company_id: str):
 
 @app.get("/images")
 async def list_images():
-    """List all images in the bucket"""
+    """List all images in the bucket (admin/debugging)"""
     try:
         objects = await run_in_threadpool(
             lambda: list(
