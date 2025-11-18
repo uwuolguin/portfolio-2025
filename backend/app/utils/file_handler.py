@@ -1,11 +1,11 @@
 """
 Simplified File Handler
 - Delegates all image processing to Image Service
-- No NSFW detection (handled by image service)
-- Just sends files to image service and handles responses
+- Determines extension from uploaded file BEFORE sending
 """
 import structlog
-from typing import Optional,Tuple
+from typing import Tuple
+import os
 
 from fastapi import UploadFile, HTTPException, status
 from app.config import settings
@@ -16,11 +16,35 @@ logger = structlog.get_logger(__name__)
 
 class FileHandler:
     """
-    Simplified file handler that delegates to Image Service
+    File handler that delegates to Image Service
     
-    All image validation, processing, and NSFW detection happens in the image service.
-    This class just coordinates the upload/delete operations.
+    Key change: Determines extension from uploaded file BEFORE sending to image service
     """
+
+    @staticmethod
+    def get_extension_from_content_type(content_type: str) -> str:
+        """
+        Map content type to file extension
+        
+        Args:
+            content_type: MIME type (e.g., "image/jpeg")
+            
+        Returns:
+            Extension with dot (e.g., ".jpg")
+            
+        Raises:
+            HTTPException if content type is invalid
+        """
+        
+        extension = settings.content_type_map.get(content_type)
+        
+        if not extension:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported image type: {content_type}. Allowed: {list(settings.content_type_map.keys())}"
+            )
+        
+        return extension
 
     @staticmethod
     async def save_image(
@@ -30,6 +54,15 @@ class FileHandler:
         """
         Upload image to Image Service
         
+        Flow:
+        1. Determine extension from content type
+        2. Upload to image service with extension
+        3. Return image_id and extension
+        
+        Args:
+            file: Uploaded file
+            company_id: Company UUID (used as image ID)
+            
         Returns:
             Tuple of (image_id, extension) - e.g., ("uuid", ".jpg")
         
@@ -40,19 +73,35 @@ class FileHandler:
             file_bytes = await file.read()
             await file.seek(0)
             
-            logger.info("uploading_to_image_service",
-                    size_kb=len(file_bytes) / 1024,
-                    content_type=file.content_type,
-                    company_id=company_id)
+            extension = FileHandler.get_extension_from_content_type(file.content_type)
+            
+            logger.info(
+                "uploading_to_image_service",
+                size_kb=len(file_bytes) / 1024,
+                content_type=file.content_type,
+                extension=extension,
+                company_id=company_id
+            )
             
             result = await image_service_client.upload_image(
                 file_bytes=file_bytes,
                 filename=company_id, 
-                content_type=file.content_type ,
+                content_type=file.content_type,
+                extension=extension,
                 user_id=company_id
             )
             
-            extension = result.get('extension')
+            returned_extension = result.get('extension')
+            if returned_extension != extension:
+                logger.error(
+                    "extension_mismatch",
+                    sent=extension,
+                    returned=returned_extension
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Image service returned unexpected extension"
+                )
             
             logger.info(
                 "image_saved_successfully",
@@ -71,18 +120,21 @@ class FileHandler:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to save image: {str(e)}"
             )
+
     @staticmethod
-    async def delete_image(image_id: str) -> bool:
+    async def delete_image(image_id: str, extension: str) -> bool:
         """
         Delete an image via Image Service
         
         Args:
             image_id: ID of the image to delete (company_id)
+            extension: File extension (e.g., ".jpg")
         
         Returns:
             True if deleted, False if not found
         """
-        return await image_service_client.delete_image(image_id)
+        filename = f"{image_id}{extension}"
+        return await image_service_client.delete_image(filename)
     
     @staticmethod
     def get_image_url(image_id: str, extension: str, request_base_url: str) -> str:

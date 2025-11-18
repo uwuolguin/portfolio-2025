@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 class Settings(BaseSettings):
@@ -38,9 +38,23 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     # File uploads / Image processing
     # ------------------------------------------------------------------------
-    max_file_size: int = 10_000_000  
+    max_file_size: int = 10_000_000
     allowed_file_types: List[str] = ["image/jpeg", "image/png"]
     upload_directory: str = "/shared-files/pictures"
+    content_type_map: Dict[str, str] = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+    }
+
+    # ------------------------------------------------------------------------
+    # Image Service / HTTP client
+    # ------------------------------------------------------------------------
+    image_service_url: str = "http://image-service:8080"  
+    request_timeout: float = 30.0                         
+    connection_timeout: float = 5.0                       
+    max_retries: int = 3                                 
+    max_connections: int = 100                            
+    max_keepalive_connections: int = 20                   
 
     # ------------------------------------------------------------------------
     # API

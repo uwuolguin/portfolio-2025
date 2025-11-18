@@ -19,10 +19,10 @@ class ImageValidator:
     Image validation and NSFW detection
 
     Features:
-    - Format validation (JPEG, PNG, WebP)
-    - Size validation (max configured in MAX_FILE_SIZE)
-    - Dimension validation (max MAX_WIDTH x MAX_HEIGHT)
-    - Image optimization (compression, progressive JPEG)
+    - Format validation (JPEG, PNG)
+    - Size validation
+    - Dimension validation
+    - Image optimization
     - NSFW content detection
     """
 
@@ -31,11 +31,7 @@ class ImageValidator:
 
     @classmethod
     def init_nsfw_model(cls) -> bool:
-        """
-        Initialize NSFW model once at startup
-        Returns True if successful, False otherwise
-        Gracefully handles failure - app continues without NSFW protection
-        """
+        """Initialize NSFW model once at startup"""
         if not settings.nsfw_enabled:
             logger.info("nsfw_detection_disabled", reason="config_setting")
             cls._nsfw_available = False
@@ -98,9 +94,15 @@ class ImageValidator:
         cls,
         file_bytes: bytes,
         content_type: str,
-    ) -> Tuple[bytes, str]:
+        extension: str
+    ) -> bytes:
         """
         Validate and process image synchronously
+
+        Args:
+            file_bytes: Raw image bytes
+            content_type: MIME type from upload
+            extension: Expected extension (e.g., ".jpg", ".png")
 
         Steps:
         1. Validate MIME type
@@ -110,18 +112,16 @@ class ImageValidator:
         5. Convert to RGB if needed
         6. Optimize and compress
 
-        Returns: (processed_bytes, extension)
+        Returns: processed_bytes (no extension - we already know it!)
         Raises: ValueError on validation failure
         """
 
-        # Validate MIME type
         if content_type not in settings.allowed_types:
             raise ValueError(
                 f"Unsupported MIME type: {content_type}. "
                 f"Allowed: {', '.join(sorted(settings.allowed_types))}"
             )
 
-        # Check size before processing
         if len(file_bytes) > settings.max_file_size:
             size_mb = len(file_bytes) / 1_048_576
             limit_mb = settings.max_file_size / 1_048_576
@@ -129,10 +129,9 @@ class ImageValidator:
                 f"Image too large ({size_mb:.2f}MB). Limit: {limit_mb:.2f}MB"
             )
 
-        # Open and validate image
         try:
             with Image.open(BytesIO(file_bytes)) as img:
-                img.load()  # Force full load to detect corruption
+                img.load()
                 fmt = (img.format or "").upper()
                 img_copy = img.copy()
         except UnidentifiedImageError:
@@ -140,14 +139,21 @@ class ImageValidator:
         except Exception as e:
             raise ValueError(f"Image processing error: {str(e)}")
 
-        # Validate format (PIL level)
-        if fmt not in settings.allowed_formats:
+        expected_format = None
+        for format_name, ext in settings.ext_by_format.items():
+            if ext == extension:
+                expected_format = format_name
+                break
+        
+        if not expected_format:
+            raise ValueError(f"Unknown extension: {extension}")
+        
+        if fmt != expected_format:
             raise ValueError(
-                f"Unsupported format: {fmt}. "
-                f"Allowed: {', '.join(sorted(settings.allowed_formats))}"
+                f"Image format mismatch: file is {fmt} but extension is {extension} "
+                f"(expected {expected_format})"
             )
 
-        # Check dimensions
         if (
             img_copy.width > settings.max_width
             or img_copy.height > settings.max_height
@@ -157,7 +163,6 @@ class ImageValidator:
                 f"Max: {settings.max_width}x{settings.max_height}"
             )
 
-        # Convert RGBA/palette to RGB (avoid transparency issues)
         if img_copy.mode in ("RGBA", "P", "LA"):
             background = Image.new("RGB", img_copy.size, (255, 255, 255))
             if img_copy.mode == "P":
@@ -165,42 +170,36 @@ class ImageValidator:
             background.paste(img_copy, mask=img_copy.split()[-1])
             img_copy = background
 
-        # Optimize and save
         out = BytesIO()
 
         save_params = {}
-        if fmt == "JPEG":
+        if expected_format == "JPEG":
             save_params = {
                 "quality": 90,
                 "optimize": True,
-                "progressive": True,  # Better for web streaming
+                "progressive": True,
             }
-        elif fmt == "PNG":
+        elif expected_format == "PNG":
             save_params = {
                 "optimize": True,
-                "compress_level": 6,  # Good balance of speed/size
-            }
-        else:  # WEBP or others configured
-            save_params = {
-                "quality": 90,
-                "method": 6,  # Best compression
+                "compress_level": 6,
             }
 
-        img_copy.save(out, format=fmt, **save_params)
+        img_copy.save(out, format=expected_format, **save_params)
 
         processed_bytes = out.getvalue()
-        ext = settings.ext_by_format.get(fmt, ".jpg")
 
         logger.info(
             "image_validated_and_processed",
-            format=fmt,
+            format=expected_format,
+            extension=extension,
             original_size_kb=len(file_bytes) / 1024,
             processed_size_kb=len(processed_bytes) / 1024,
             compression_ratio=f"{(1 - len(processed_bytes) / len(file_bytes)) * 100:.1f}%",
             dimensions=f"{img_copy.width}x{img_copy.height}",
         )
 
-        return processed_bytes, ext
+        return processed_bytes
 
     @classmethod
     def check_nsfw_content(cls, image_bytes: bytes) -> Tuple[float, bool]:
@@ -208,15 +207,6 @@ class ImageValidator:
         Run NSFW detection on processed image bytes
 
         Returns: (score, check_performed)
-        - score: 0.0-1.0 (higher = more NSFW)
-        - check_performed: True if check ran successfully
-
-        Behavior:
-        - If NSFW disabled: returns (0.0, False)
-        - If NSFW unavailable and fail_closed: returns (1.0, False) - blocks upload
-        - If NSFW unavailable and not fail_closed: returns (0.0, False) - allows upload
-        - If check succeeds: returns (actual_score, True)
-        - If check fails: same as unavailable
         """
         if not settings.nsfw_enabled:
             return (0.0, False)
@@ -247,7 +237,6 @@ class ImageValidator:
         except Exception as e:
             logger.error("nsfw_check_execution_failed", error=str(e), exc_info=True)
 
-            # On error, use fail_closed setting
             if settings.nsfw_fail_closed:
                 logger.warning("nsfw_check_failed_blocking_upload")
                 return (1.0, False)

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, status,Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, Form
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from minio import Minio
@@ -94,9 +94,15 @@ async def health_check():
 async def upload_image(
     file: UploadFile = File(...),
     company_id: str = Form(...),
+    extension: str = Form(...),
 ):
     """
     Upload an image to MinIO with validation and NSFW detection
+    
+    Args:
+        file: Image file bytes
+        company_id: UUID of the company (used as filename base)
+        extension: File extension (e.g., ".jpg", ".png") - determined by backend
     
     Process:
     1. Validate and process image (resize, optimize)
@@ -106,6 +112,7 @@ async def upload_image(
     
     Returns: company_id, extension, url, size, nsfw_score
     """
+    
     spooled = file.file
 
     try:
@@ -115,15 +122,17 @@ async def upload_image(
         logger.info(
             "upload_started",
             company_id=company_id,
+            extension=extension,
             size_kb=len(file_bytes) / 1024,
             content_type=file.content_type
         )
 
         try:
-            processed_bytes, ext = await run_in_threadpool(
+            processed_bytes = await run_in_threadpool(
                 ImageValidator.validate_and_process_image,
                 file_bytes,
-                file.content_type
+                file.content_type,
+                extension
             )
         except ValueError as e:
             logger.warning("image_validation_failed", error=str(e))
@@ -155,29 +164,9 @@ async def upload_image(
                     detail="Content moderation service unavailable. Please try again later."
                 )
 
-        # Step 4: Delete old image if exists (different extension)
-        for old_ext in [".jpg", ".png"]:
-            if old_ext != ext:
-                old_object_name = f"{company_id}{old_ext}"
-                try:
-                    await run_in_threadpool(
-                        minio_client.remove_object,
-                        settings.minio_bucket,
-                        old_object_name
-                    )
-                    logger.info("old_image_deleted", object_name=old_object_name)
-                except:
-                    pass  # Old image doesn't exist, that's fine
-
-        # Step 5: Upload to MinIO
-        object_name = f"{company_id}{ext}"
+        object_name = f"{company_id}{extension}"
         
-        # Determine content type from extension
-        content_type_map = {
-            ".jpg": "image/jpeg",
-            ".png": "image/png"
-        }
-        upload_content_type = content_type_map.get(ext, "application/octet-stream")
+        upload_content_type = settings.content_type_map.get(extension, "application/octet-stream")
         
         from io import BytesIO
         upload_stream = BytesIO(processed_bytes)
@@ -194,7 +183,7 @@ async def upload_image(
         logger.info(
             "upload_success",
             company_id=company_id,
-            extension=ext,
+            extension=extension,
             size=len(processed_bytes),
             object_name=object_name,
             nsfw_score=nsfw_score,
@@ -203,8 +192,8 @@ async def upload_image(
 
         return {
             "image_id": company_id,
-            "extension": ext,  # Backend stores this
-            "url": f"/images/{company_id}{ext}",
+            "extension": extension,
+            "url": f"/images/{company_id}{extension}",
             "size": len(processed_bytes),
             "nsfw_score": nsfw_score if check_performed else None,
             "nsfw_checked": check_performed
@@ -231,16 +220,10 @@ async def get_image(filename: str):
     Stream an image from MinIO using full filename (company_id + extension)
     
     Backend provides complete filename: {company_id}.jpg or {company_id}.png
-    No guessing needed - just use the filename directly
-    
-    Examples:
-        /images/550e8400-e29b-41d4-a716-446655440001.jpg
-        /images/abc-123.png
     """
-    object_name = filename  # Use filename directly from URL
+    object_name = filename
     
     try:
-        # Check if exists
         try:
             stat = await run_in_threadpool(
                 minio_client.stat_object, settings.minio_bucket, object_name
@@ -255,7 +238,6 @@ async def get_image(filename: str):
                 )
             raise
 
-        # Stream the object
         obj = await run_in_threadpool(
             minio_client.get_object, settings.minio_bucket, object_name
         )
@@ -310,13 +292,10 @@ async def get_image(filename: str):
 async def delete_image(filename: str):
     """
     Delete an image from MinIO using full filename (company_id + extension)
-    
-    Backend provides complete filename when calling this endpoint
     """
     object_name = filename
     
     try:
-        # Check if exists first
         try:
             await run_in_threadpool(
                 minio_client.stat_object,
@@ -331,7 +310,6 @@ async def delete_image(filename: str):
                 )
             raise
         
-        # Delete the object
         await run_in_threadpool(
             minio_client.remove_object, settings.minio_bucket, object_name
         )

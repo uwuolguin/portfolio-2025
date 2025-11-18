@@ -68,7 +68,6 @@ class Settings(BaseSettings):
         le=20_000,
     )
 
-    # These will be loaded from JSON in .env
     allowed_types: Set[str] = Field(
         default={"image/jpeg", "image/png"},
         description="Allowed MIME types for upload",
@@ -83,6 +82,11 @@ class Settings(BaseSettings):
         default_factory=lambda: {"JPEG": ".jpg", "PNG": ".png"},
         description="File extension mapping for each image format",
     )
+    content_type_map: Dict[str, str] = Field(
+        default_factory=lambda: {".jpg": "image/jpeg",".jpeg": "image/jpeg",".png": "image/png"},
+        description="image format mapping for each File extension",
+    )
+
 
     # =========================================================================
     # NSFW Settings
