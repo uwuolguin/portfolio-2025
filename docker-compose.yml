@@ -6,16 +6,16 @@ services:
     image: postgres:15-alpine
     container_name: portfolio-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-portfolio}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - portfolio-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 60s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
@@ -29,7 +29,7 @@ services:
       - portfolio-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 60s
+      interval: 10s
       timeout: 3s
       retries: 5
 
@@ -41,15 +41,15 @@ services:
     container_name: portfolio-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
     networks:
       - portfolio-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 60s
+      interval: 10s
       timeout: 5s
       retries: 5
 
@@ -61,20 +61,6 @@ services:
       context: ./image-service
       dockerfile: Dockerfile
     container_name: portfolio-image-service
-    environment:
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_BUCKET: images
-      MINIO_SECURE: "false"
-      MAX_FILE_SIZE: 10000000
-      
-      NSFW_ENABLED: ${NSFW_ENABLED:-true}
-      NSFW_THRESHOLD: ${NSFW_THRESHOLD:-0.75}
-      NSFW_FAIL_CLOSED: ${NSFW_FAIL_CLOSED:-true}
-      
-      LOG_LEVEL: ${IMAGE_SERVICE_LOG_LEVEL:-INFO}
-      DEBUG: ${IMAGE_SERVICE_DEBUG:-false}
     depends_on:
       minio:
         condition: service_healthy
@@ -94,37 +80,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: portfolio-backend
-    environment:
-      # Database
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-portfolio}
-      - ALEMBIC_DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-portfolio}
-      
-      # Redis
-      - REDIS_URL=redis://redis:6379/0
-      
-      # Image Service
-      - IMAGE_SERVICE_URL=http://image-service:8080
-      
-      # JWT & Security
-      - SECRET_KEY=${SECRET_KEY}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=120
-      
-      # Email
-      - RESEND_API_KEY=${RESEND_API_KEY}
-      - ADMIN_EMAIL=${ADMIN_EMAIL}
-      - EMAIL_FROM=${EMAIL_FROM:-noreply@proveo.com}
-      - API_BASE_URL=${API_BASE_URL:-http://localhost}
-      - VERIFICATION_TOKEN_EMAIL_TIME=24
-      
-      # API Config
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://localhost:80}
-      - DEBUG=${DEBUG:-false}
-    
-    volumes:
-      - ./backend:/app
-    
     depends_on:
-    
       postgres:
         condition: service_healthy
       redis:
@@ -135,7 +91,7 @@ services:
     networks:
       - portfolio-network
     
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   # ===========================
   # Reverse Proxy (Nginx)
@@ -162,7 +118,7 @@ services:
       retries: 5
 
 # ===========================
-# Volumes
+# Volumes (Persistent Data)
 # ===========================
 volumes:
   postgres_data:
