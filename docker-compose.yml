@@ -101,9 +101,6 @@ services:
       context: ./nginx
       dockerfile: Dockerfile
     container_name: portfolio-nginx
-    volumes:
-      - ./frontend/web-pages:/usr/share/nginx/html
-      - ./files:/usr/share/nginx/files
     ports:
       - "80:80"
     depends_on:

@@ -38,9 +38,6 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     # File uploads / Image processing
     # ------------------------------------------------------------------------
-    max_file_size: int = 10_000_000
-    allowed_file_types: List[str] = ["image/jpeg", "image/png"]
-    upload_directory: str = "/shared-files/pictures"
     content_type_map: Dict[str, str] = {
         "image/jpeg": ".jpg",
         "image/png": ".png",
