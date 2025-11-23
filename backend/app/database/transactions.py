@@ -744,21 +744,18 @@ class DB:
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
-        Hybrid search: Uses ILIKE for partial matching when query is present,
-        falls back to listing all when query is empty.
-        Filters by exact commune/product match.
+        Hybrid search:
+        - No query: list all (no search filter)
+        - Short query (< 4 chars): ILIKE '%q%' for predictable substring matching
+        - Long query (>= 4 chars): trigram similarity (pg_trgm % operator) for typo tolerance
         """
+        from typing import Any
         
-        if query:
-            base_query = """
-                SELECT company_id, company_name, company_description_es, company_description_en,
-                    address, company_email, product_name_es, product_name_en,
-                    phone, image_url, user_name, user_email, commune_name
-                FROM proveo.company_search
-                WHERE searchable_text ILIKE $1
-            """
-            params = [f"%{query.lower()}%"]
-        else:
+        search = (query or "").strip().lower()
+        
+        params: List[Any] = []
+        
+        if not search:
             base_query = """
                 SELECT company_id, company_name, company_description_es, company_description_en,
                     address, company_email, product_name_es, product_name_en,
@@ -766,23 +763,57 @@ class DB:
                 FROM proveo.company_search
                 WHERE 1=1
             """
-            params = []
-
+            order_clause = " ORDER BY company_name ASC"
+            
+        elif len(search) < 4:
+            base_query = """
+                SELECT company_id, company_name, company_description_es, company_description_en,
+                    address, company_email, product_name_es, product_name_en,
+                    phone, image_url, user_name, user_email, commune_name
+                FROM proveo.company_search
+                WHERE searchable_text ILIKE $1
+            """
+            params.append(f"%{search}%")
+            order_clause = " ORDER BY company_name ASC"
+            
+        else:
+            base_query = """
+                SELECT company_id, company_name, company_description_es, company_description_en,
+                    address, company_email, product_name_es, product_name_en,
+                    phone, image_url, user_name, user_email, commune_name,
+                    similarity(searchable_text, $1) AS score
+                FROM proveo.company_search
+                WHERE searchable_text % $1
+            """
+            params.append(search)
+            order_clause = " ORDER BY score DESC, company_name ASC"
+        
         if commune:
-            base_query += f" AND LOWER(commune_name) = LOWER(${len(params) + 1})"
+            param_index = len(params) + 1
+            base_query += f" AND LOWER(commune_name) = LOWER(${param_index})"
             params.append(commune)
         
         if product:
-            base_query += f" AND (LOWER(product_name_es) = LOWER(${len(params) + 1}) OR LOWER(product_name_en) = LOWER(${len(params) + 2}))"
+            idx1 = len(params) + 1
+            idx2 = len(params) + 2
+            base_query += (
+                f" AND (LOWER(product_name_es) = LOWER(${idx1}) "
+                f"OR LOWER(product_name_en) = LOWER(${idx2}))"
+            )
             params.extend([product, product])
-
-        base_query += f" ORDER BY company_name ASC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
+        
+        limit_idx = len(params) + 1
+        offset_idx = len(params) + 2
+        pagination_clause = f" LIMIT ${limit_idx} OFFSET ${offset_idx}"
         params.extend([limit, offset])
-
-        rows = await conn.fetch(base_query, *params)
-
-        return [
-            {
+        
+        sql = base_query + order_clause + pagination_clause
+        
+        rows = await conn.fetch(sql, *params)
+        
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            results.append({
                 "uuid": row["company_id"],
                 "name": row["company_name"],
                 "description": row[f"company_description_{lang}"],
@@ -792,9 +823,9 @@ class DB:
                 "commune_name": row["commune_name"],
                 "phone": row["phone"],
                 "img_url": row["image_url"]
-            }
-            for row in rows
-        ]
+            })
+        
+        return results
 
     @staticmethod
     @db_retry()

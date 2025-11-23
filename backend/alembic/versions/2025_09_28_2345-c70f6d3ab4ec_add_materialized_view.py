@@ -16,7 +16,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
-    op.execute("DROP MATERIALIZED VIEW IF EXISTS proveo.company_search CASCADE;")
+    op.execute("DROP MATERIALIZED VIEW IF EXISTS proveo.company_search;")
     op.execute("""
     CREATE MATERIALIZED VIEW proveo.company_search AS
     SELECT 
@@ -61,7 +61,6 @@ def upgrade() -> None:
     CREATE UNIQUE INDEX idx_company_search_unique_id 
     ON proveo.company_search (company_id);
     """)
-
 
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS proveo.idx_company_searchable_text;")
