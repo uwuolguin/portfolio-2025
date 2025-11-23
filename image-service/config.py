@@ -1,7 +1,7 @@
 from typing import Set, Dict
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -82,11 +82,15 @@ class Settings(BaseSettings):
         default_factory=lambda: {"JPEG": ".jpg", "PNG": ".png"},
         description="File extension mapping for each image format",
     )
-    content_type_map: Dict[str, str] = Field(
-        default_factory=lambda: {".jpg": "image/jpeg",".jpeg": "image/jpeg",".png": "image/png"},
-        description="image format mapping for each File extension",
-    )
 
+    content_type_map: Dict[str, str] = Field(
+        default_factory=lambda: {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+        },
+        description="Image content-type mapping for each file extension",
+    )
 
     # =========================================================================
     # NSFW Settings
@@ -126,11 +130,13 @@ class Settings(BaseSettings):
         description="Enable debug mode (disable in production!)",
     )
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        env_prefix = ""
+    # Pydantic-settings v2 style config
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        env_prefix="",
+    )
 
 
 settings = Settings()

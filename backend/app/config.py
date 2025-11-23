@@ -1,8 +1,16 @@
-from pydantic_settings import BaseSettings
 from typing import Optional, List, Dict
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
+
     # ------------------------------------------------------------------------
     # Database
     # ------------------------------------------------------------------------
@@ -38,20 +46,22 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     # File uploads / Image processing
     # ------------------------------------------------------------------------
-    content_type_map: Dict[str, str] = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-    }
+    content_type_map: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+        }
+    )
 
     # ------------------------------------------------------------------------
     # Image Service / HTTP client
     # ------------------------------------------------------------------------
-    image_service_url: str = "http://image-service:8080"  
-    request_timeout: float = 30.0                         
-    connection_timeout: float = 5.0                       
-    max_retries: int = 3                                 
-    max_connections: int = 100                            
-    max_keepalive_connections: int = 20                   
+    image_service_url: str = "http://image-service:8080"
+    request_timeout: float = 30.0
+    connection_timeout: float = 5.0
+    max_retries: int = 3
+    max_connections: int = 100
+    max_keepalive_connections: int = 20
 
     # ------------------------------------------------------------------------
     # API
@@ -59,7 +69,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     project_name: str = "Proveo API"
     debug: bool = True
-    allowed_origins: List[str] = ["http://localhost", "http://localhost:80"]
+    allowed_origins: List[str] = Field(
+        default_factory=lambda: ["http://localhost", "http://localhost:80"]
+    )
 
     # ------------------------------------------------------------------------
     # Database monitoring / Retry
@@ -79,9 +91,6 @@ class Settings(BaseSettings):
     resend_api_key: str
     email_from: str = "noreply@proveo.com"
     api_base_url: str = "http://localhost"
-
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()
