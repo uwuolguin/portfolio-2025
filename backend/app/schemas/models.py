@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey,Boolean
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey,Boolean,UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -38,7 +38,10 @@ class Commune(Base):
 
 class Company(Base):
     __tablename__ = "companies"
-    __table_args__ = {"schema": "proveo"}
+    __table_args__ = (
+        UniqueConstraint("user_uuid", name="uq_companies_user_uuid"),
+        {"schema": "proveo"},
+    )
     
     uuid = Column(UUID(as_uuid=True), primary_key=True)
     user_uuid = Column(UUID(as_uuid=True), ForeignKey("proveo.users.uuid"), nullable=False)

@@ -18,18 +18,19 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+
 def upgrade() -> None:
-    op.add_column('companies',
+    op.add_column(
+        'companies',
+        sa.Column('image_extension', sa.String(10), nullable=False),
+        schema='proveo'
+    )
+    op.add_column(
+        'companies_deleted',
         sa.Column('image_extension', sa.String(10), nullable=False),
         schema='proveo'
     )
     
-    op.add_column('companies_deleted',
-        sa.Column('image_extension', sa.String(10), nullable=False),
-        schema='proveo'
-    )
-
-
-def upgrade() -> None:
+def downgrade() -> None:
     op.drop_column('companies', 'image_extension', schema='proveo')
     op.drop_column('companies_deleted', 'image_extension', schema='proveo')

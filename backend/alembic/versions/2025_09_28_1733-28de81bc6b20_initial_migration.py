@@ -21,7 +21,7 @@ def upgrade() -> None:
 
     op.create_table(
         'communes',
-        sa.Column('uuid', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('uuid', sa.UUID(), nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.PrimaryKeyConstraint('uuid'),
@@ -60,7 +60,7 @@ def upgrade() -> None:
 
     op.create_table(
         'products',
-        sa.Column('uuid', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('uuid', sa.UUID(), nullable=False),
         sa.Column('name_es', sa.String(length=100), nullable=False),
         sa.Column('name_en', sa.String(length=100), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -81,7 +81,7 @@ def upgrade() -> None:
 
     op.create_table(
         'users',
-        sa.Column('uuid', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('uuid', sa.UUID(), nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False),
         sa.Column('email', sa.String(length=100), nullable=False),
         sa.Column('hashed_password', sa.Text(), nullable=False),
@@ -105,7 +105,7 @@ def upgrade() -> None:
 
     op.create_table(
         'companies',
-        sa.Column('uuid', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('uuid', sa.UUID(), nullable=False),
         sa.Column('user_uuid', sa.UUID(), nullable=False),
         sa.Column('product_uuid', sa.UUID(), nullable=False),
         sa.Column('commune_uuid', sa.UUID(), nullable=False),
