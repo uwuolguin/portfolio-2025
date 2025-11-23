@@ -753,8 +753,7 @@ class DB:
             base_query = """
                 SELECT company_id, company_name, company_description_es, company_description_en,
                     address, company_email, product_name_es, product_name_en,
-                    phone, image_url, user_name, user_email, commune_name,
-                    1.0 AS rank
+                    phone, image_url, user_name, user_email, commune_name
                 FROM proveo.company_search
                 WHERE searchable_text ILIKE $1
             """
@@ -763,8 +762,7 @@ class DB:
             base_query = """
                 SELECT company_id, company_name, company_description_es, company_description_en,
                     address, company_email, product_name_es, product_name_en,
-                    phone, image_url, user_name, user_email, commune_name,
-                    1.0 AS rank
+                    phone, image_url, user_name, user_email, commune_name
                 FROM proveo.company_search
                 WHERE 1=1
             """
@@ -792,7 +790,6 @@ class DB:
                 "email": row["company_email"],
                 "product_name": row[f"product_name_{lang}"],
                 "commune_name": row["commune_name"],
-                "relevance_score": float(row["rank"]),
                 "phone": row["phone"],
                 "img_url": row["image_url"]
             }
