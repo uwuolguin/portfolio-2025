@@ -104,8 +104,3 @@ class RedisClient:
 
 
 redis_client = RedisClient()
-
-
-async def get_redis() -> RedisClient:
-    """Dependency to get Redis client"""
-    return redis_client

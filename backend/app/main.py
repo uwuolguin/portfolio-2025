@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status, Depends
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 import structlog
 import traceback
@@ -7,7 +7,6 @@ import traceback
 from app.config import settings
 from app.database.connection import init_db_pools, close_db_pools
 from app.redis.redis_client import redis_client
-from app.redis.rate_limit import get_rate_limiter
 from app.middleware.cors import setup_cors
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.security import (
