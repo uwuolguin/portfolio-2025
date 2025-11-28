@@ -111,10 +111,8 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         real_ip = request.headers.get("X-Real-IP", client_ip)
         user_agent = request.headers.get("user-agent", "unknown")
 
-        # Extract user_id if authenticated
         user_id = self._extract_user_id(request)
 
-        # Bind context that will be automatically added to ALL logs in this request
         bind_contextvars(
             correlation_id=correlation_id,
             client_ip=client_ip,
@@ -126,7 +124,6 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
         start_time = time.time()
 
-        # Log request start - context fields added automatically
         logger.info(
             "request_started",
             query_params=str(request.query_params) if request.query_params else None,
@@ -139,14 +136,12 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
         duration = time.time() - start_time
 
-        # Determine log level based on status code
         log_level = "info"
         if response.status_code >= 500:
             log_level = "error"
         elif response.status_code >= 400:
             log_level = "warning"
 
-        # Log response - context fields added automatically
         getattr(logger, log_level)(
             "request_completed",
             status_code=response.status_code,
