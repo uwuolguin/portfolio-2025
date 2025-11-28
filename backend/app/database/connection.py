@@ -4,7 +4,6 @@ import structlog
 import ssl
 import logging
 from typing import AsyncGenerator, Optional
-from contextlib import asynccontextmanager
 from app.config import settings
 
 logging.basicConfig(
@@ -93,8 +92,7 @@ async def init_db_pools():
 async def close_db_pools():
     await pool_manager.close_pools()
 
-@asynccontextmanager
-async def get_db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
+async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     if not pool_manager.write_pool:
         raise RuntimeError("Database pool not initialized")
     
@@ -104,7 +102,3 @@ async def get_db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
         except Exception as e:
             logger.error("database_connection_error", error=str(e), exc_info=True)
             raise
-
-async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
-    async with get_db_connection() as conn:
-        yield conn

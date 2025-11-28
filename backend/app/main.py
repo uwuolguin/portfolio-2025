@@ -22,11 +22,9 @@ async def lifespan(app: FastAPI):
     logger.info("application_startup_begin")
 
     try:
-        # Initialize database pools
         await init_db_pools()
         logger.info("database_pools_initialized")
 
-        # Connect to Redis
         await redis_client.connect()
         logger.info("application_startup_complete")
 
@@ -39,11 +37,9 @@ async def lifespan(app: FastAPI):
     logger.info("application_shutdown_begin")
 
     try:
-        # Close database pools
         await close_db_pools()
         logger.info("database_pools_closed")
 
-        # Disconnect from Redis
         await redis_client.disconnect()
         logger.info("redis_disconnected")
 
@@ -126,24 +122,21 @@ async def global_rate_limit_middleware(request: Request, call_next):
     Apply global rate limiting to all API routes
     Skip for health checks and static files
     """
-    # Skip rate limiting for these paths
     if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
         return await call_next(request)
     
-    # Skip rate limiting for static files
     if request.url.path.startswith("/files/"):
         return await call_next(request)
     
-    # Apply rate limiting to API routes
     if request.url.path.startswith("/api/"):
         try:
             from app.redis.rate_limit import enforce_rate_limit
             await enforce_rate_limit(
                 request=request,
                 route_name="global",
-                ip_limit=2,           # 2 requests per second per IP
-                global_limit=20,      # 20 requests per second globally
-                window_seconds=1      # 1 second window
+                ip_limit=2,      
+                global_limit=20,      
+                window_seconds=1
             )
         except Exception as e:
             logger.warning("rate_limit_check_failed", error=str(e))
