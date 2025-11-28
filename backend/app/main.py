@@ -113,7 +113,6 @@ async def internal_server_error_handler(request: Request, exc):
     )
 
 
-# Middleware order (class-based)
 app.add_middleware(HTTPSRedirectMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 setup_cors(app)
