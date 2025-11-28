@@ -39,7 +39,7 @@ logger = structlog.get_logger(__name__)
 
 class LoggingMiddleware(BaseHTTPMiddleware):
     """
-    Enhanced logging with security-focused information and contextvars
+    Enhanced logging with security-focused information and contextvars.
 
     All logs within a request automatically include:
     - correlation_id
@@ -56,22 +56,43 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         "cookie",
         "x-csrf-token",
         "x-api-key",
+        "set-cookie",
     }
 
     @staticmethod
+    def _sanitize_headers(headers: dict) -> dict:
+        """
+        Redact sensitive headers before logging.
+
+        - Sensitive header names are matched case-insensitively.
+        - Values for those headers are replaced with "***REDACTED***".
+        """
+        sanitized = {}
+
+        for key, value in headers.items():
+            key_lower = key.lower()
+
+            if key_lower in LoggingMiddleware.SENSITIVE_HEADERS:
+                sanitized[key] = "***REDACTED***"
+            else:
+                sanitized[key] = value
+
+        return sanitized
+
+    @staticmethod
     def _is_suspicious_path(path: str) -> bool:
-        """Detect common attack patterns in URL paths"""
+        """Detect common attack patterns in URL paths."""
         suspicious_patterns = [
             "..", "~", "/etc/", "/proc/", "/sys/",
             "eval(", "exec(", "system(", "<script",
-            "SELECT", "UNION", "DROP", "INSERT",
+            "select", "union", "drop", "insert",
             ".php", ".asp", ".jsp", ".cgi",
             "wp-admin", "wp-login", "phpmyadmin",
             "xmlrpc", ".env", ".git",
         ]
 
         path_lower = path.lower()
-        return any(pattern.lower() in path_lower for pattern in suspicious_patterns)
+        return any(pattern in path_lower for pattern in suspicious_patterns)
 
     @staticmethod
     def _extract_user_id(request: Request) -> str | None:
@@ -122,6 +143,8 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             user_id=user_id,
         )
 
+        sanitized_headers = self._sanitize_headers(dict(request.headers))
+
         start_time = time.time()
 
         logger.info(
@@ -130,17 +153,19 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             user_agent=user_agent,
             referer=request.headers.get("referer"),
             content_type=request.headers.get("content-type"),
+            headers=sanitized_headers,
         )
 
         response = await call_next(request)
 
         duration = time.time() - start_time
 
-        log_level = "info"
         if response.status_code >= 500:
             log_level = "error"
         elif response.status_code >= 400:
             log_level = "warning"
+        else:
+            log_level = "info"
 
         getattr(logger, log_level)(
             "request_completed",
