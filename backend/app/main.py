@@ -1,21 +1,25 @@
 from contextlib import asynccontextmanager
+import traceback
+
+import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
-import structlog
-import traceback
 
 from app.config import settings
 from app.database.connection import init_db_pools, close_db_pools
 from app.redis.redis_client import redis_client
 from app.middleware.cors import setup_cors
-from app.middleware.logging import LoggingMiddleware
+from app.middleware.logging import LoggingMiddleware, setup_logging
 from app.middleware.security import (
     SecurityHeadersMiddleware,
     HTTPSRedirectMiddleware,
 )
 from app.routers import users, products, communes, companies, health
 
+setup_logging()
+
 logger = structlog.get_logger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,6 +61,7 @@ app = FastAPI(
     redoc_url="/redoc" if settings.debug else None,
 )
 
+
 @app.middleware("http")
 async def global_exception_handler(request: Request, call_next):
     """
@@ -74,7 +79,7 @@ async def global_exception_handler(request: Request, call_next):
             traceback=traceback.format_exc(),
         )
         return JSONResponse(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Unexpected internal server error"},
         )
 
@@ -108,13 +113,12 @@ async def internal_server_error_handler(request: Request, exc):
     )
 
 
+# Middleware order (class-based)
 app.add_middleware(HTTPSRedirectMiddleware)
-
 app.add_middleware(SecurityHeadersMiddleware)
-
 setup_cors(app)
-
 app.add_middleware(LoggingMiddleware)
+
 
 @app.middleware("http")
 async def global_rate_limit_middleware(request: Request, call_next):
@@ -124,23 +128,24 @@ async def global_rate_limit_middleware(request: Request, call_next):
     """
     if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
         return await call_next(request)
-    
+
     if request.url.path.startswith("/files/"):
         return await call_next(request)
-    
+
     if request.url.path.startswith("/api/"):
         try:
             from app.redis.rate_limit import enforce_rate_limit
+
             await enforce_rate_limit(
                 request=request,
                 route_name="global",
-                ip_limit=2,      
-                global_limit=20,      
-                window_seconds=1
+                ip_limit=2,
+                global_limit=20,
+                window_seconds=1,
             )
         except Exception as e:
             logger.warning("rate_limit_check_failed", error=str(e))
-    
+
     return await call_next(request)
 
 

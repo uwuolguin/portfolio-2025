@@ -1,112 +1,163 @@
-from fastapi import Request
+import sys
 import time
+import logging
 import structlog
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from structlog.contextvars import bind_contextvars, clear_contextvars
+
+
+def setup_logging() -> None:
+    """
+    Configure stdlib logging + structlog for the whole process.
+    Call this once at startup (e.g. in main.py), before creating loggers.
+    """
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=logging.DEBUG,
+    )
+
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
 
 logger = structlog.get_logger(__name__)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
     """
-    Enhanced logging with security-focused information
+    Enhanced logging with security-focused information and contextvars
+
+    All logs within a request automatically include:
+    - correlation_id
+    - client_ip
+    - method
+    - path
+    - user_id (if authenticated)
     """
-    
-    # Paths to exclude from logging (reduce noise)
+
     EXCLUDE_PATHS = {"/health", "/favicon.ico", "/"}
-    
-    # Sensitive headers to redact from logs
+
     SENSITIVE_HEADERS = {
         "authorization",
         "cookie",
         "x-csrf-token",
         "x-api-key",
     }
-    
+
     @staticmethod
     def _is_suspicious_path(path: str) -> bool:
-        """
-        Detect common attack patterns in URL paths
-        """
+        """Detect common attack patterns in URL paths"""
         suspicious_patterns = [
             "..", "~", "/etc/", "/proc/", "/sys/",
             "eval(", "exec(", "system(", "<script",
             "SELECT", "UNION", "DROP", "INSERT",
             ".php", ".asp", ".jsp", ".cgi",
             "wp-admin", "wp-login", "phpmyadmin",
-            "xmlrpc", ".env", ".git"
+            "xmlrpc", ".env", ".git",
         ]
-        
+
         path_lower = path.lower()
         return any(pattern.lower() in path_lower for pattern in suspicious_patterns)
-    
+
+    @staticmethod
+    def _extract_user_id(request: Request) -> str | None:
+        """
+        Extract user_id from JWT cookie if present.
+        """
+        try:
+            token = request.cookies.get("access_token")
+            if not token:
+                return None
+
+            from app.auth.jwt import decode_access_token
+            payload = decode_access_token(token)
+
+            if payload and "sub" in payload:
+                return payload["sub"]
+
+            return None
+        except Exception:
+            return None
+
     async def dispatch(self, request: Request, call_next):
-        # Skip logging for excluded paths
         if request.url.path in self.EXCLUDE_PATHS:
             return await call_next(request)
-        
-        # Generate correlation ID
+
+        clear_contextvars()
+
         correlation_id = request.headers.get(
             "X-Correlation-ID",
-            f"req_{int(time.time() * 1000)}"
+            f"req_{int(time.time() * 1000)}",
         )
-        
-        # Get client information
+
         client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         if not client_ip:
             client_ip = request.client.host if request.client else "unknown"
-        
+
         real_ip = request.headers.get("X-Real-IP", client_ip)
         user_agent = request.headers.get("user-agent", "unknown")
-        
-        start_time = time.time()
-        
-        # Log request start with security context
-        logger.info(
-            "request_started",
+
+        # Extract user_id if authenticated
+        user_id = self._extract_user_id(request)
+
+        # Bind context that will be automatically added to ALL logs in this request
+        bind_contextvars(
             correlation_id=correlation_id,
-            method=request.method,
-            path=request.url.path,
-            query_params=str(request.query_params) if request.query_params else None,
             client_ip=client_ip,
             real_ip=real_ip,
+            method=request.method,
+            path=request.url.path,
+            user_id=user_id,
+        )
+
+        start_time = time.time()
+
+        # Log request start - context fields added automatically
+        logger.info(
+            "request_started",
+            query_params=str(request.query_params) if request.query_params else None,
             user_agent=user_agent,
             referer=request.headers.get("referer"),
             content_type=request.headers.get("content-type"),
         )
-        
-        # Process request
+
         response = await call_next(request)
-        
-        # Calculate duration
+
         duration = time.time() - start_time
-        
+
         # Determine log level based on status code
         log_level = "info"
         if response.status_code >= 500:
             log_level = "error"
         elif response.status_code >= 400:
             log_level = "warning"
-        
-        # Log response with security indicators
+
+        # Log response - context fields added automatically
         getattr(logger, log_level)(
             "request_completed",
-            correlation_id=correlation_id,
-            method=request.method,
-            path=request.url.path,
             status_code=response.status_code,
             duration_ms=f"{duration * 1000:.2f}",
-            client_ip=client_ip,
-            real_ip=real_ip,
             response_size=response.headers.get("content-length", "unknown"),
-            
-            # Security indicators
             suspicious_path=self._is_suspicious_path(request.url.path),
-            unusual_method=request.method not in ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+            unusual_method=request.method
+            not in ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
             high_duration=duration > 5.0,
         )
-        
-        # Set correlation ID in response
+
         response.headers["X-Correlation-ID"] = correlation_id
-        
+
         return response
-    
