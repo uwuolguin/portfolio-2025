@@ -12,13 +12,14 @@ openssl req -new -x509 -days 3650 -nodes \
 chown postgres:postgres "$SSL_DIR/server.crt" "$SSL_DIR/server.key"
 chmod 600 "$SSL_DIR/server.key"
 
+echo "password_encryption = 'scram-sha-256'" >> "$PGDATA/postgresql.conf"
 echo "ssl = on" >> "$PGDATA/postgresql.conf"
 echo "ssl_cert_file = 'ssl/server.crt'" >> "$PGDATA/postgresql.conf"
 echo "ssl_key_file  = 'ssl/server.key'" >> "$PGDATA/postgresql.conf"
 
 echo "# FORCE TLS ONLY" >> "$PGDATA/pg_hba.conf"
-echo "hostssl all all 0.0.0.0/0 md5" >> "$PGDATA/pg_hba.conf"
-echo "hostssl all all ::0/0 md5"     >> "$PGDATA/pg_hba.conf"
+echo "hostssl all all 0.0.0.0/0 scram-sha-256" >> "$PGDATA/pg_hba.conf"
+echo "hostssl all all ::0/0 scram-sha-256"     >> "$PGDATA/pg_hba.conf"
 
 sed -i '/^host /d' "$PGDATA/pg_hba.conf"
 
