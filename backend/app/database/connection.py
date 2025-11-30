@@ -12,7 +12,7 @@ logger = structlog.get_logger(__name__)
 class DatabasePoolManager:
     write_pool: asyncpg.Pool | None = None
 
-    async def _create_ssl_context(self) -> Optional[ssl.SSLContext]:
+    def _create_ssl_context(self) -> Optional[ssl.SSLContext]:
         if settings.db_ssl_mode != "require":
             return None
 
@@ -22,8 +22,7 @@ class DatabasePoolManager:
         return ssl_context
 
     async def init_pools(self) -> None:
-        ssl_context = await self._create_ssl_context()
-
+        ssl_context = self._create_ssl_context()
         try:
             self.write_pool = await asyncpg.create_pool(
                 dsn=settings.alembic_database_url,
