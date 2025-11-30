@@ -10,7 +10,7 @@ from app.config import settings
 import uuid
 from app.auth.csrf import generate_csrf_token
 from datetime import datetime,timedelta,timezone
-from app.utils.file_handler import FileHandler
+from app.services.file_handler import FileHandler
 
 logger = structlog.get_logger(__name__)
 

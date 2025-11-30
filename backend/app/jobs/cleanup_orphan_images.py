@@ -11,7 +11,7 @@ import asyncpg
 import uuid
 from pathlib import Path
 from app.config import settings
-from app.utils.file_handler import FileHandler
+from app.services.file_handler import FileHandler
 import structlog
 
 logger = structlog.get_logger(__name__)

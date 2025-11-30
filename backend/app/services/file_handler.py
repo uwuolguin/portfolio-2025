@@ -2,7 +2,7 @@ import structlog
 from typing import Tuple
 from fastapi import UploadFile, HTTPException, status
 from app.config import settings
-from app.utils.image_service_client import image_service_client
+from app.services.image_service_client import image_service_client
 
 logger = structlog.get_logger(__name__)
 

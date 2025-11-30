@@ -10,7 +10,7 @@ from app.schemas.users import UserSignup, UserResponse, UserLogin, LoginResponse
 from app.auth.jwt import verify_password, create_access_token
 from app.auth.csrf import generate_csrf_token
 from app.auth.dependencies import get_current_user, verify_csrf, require_admin
-from backend.app.utils.email_service import email_service
+from backend.app.services.email_service import email_service
 from app.templates.email_verification import ( 
     verification_success_page,
     verification_error_page,
