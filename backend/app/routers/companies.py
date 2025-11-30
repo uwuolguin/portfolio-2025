@@ -14,7 +14,7 @@ from app.database.connection import get_db
 from app.database.transactions import DB
 from app.auth.dependencies import require_verified_email, require_admin, verify_csrf, get_current_user
 from app.schemas.companies import CompanyResponse, CompanySearchResponse
-from app.utils.translator import translate_field
+from backend.app.utils.translation_service import translate_field
 from app.utils.file_handler import FileHandler
 import structlog
 

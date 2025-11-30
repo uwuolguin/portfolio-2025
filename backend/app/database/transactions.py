@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional, List, Dict, Any
 from enum import Enum
 from uuid import UUID
-from app.utils.db_retry import db_retry
+from backend.app.database.db_retry import db_retry
 from app.auth.jwt import get_password_hash
 from app.config import settings
 import uuid
