@@ -34,6 +34,7 @@ def upgrade() -> None:
         schema='proveo'
     )
     op.create_index('idx_users_verification_token', 'users', ['verification_token'], schema='proveo')
+    
     op.add_column('users_deleted',
         sa.Column('role', sa.String(20), nullable=False, server_default='user'),
         schema='proveo'
