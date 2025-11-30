@@ -8,7 +8,6 @@ import tempfile
 from app.config import settings
 from app.database.connection import pool_manager, get_db
 from app.redis.redis_client import redis_client
-from app.services.file_handler import FileHandler
 from app.auth.dependencies import require_admin
 
 logger = structlog.get_logger(__name__)

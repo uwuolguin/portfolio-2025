@@ -10,7 +10,7 @@ from app.config import settings
 import uuid
 from app.auth.csrf import generate_csrf_token
 from datetime import datetime,timedelta,timezone
-from app.services.file_handler import FileHandler
+from app.services.image_service_client import image_service_client
 
 logger = structlog.get_logger(__name__)
 
@@ -181,7 +181,7 @@ class DB:
                     image_ext = company.get("image_extension")  # e.g., ".jpg"
                     
                     if image_id and image_ext:
-                        success = await FileHandler.delete_image(image_id, image_ext)
+                        success = await image_service_client.delete_image(f"{image_id}{image_ext}")
                         if success:
                             deleted_images.append(f"{image_id}{image_ext}")
                             logger.info(
@@ -297,7 +297,7 @@ class DB:
                     image_ext = company.get("image_extension")  # e.g., ".jpg"
                     
                     if image_id and image_ext:
-                        success = await FileHandler.delete_image(image_id, image_ext)
+                        success = await image_service_client.delete_image(f"{image_id}{image_ext}")
                         if success:
                             deleted_images.append(f"{image_id}{image_ext}")
                             logger.info(
@@ -853,7 +853,7 @@ class DB:
             image_ext = company.get("image_extension")  # e.g., ".jpg"
             
             if image_id and image_ext:
-                success = await FileHandler.delete_image(image_id, image_ext)
+                success = await image_service_client.delete_image(f"{image_id}{image_ext}")
                 if success:
                     logger.info(
                         "admin_deleted_company_image",

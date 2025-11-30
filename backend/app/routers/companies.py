@@ -1,7 +1,7 @@
 """
 Companies Router - Complete Implementation
 Handles all company CRUD operations with image management
-CORRECTED: Uses company_uuid for image storage
+Uses image_service_client directly (no file_handler wrapper)
 """
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, Query, Form
 from typing import List, Optional
@@ -14,8 +14,8 @@ from app.database.connection import get_db
 from app.database.transactions import DB
 from app.auth.dependencies import require_verified_email, require_admin, verify_csrf, get_current_user
 from app.schemas.companies import CompanyResponse, CompanySearchResponse
-from backend.app.services.translation_service import translate_field
-from app.services.file_handler import FileHandler
+from app.services.translation_service import translate_field
+from app.services.image_service_client import image_service_client, ImageServiceError
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -147,14 +147,59 @@ async def create_company(
         # Step 2: Generate company UUID BEFORE uploading image
         company_uuid_str = str(uuid.uuid4())
         
-        # Step 3: Upload image using company_id (validates, checks NSFW, uploads)
-        image_id, image_ext = await FileHandler.save_image(
-            file=image, 
-            company_id=company_uuid_str
-        )
+        # Step 3: Upload image using company_uuid as filename
+        try:
+            # Get extension from content type
+            image_ext = image_service_client.get_extension_from_content_type(image.content_type)
+            
+            # Read file bytes
+            file_bytes = await image.read()
+            await image.seek(0)
+            
+            logger.info(
+                "uploading_company_image",
+                company_uuid=company_uuid_str,
+                extension=image_ext,
+                size_kb=len(file_bytes) / 1024,
+                content_type=image.content_type
+            )
+            
+            # Upload to image service
+            result = await image_service_client.upload_image(
+                file_bytes=file_bytes,
+                filename=company_uuid_str,
+                content_type=image.content_type,
+                extension=image_ext,
+                user_id=str(user_uuid)
+            )
+            
+            image_id = result['image_id']
+            image_ext = result['extension']
+            
+            logger.info(
+                "image_uploaded_successfully",
+                company_uuid=company_uuid_str,
+                image_id=image_id,
+                extension=image_ext,
+                nsfw_score=result.get('nsfw_score'),
+                nsfw_checked=result.get('nsfw_checked')
+            )
+            
+        except ValueError as e:
+            logger.warning("image_validation_failed", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+        except ImageServiceError as e:
+            logger.error("image_upload_failed", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Image upload failed: {str(e)}"
+            )
         
         try:
-           
+            # Step 4: Create DB record with pre-generated UUID
             company = await DB.create_company(
                 conn=db,
                 user_uuid=user_uuid,
@@ -173,8 +218,9 @@ async def create_company(
             
             # Build response with full image URL
             response_data = dict(company)
-            response_data["image_url"] = FileHandler.get_image_url(
-                image_id,  # company_uuid
+            response_data["image_url"] = image_service_client.build_image_url(
+                image_id,
+                image_ext,
                 str(request.base_url).rstrip('/')
             )
             
@@ -189,7 +235,8 @@ async def create_company(
             
         except ValueError as ve:
             # Business rule violation (e.g., user already has company)
-            await FileHandler.delete_image(company_uuid_str)
+            # Cleanup uploaded image
+            await image_service_client.delete_image(f"{company_uuid_str}{image_ext}")
             logger.warning(
                 "company_creation_failed_business_rule",
                 user_uuid=str(user_uuid),
@@ -202,7 +249,7 @@ async def create_company(
             
         except Exception as db_error:
             # Database error - cleanup uploaded image
-            await FileHandler.delete_image(company_uuid_str)
+            await image_service_client.delete_image(f"{company_uuid_str}{image_ext}")
             logger.error(
                 "company_creation_failed_db_error",
                 user_uuid=str(user_uuid),
@@ -287,7 +334,7 @@ async def update_company(
         new_image_ext = None
         
         if image:
-            # Get company to verify ownership
+            # Get company to verify ownership and get old extension
             old_company = await DB.get_company_by_uuid(
                 conn=db, 
                 company_uuid=company_uuid
@@ -306,12 +353,52 @@ async def update_company(
                     detail="You can only update your own company"
                 )
             
-            # Upload new image using company_uuid
-            # Note: This automatically overwrites the old image since we use company_uuid
-            new_image_id, new_image_ext = await FileHandler.save_image(
-                file=image, 
-                company_id=str(company_uuid)
-            )
+            # Upload new image
+            try:
+                # Get extension from content type
+                new_image_ext = image_service_client.get_extension_from_content_type(image.content_type)
+                
+                # Read file bytes
+                file_bytes = await image.read()
+                await image.seek(0)
+                
+                logger.info(
+                    "uploading_updated_company_image",
+                    company_uuid=str(company_uuid),
+                    extension=new_image_ext,
+                    size_kb=len(file_bytes) / 1024
+                )
+                
+                # Upload to image service (overwrites if same extension)
+                result = await image_service_client.upload_image(
+                    file_bytes=file_bytes,
+                    filename=str(company_uuid),
+                    content_type=image.content_type,
+                    extension=new_image_ext,
+                    user_id=str(user_uuid)
+                )
+                
+                new_image_id = result['image_id']
+                new_image_ext = result['extension']
+                
+                logger.info(
+                    "updated_image_uploaded_successfully",
+                    company_uuid=str(company_uuid),
+                    new_extension=new_image_ext
+                )
+                
+            except ValueError as e:
+                logger.warning("image_validation_failed", error=str(e))
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e)
+                )
+            except ImageServiceError as e:
+                logger.error("image_upload_failed", error=str(e))
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Image upload failed: {str(e)}"
+                )
         
         try:
             # Step 3: Update company in database
@@ -333,8 +420,9 @@ async def update_company(
             
             # Build response with full URL
             response_data = dict(company)
-            response_data["image_url"] = FileHandler.get_image_url(
-                company["image_url"],  # company_uuid
+            response_data["image_url"] = image_service_client.build_image_url(
+                company["image_url"],
+                company["image_extension"],
                 str(request.base_url).rstrip('/')
             )
             
@@ -349,7 +437,7 @@ async def update_company(
         except PermissionError as pe:
             # User doesn't own this company
             if new_image_id:
-                await FileHandler.delete_image(str(company_uuid))
+                await image_service_client.delete_image(f"{company_uuid}{new_image_ext}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=str(pe)
@@ -358,7 +446,7 @@ async def update_company(
         except ValueError as ve:
             # Business rule violation
             if new_image_id:
-                await FileHandler.delete_image(str(company_uuid))
+                await image_service_client.delete_image(f"{company_uuid}{new_image_ext}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(ve)
@@ -367,7 +455,7 @@ async def update_company(
         except Exception as db_error:
             # Database error - cleanup new image if uploaded
             if new_image_id:
-                await FileHandler.delete_image(str(company_uuid))
+                await image_service_client.delete_image(f"{company_uuid}{new_image_ext}")
             logger.error(
                 "company_update_failed",
                 company_uuid=str(company_uuid),
@@ -410,7 +498,7 @@ async def delete_company(
             user_uuid=str(user_uuid)
         )
         
-        # Get company to verify ownership
+        # Get company to verify ownership and get image info
         company = await DB.get_company_by_uuid(
             conn=db, 
             company_uuid=company_uuid
@@ -428,7 +516,8 @@ async def delete_company(
                 detail="You can only delete your own company"
             )
         
-        image_id = company.get("image_url")  # This is company_uuid
+        image_id = company.get("image_url")
+        image_ext = company.get("image_extension")
         
         # Delete from database
         result = await DB.delete_company_by_uuid(
@@ -444,12 +533,12 @@ async def delete_company(
             )
         
         # Delete image from storage service
-        if image_id:
-            deleted = await FileHandler.delete_image(image_id)  # company_uuid
+        if image_id and image_ext:
+            deleted = await image_service_client.delete_image(f"{image_id}{image_ext}")
             logger.info(
                 "company_image_deleted",
                 company_uuid=str(company_uuid),
-                image_id=image_id,
+                image_filename=f"{image_id}{image_ext}",
                 deleted=deleted
             )
         
@@ -502,8 +591,9 @@ async def get_my_company(
         
         # Build response with full image URL
         response_data = dict(company)
-        response_data["image_url"] = FileHandler.get_image_url(
-            company["image_url"],  # company_uuid
+        response_data["image_url"] = image_service_client.build_image_url(
+            company["image_url"],
+            company["image_extension"],
             str(request.base_url).rstrip('/')
         )
         
@@ -555,8 +645,9 @@ async def admin_list_all_companies(
         response_companies = []
         for company in companies:
             company_data = dict(company)
-            company_data["image_url"] = FileHandler.get_image_url(
-                company["image_url"],  # company_uuid
+            company_data["image_url"] = image_service_client.build_image_url(
+                company["image_url"],
+                company["image_extension"],
                 base_url
             )
             response_companies.append(CompanyResponse(**company_data))
@@ -612,15 +703,16 @@ async def admin_delete_company(
             admin_email=current_user["email"]
         )
         
-        image_id = result.get("image_url")  # This is company_uuid
+        image_id = result.get("image_url")
+        image_ext = result.get("image_extension")
         
         # Delete image from storage service
-        if image_id:
-            deleted = await FileHandler.delete_image(image_id)  # company_uuid
+        if image_id and image_ext:
+            deleted = await image_service_client.delete_image(f"{image_id}{image_ext}")
             logger.info(
                 "admin_deleted_company_image",
                 company_uuid=str(company_uuid),
-                image_id=image_id,
+                image_filename=f"{image_id}{image_ext}",
                 deleted=deleted,
                 admin_email=current_user["email"]
             )

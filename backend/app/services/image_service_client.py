@@ -1,5 +1,6 @@
 """
-Image Service Client - Fixed to send extension explicitly
+Image Service Client - Complete with helper methods
+Handles all communication with the image storage microservice
 """
 import httpx
 import structlog
@@ -11,9 +12,8 @@ from tenacity import (
     retry_if_exception_type,
     before_sleep_log
 )
-from config import settings
+from app.config import settings
 import logging
-import os
 
 logger = structlog.get_logger(__name__)
 
@@ -112,7 +112,9 @@ class ImageServiceClient:
                 "image_id": "uuid",
                 "extension": ".jpg",
                 "url": "/images/uuid.jpg",
-                "size": 12345
+                "size": 12345,
+                "nsfw_score": 0.05,
+                "nsfw_checked": true
             }
         
         Raises:
@@ -213,6 +215,47 @@ class ImageServiceClient:
                         error=str(e),
                         exc_info=True)
             raise ImageServiceError(f"Delete failed: {str(e)}")
+
+    @staticmethod
+    def get_extension_from_content_type(content_type: str) -> str:
+        """
+        Map content type to file extension
+        
+        Args:
+            content_type: MIME type (e.g., "image/jpeg")
+        
+        Returns:
+            File extension (e.g., ".jpg")
+        
+        Raises:
+            ValueError: If content type is not supported
+        """
+        extension = settings.content_type_map.get(content_type)
+        
+        if not extension:
+            raise ValueError(
+                f"Unsupported image type: {content_type}. "
+                f"Allowed: {', '.join(settings.content_type_map.keys())}"
+            )
+        
+        return extension
+
+    @staticmethod
+    def build_image_url(image_id: str, extension: str, base_url: str) -> str:
+        """
+        Build public image URL
+        Nginx proxies /images/* to image-service
+        
+        Args:
+            image_id: Company UUID
+            extension: File extension (e.g., ".jpg")
+            base_url: Request base URL (e.g., "http://localhost")
+        
+        Returns:
+            Full image URL (e.g., "http://localhost/images/uuid.jpg")
+        """
+        base = base_url.rstrip('/')
+        return f"{base}/images/{image_id}{extension}"
 
 
 image_service_client = ImageServiceClient()
