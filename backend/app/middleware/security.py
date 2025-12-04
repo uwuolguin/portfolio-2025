@@ -71,7 +71,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     """
-    Force HTTPS in production
+    Force HTTPS in production.
+    If debug is False, this middleware ensures that requests are served over HTTPS.
+
+    Behavior:
+    - In development (settings.debug=True): passthrough, no redirect.
+    - If request is already HTTPS (request.url.scheme == "https"): passthrough.
+    - If behind a reverse proxy that sets X-Forwarded-Proto=https: passthrough.
+    - Otherwise: redirect to the same URL with scheme="https" using a 301.
     """
     
     async def dispatch(self, request: Request, call_next):
@@ -100,83 +107,3 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         )
         
         return RedirectResponse(url=str(https_url), status_code=301)
-
-    """
-    Basic rate limiting middleware
-    
-    WARNING: This is a simple in-memory implementation for development/testing.
-    For production with multiple workers/containers, use Redis-based rate limiting
-    (see app.redis.rate_limit.py for the proper implementation).
-    """
-    
-    def __init__(self, app, max_requests: int = 100, window_seconds: int = 60):
-        super().__init__(app)
-        self.max_requests = max_requests
-        self.window_seconds = window_seconds
-        self.request_counts = {}  # {client_ip: [(timestamp, count), ...]}
-        
-        logger.warning(
-            "rate_limit_middleware_initialized",
-            implementation="in-memory",
-            note="Use Redis-based rate limiting for production"
-        )
-    
-    async def dispatch(self, request: Request, call_next):
-        from time import time
-        
-        # Skip rate limiting for health checks and docs
-        if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
-            return await call_next(request)
-        
-        # Get client IP
-        client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        if not client_ip:
-            client_ip = request.client.host if request.client else "unknown"
-        
-        current_time = time()
-        
-        # Clean up old entries
-        if client_ip in self.request_counts:
-            self.request_counts[client_ip] = [
-                (ts, count) for ts, count in self.request_counts[client_ip]
-                if current_time - ts < self.window_seconds
-            ]
-        else:
-            self.request_counts[client_ip] = []
-        
-        # Count requests in current window
-        total_requests = sum(count for _, count in self.request_counts[client_ip])
-        
-        # Check if limit exceeded
-        if total_requests >= self.max_requests:
-            logger.warning(
-                "rate_limit_exceeded",
-                client_ip=client_ip,
-                path=request.url.path,
-                requests=total_requests,
-                window=self.window_seconds
-            )
-            return Response(
-                content='{"detail": "Too many requests. Please try again later."}',
-                status_code=429,
-                media_type="application/json",
-                headers={
-                    "Retry-After": str(self.window_seconds),
-                    "X-RateLimit-Limit": str(self.max_requests),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(int(current_time + self.window_seconds))
-                }
-            )
-        
-        # Record this request
-        self.request_counts[client_ip].append((current_time, 1))
-        
-        # Add rate limit headers to response
-        response = await call_next(request)
-        remaining = self.max_requests - total_requests - 1
-        
-        response.headers["X-RateLimit-Limit"] = str(self.max_requests)
-        response.headers["X-RateLimit-Remaining"] = str(max(0, remaining))
-        response.headers["X-RateLimit-Reset"] = str(int(current_time + self.window_seconds))
-        
-        return response

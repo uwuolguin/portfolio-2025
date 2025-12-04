@@ -1,5 +1,5 @@
 import time
-from fastapi import Request, HTTPException, status, Depends
+from fastapi import Request, HTTPException, status
 from app.redis.redis_client import redis_client
 import structlog
 
