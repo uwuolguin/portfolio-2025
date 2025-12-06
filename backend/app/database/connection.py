@@ -8,6 +8,8 @@ from app.config import settings
 
 logger = structlog.get_logger(__name__)
 
+logger.info(settings.alembic_database_url,
+            )
 
 class DatabasePoolManager:
     write_pool: asyncpg.Pool | None = None

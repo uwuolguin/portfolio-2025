@@ -1,25 +1,72 @@
+if i implement this #!/bin/bash
 set -e
 
+echo "Starting PostgreSQL SSL configuration..."
+
+sleep 2
+
 SSL_DIR="$PGDATA/ssl"
-mkdir -p "$SSL_DIR"
-chown postgres:postgres "$SSL_DIR"
-chmod 700 "$SSL_DIR"
-openssl req -new -x509 -days 3650 -nodes \
-  -text -out "$SSL_DIR/server.crt" \
-  -keyout "$SSL_DIR/server.key" \
-  -subj "/CN=postgres"
 
-chown postgres:postgres "$SSL_DIR/server.crt" "$SSL_DIR/server.key"
-chmod 600 "$SSL_DIR/server.key"
+if [ ! -f "$SSL_DIR/server.crt" ]; then
+    echo "Generating SSL certificates..."
+    mkdir -p "$SSL_DIR"
+    openssl req -new -x509 -days 3650 -nodes \
+      -text -out "$SSL_DIR/server.crt" \
+      -keyout "$SSL_DIR/server.key" \
+      -subj "/CN=postgres"
 
-echo "password_encryption = 'scram-sha-256'" >> "$PGDATA/postgresql.conf"
-echo "ssl = on" >> "$PGDATA/postgresql.conf"
-echo "ssl_cert_file = 'ssl/server.crt'" >> "$PGDATA/postgresql.conf"
-echo "ssl_key_file  = 'ssl/server.key'" >> "$PGDATA/postgresql.conf"
+    chown postgres:postgres "$SSL_DIR/server.crt" "$SSL_DIR/server.key"
+    chmod 600 "$SSL_DIR/server.key"
+    chmod 644 "$SSL_DIR/server.crt"
+    echo "SSL certificates created"
+else
+    echo "SSL certificates already exist, skipping generation"
+fi
 
-sed -i '/^host /d' "$PGDATA/pg_hba.conf"
-echo "# FORCE TLS ONLY" >> "$PGDATA/pg_hba.conf"
-echo "hostssl all all 0.0.0.0/0 scram-sha-256" >> "$PGDATA/pg_hba.conf"
-echo "hostssl all all ::0/0 scram-sha-256"     >> "$PGDATA/pg_hba.conf"
+CUSTOM_CONF="$PGDATA/postgresql.ssl.conf"
 
-echo "TLS-only policy applied to pg_hba.conf"
+if [ ! -f "$CUSTOM_CONF" ]; then
+    echo "Creating persistent SSL configuration..."
+    cat > "$CUSTOM_CONF" <<EOF
+ssl = on
+ssl_cert_file = 'ssl/server.crt'
+ssl_key_file = 'ssl/server.key'
+ssl_min_protocol_version = 'TLSv1.2'
+password_encryption = 'scram-sha-256'
+EOF
+    chown postgres:postgres "$CUSTOM_CONF"
+    echo "Persistent SSL config created"
+fi
+
+if ! grep -q "include.*postgresql.ssl.conf" "$PGDATA/postgresql.conf"; then
+    echo "include = 'postgresql.ssl.conf'" >> "$PGDATA/postgresql.conf"
+    echo "SSL config included in postgresql.conf"
+fi
+
+CUSTOM_HBA="$PGDATA/pg_hba.ssl.conf"
+
+if [ ! -f "$CUSTOM_HBA" ]; then
+    echo "Creating persistent authentication configuration..."
+    cat > "$CUSTOM_HBA" <<EOF
+# Allow local access
+local   all             all                                     scram-sha-256
+
+# Allow plain TCP (asyncpg STARTTLS upgrade needs this)
+host    all             all             0.0.0.0/0               scram-sha-256
+host    all             all             ::/0                    scram-sha-256
+
+# Accept SSL if client requests it
+hostssl all             all             0.0.0.0/0               scram-sha-256
+hostssl all             all             ::/0                    scram-sha-256
+EOF
+    chown postgres:postgres "$CUSTOM_HBA"
+    echo "Persistent authentication config created"
+fi
+
+if [ ! -L "$PGDATA/pg_hba.conf" ]; then
+    rm -f "$PGDATA/pg_hba.conf"
+    ln -s "$PGDATA/pg_hba.ssl.conf" "$PGDATA/pg_hba.conf"
+    echo "Authentication config linked"
+fi
+
+echo "PostgreSQL SSL setup finished successfully!"; i have to make sure any connection that is made to it will ask the upgrade right?
