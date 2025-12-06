@@ -17,10 +17,9 @@ echo "ssl = on" >> "$PGDATA/postgresql.conf"
 echo "ssl_cert_file = 'ssl/server.crt'" >> "$PGDATA/postgresql.conf"
 echo "ssl_key_file  = 'ssl/server.key'" >> "$PGDATA/postgresql.conf"
 
+sed -i '/^host /d' "$PGDATA/pg_hba.conf"
 echo "# FORCE TLS ONLY" >> "$PGDATA/pg_hba.conf"
 echo "hostssl all all 0.0.0.0/0 scram-sha-256" >> "$PGDATA/pg_hba.conf"
 echo "hostssl all all ::0/0 scram-sha-256"     >> "$PGDATA/pg_hba.conf"
-
-sed -i '/^host /d' "$PGDATA/pg_hba.conf"
 
 echo "TLS-only policy applied to pg_hba.conf"

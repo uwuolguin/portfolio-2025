@@ -4,7 +4,7 @@ from uuid import UUID
 import asyncpg
 from app.database.connection import get_db
 from app.database.transactions import DB
-from backend.app.services.translation_service import translate_field
+from app.services.translation_service import translate_field
 from app.auth.dependencies import verify_csrf, require_admin 
 from app.schemas.products import ProductCreate, ProductUpdate, ProductResponse
 from app.redis.decorators import cache_response

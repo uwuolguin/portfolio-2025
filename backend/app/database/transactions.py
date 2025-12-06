@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional, List, Dict, Any
 from enum import Enum
 from uuid import UUID
-from backend.app.database.db_retry import db_retry
+from app.database.db_retry import db_retry
 from app.auth.jwt import get_password_hash
 from app.config import settings
 import uuid
@@ -177,8 +177,8 @@ class DB:
             if companies:
                 deleted_images = []
                 for company in companies:
-                    image_id = company.get("image_url")  # This is company_uuid
-                    image_ext = company.get("image_extension")  # e.g., ".jpg"
+                    image_id = company.get("image_url")
+                    image_ext = company.get("image_extension")
                     
                     if image_id and image_ext:
                         success = await image_service_client.delete_image(f"{image_id}{image_ext}")
@@ -293,8 +293,8 @@ class DB:
             if companies:
                 deleted_images = []
                 for company in companies:
-                    image_id = company.get("image_url")  # This is company_uuid
-                    image_ext = company.get("image_extension")  # e.g., ".jpg"
+                    image_id = company.get("image_url")
+                    image_ext = company.get("image_extension")
                     
                     if image_id and image_ext:
                         success = await image_service_client.delete_image(f"{image_id}{image_ext}")
@@ -848,9 +848,8 @@ class DB:
             if not company:
                 raise ValueError(f"Company with UUID {company_uuid} not found")
 
-            # Delete image from image service
-            image_id = company.get("image_url")  # This is company_uuid
-            image_ext = company.get("image_extension")  # e.g., ".jpg"
+            image_id = company.get("image_url")
+            image_ext = company.get("image_extension")
             
             if image_id and image_ext:
                 success = await image_service_client.delete_image(f"{image_id}{image_ext}")

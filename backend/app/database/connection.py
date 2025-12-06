@@ -13,8 +13,6 @@ class DatabasePoolManager:
     write_pool: asyncpg.Pool | None = None
 
     def _create_ssl_context(self) -> Optional[ssl.SSLContext]:
-        if settings.db_ssl_mode != "require":
-            return None
 
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
