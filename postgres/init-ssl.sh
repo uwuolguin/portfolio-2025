@@ -1,4 +1,4 @@
-if i implement this #!/bin/bash
+#!/bin/bash
 set -e
 
 echo "Starting PostgreSQL SSL configuration..."
@@ -69,4 +69,4 @@ if [ ! -L "$PGDATA/pg_hba.conf" ]; then
     echo "Authentication config linked"
 fi
 
-echo "PostgreSQL SSL setup finished successfully!"; i have to make sure any connection that is made to it will ask the upgrade right?
+echo "PostgreSQL SSL setup finished successfully!"
