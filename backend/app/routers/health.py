@@ -23,7 +23,7 @@ async def basic_health() -> dict[str, Any]:
     }
 
 
-@router.get("/detailed/use-postman-or-similar-to-send-csrf")
+@router.get("/detailed/use-postman-or-similar-to-bypass-csrf")
 async def detailed_health(
     current_user: dict = Depends(require_admin),
     db: asyncpg.Connection = Depends(get_db)
@@ -107,7 +107,7 @@ async def detailed_health(
     return health_status
 
 
-@router.get("/database/use-postman-or-similar-to-send-csrf")
+@router.get("/database/use-postman-or-similar-to-bypass-csrf")
 async def database_health(
     current_user: dict = Depends(require_admin),
     db: asyncpg.Connection = Depends(get_db)

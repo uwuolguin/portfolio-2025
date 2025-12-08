@@ -620,7 +620,7 @@ async def get_my_company(
 # ============================================================================
 
 @router.get(
-    "/admin/all-companies/use-postman-or-similar-to-send-csrf",
+    "/admin/all-companies/use-postman-or-similar-to-bypass-csrf",
     response_model=List[CompanyResponse]
 )
 async def admin_list_all_companies(
@@ -673,7 +673,7 @@ async def admin_list_all_companies(
 
 
 @router.delete(
-    "/admin/{company_uuid}/use-postman-or-similar-to-send-csrf",
+    "/admin/{company_uuid}/use-postman-or-similar-to-bypass-csrf",
     status_code=status.HTTP_200_OK
 )
 async def admin_delete_company(

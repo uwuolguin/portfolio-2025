@@ -25,7 +25,7 @@ async def list_products(
     return [ProductResponse(**product) for product in products]
 
 
-@router.post("/use-postman-or-similar-to-send-csrf", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/use-postman-or-similar-to-bypass-csrf", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(
     product_data: ProductCreate,
     current_user: dict = Depends(require_admin), 
@@ -73,7 +73,7 @@ async def create_product(
         )
 
 
-@router.put("/{product_uuid}/use-postman-or-similar-to-send-csrf", response_model=ProductResponse)
+@router.put("/{product_uuid}/use-postman-or-similar-to-bypass-csrf", response_model=ProductResponse)
 async def update_product(
     product_uuid: UUID,
     product_data: ProductUpdate,
@@ -127,7 +127,7 @@ async def update_product(
         )
 
 
-@router.delete("/{product_uuid}/use-postman-or-similar-to-send-csrf", status_code=status.HTTP_200_OK)
+@router.delete("/{product_uuid}/use-postman-or-similar-to-bypass-csrf", status_code=status.HTTP_200_OK)
 async def delete_product(
     product_uuid: UUID,
     current_user: dict = Depends(require_admin),

@@ -231,7 +231,7 @@ async def delete_me(
         )
 
 
-@router.get("/admin/all-users/use-postman-or-similar-to-send-csrf", response_model=List[AdminUserResponse])
+@router.get("/admin/all-users/use-postman-or-similar-to-bypass-csrf", response_model=List[AdminUserResponse])
 async def get_all_users(
     limit: int = Query(100, ge=1, le=500), 
     offset: int = Query(0, ge=0), 
@@ -239,7 +239,7 @@ async def get_all_users(
     db: asyncpg.Connection = Depends(get_db)
 ):
     try:
-        users = await DB.get_all_users_with_company_count(conn=db, limit=limit, offset=offset)
+        users = await DB.get_all_users_admin(conn=db, limit=limit, offset=offset)
         logger.info("admin_get_all_users", admin_email=current_user["email"], users_count=len(users))
         return [AdminUserResponse(**user) for user in users]
         
@@ -253,7 +253,7 @@ async def get_all_users(
         )
 
 
-@router.delete("/admin/users/{user_uuid}/use-postman-or-similar-to-send-csrf", status_code=status.HTTP_200_OK)
+@router.delete("/admin/users/{user_uuid}/use-postman-or-similar-to-bypass-csrf", status_code=status.HTTP_200_OK)
 async def admin_delete_user(
     user_uuid: UUID, 
     current_user: dict = Depends(require_admin),
