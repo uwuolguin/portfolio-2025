@@ -702,7 +702,6 @@ class DB:
         image_extension: str,           
         company_uuid: str               
     ) -> Dict[str, Any]:
-        company_uuid: str | None = None
         async with transaction(conn,isolation=IsolationLevel.SERIALIZABLE):
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
@@ -907,7 +906,7 @@ class DB:
         limit: int = 20,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        from typing import Any
+
         
         search = (query or "").strip().lower()
         params: List[Any] = []
