@@ -224,7 +224,7 @@ class DB:
                 email=user["email"],
                 company_deleted=1 if company else 0
             )
-        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+
         if deleted_image:
             try:
                 success = await asyncio.wait_for(
@@ -367,7 +367,7 @@ class DB:
                 admin_email=admin_email
             )
 
-        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+
         if images_to_delete:
             for image_id, image_ext, company_uuid in images_to_delete:
                 image_path = f"{image_id}{image_ext}"
@@ -711,8 +711,9 @@ class DB:
                 image_extension,
                 company_uuid 
             )
-            
+
             logger.info("company_created", company_uuid=str(row["uuid"]), user_uuid=str(user_uuid))
+    
             return await DB.get_company_by_uuid(conn, row["uuid"])
         
     @staticmethod
@@ -807,7 +808,7 @@ class DB:
             await conn.execute("DELETE FROM proveo.companies WHERE uuid=$1", company_uuid)
             logger.info("company_deleted", company_uuid=str(company_uuid))
 
-        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+
         image_id = company.get("image_url")
         image_ext = company.get("image_extension")
         if image_id and image_ext:
@@ -971,7 +972,6 @@ class DB:
 
             logger.info("admin_deleted_company", company_uuid=str(company_uuid), admin_email=admin_email)
 
-        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
         image_id = company.get("image_url")
         image_ext = company.get("image_extension")
         
