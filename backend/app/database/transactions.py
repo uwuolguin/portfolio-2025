@@ -306,7 +306,7 @@ class DB:
     @staticmethod
     @db_retry()
     async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID, admin_email: str) -> Dict[str, Any]:
-        deleted_images: list[str] = []
+        deleted_image_path: str | None = None
         image_to_delete: tuple[str, str, str] | None = None
 
         admin_user = await conn.fetchrow(
@@ -393,7 +393,7 @@ class DB:
                     timeout=15.0
                 )
                 if success:
-                    deleted_images.append(image_path)
+                    deleted_image_path = image_path
                     logger.info(
                         "admin_delete_user_image_removed",
                         company_uuid=company_uuid,
@@ -429,7 +429,7 @@ class DB:
             "user_uuid": str(user_uuid),
             "email": user["email"],
             "company_deleted": 1 if company else 0,
-            "images_deleted": len(deleted_images)
+            "image_deleted": deleted_image_path 
         }
         
 
