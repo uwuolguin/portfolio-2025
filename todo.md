@@ -91,15 +91,11 @@ Circuit breaker: implement, fix bugs, integrate into backend client:
                                         circuit_breaker.record_failure()
                                         raise
 
-Requirements & config: ensure requirements.txt / pyproject / image-service config include needed libs and env vars. so I am not installing things that are not being used
-
 Local integration testing:manually make sure everything is working, is an small app for now so unit testing is just for show
 
 Automation scripts: update init_backend.sh and any startup jobs to create buckets, run migrations, seed inventory.
 
 Kubernetes deployment: create manifests/helm, test in k8s (move this step earlier if you want to test k8s before deleting comments — see variant below).
-
-Remove non-docstring comments: strip non-doc comments once tests pass.
 
 Micro-optimizations if necessary, do this module by module having in cosnideration the topic of the video you are planning to record
 

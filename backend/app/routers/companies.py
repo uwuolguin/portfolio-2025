@@ -199,7 +199,6 @@ async def create_company(
             )
         
         try:
-            # Step 4: Create DB record with pre-generated UUID
             company = await DB.create_company(
                 conn=db,
                 user_uuid=user_uuid,
