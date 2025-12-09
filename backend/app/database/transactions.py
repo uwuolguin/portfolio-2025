@@ -68,7 +68,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_user(conn: asyncpg.Connection, name: str, email: str, password: str) -> Dict[str, Any]:
+    async def create_user(conn: asyncpg.Connection, name: str, email: str, password: str) -> Dict[str]:
         hashed_password = get_password_hash(password)
         user_uuid = str(uuid.uuid4())
         verification_token = generate_csrf_token()
@@ -96,7 +96,7 @@ class DB:
         
     @staticmethod
     @db_retry()
-    async def get_user_by_email(conn: asyncpg.Connection, email: str) -> Optional[Dict[str, Any]]:
+    async def get_user_by_email(conn: asyncpg.Connection, email: str) -> Optional[Dict[str]]:
         async with transaction(conn, readonly=True):
             query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at 
@@ -108,7 +108,7 @@ class DB:
     
     @staticmethod
     @db_retry()
-    async def verify_email(conn: asyncpg.Connection, token: str) -> Dict[str, Any]:
+    async def verify_email(conn: asyncpg.Connection, token: str) -> Dict[str]:
         async with transaction(conn):
             query = """
                 SELECT uuid, name, email, verification_token_expires
@@ -138,7 +138,7 @@ class DB:
         
     @staticmethod
     @db_retry()
-    async def resend_verification_email(conn: asyncpg.Connection, email: str) -> Dict[str, Any]:
+    async def resend_verification_email(conn: asyncpg.Connection, email: str) -> Dict[str]:
         verification_token = generate_csrf_token()
         token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_email_time)
         async with transaction(conn):
@@ -173,7 +173,7 @@ class DB:
     
     @staticmethod
     @db_retry()
-    async def delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> Dict[str, Any]:
+    async def delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> Dict[str]:
         company_uuid: str | None = None
         deleted_image: str | None = None
         async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
@@ -290,7 +290,7 @@ class DB:
         
     @staticmethod
     @db_retry()
-    async def get_all_users_admin(conn: asyncpg.Connection, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    async def get_all_users_admin(conn: asyncpg.Connection, limit: int = 100, offset: int = 0) -> List[Dict[str]]:
         async with transaction(conn, readonly=True):
             query = """
                 SELECT u.uuid, u.name, u.email, u.created_at
@@ -305,7 +305,7 @@ class DB:
     
     @staticmethod
     @db_retry()
-    async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID, admin_email: str) -> Dict[str, Any]:
+    async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID, admin_email: str) -> Dict[str]:
         deleted_image_path: str | None = None
         image_to_delete: tuple[str, str, str] | None = None
 
@@ -435,7 +435,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_all_products(conn: asyncpg.Connection) -> List[Dict[str, Any]]:
+    async def get_all_products(conn: asyncpg.Connection) -> List[Dict[str]]:
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             query = """
                 SELECT uuid, name_es, name_en, created_at
@@ -447,7 +447,7 @@ class DB:
         
     @staticmethod
     @db_retry()
-    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str, user_email: str) -> Dict[str, Any]:
+    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str, user_email: str) -> Dict[str]:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             user_email
@@ -472,7 +472,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def update_product_by_uuid(conn: asyncpg.Connection, product_uuid: UUID, name_es: Optional[str], name_en: Optional[str], user_email: str) -> Dict[str, Any]:
+    async def update_product_by_uuid(conn: asyncpg.Connection, product_uuid: UUID, name_es: Optional[str], name_en: Optional[str], user_email: str) -> Dict[str]:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             user_email
@@ -510,7 +510,7 @@ class DB:
         
     @staticmethod
     @db_retry()
-    async def delete_product_by_uuid(conn: asyncpg.Connection, product_uuid: UUID, user_email: str) -> Dict[str, Any]:
+    async def delete_product_by_uuid(conn: asyncpg.Connection, product_uuid: UUID, user_email: str) -> Dict[str]:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             user_email
@@ -538,7 +538,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_all_communes(conn: asyncpg.Connection) -> List[Dict[str, Any]]:
+    async def get_all_communes(conn: asyncpg.Connection) -> List[Dict[str]]:
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             query = """
                 SELECT uuid, name, created_at
@@ -550,7 +550,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_commune(conn: asyncpg.Connection, name: str, user_email: str) -> Dict[str, Any]:
+    async def create_commune(conn: asyncpg.Connection, name: str, user_email: str) -> Dict[str]:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             user_email
@@ -576,7 +576,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: Optional[str], user_email: str) -> Dict[str, Any]:
+    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: Optional[str], user_email: str) -> Dict[str]:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             user_email
@@ -600,7 +600,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def delete_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, user_email: str) -> Dict[str, Any]:
+    async def delete_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, user_email: str) -> Dict[str]:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             user_email
@@ -628,7 +628,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_company_by_uuid(conn: asyncpg.Connection, company_uuid: UUID) -> Optional[Dict[str, Any]]:
+    async def get_company_by_uuid(conn: asyncpg.Connection, company_uuid: UUID) -> Optional[Dict[str]]:
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             query = """
                 SELECT c.uuid, c.user_uuid, c.product_uuid, c.commune_uuid, c.name, c.description_es, c.description_en,
@@ -647,7 +647,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_all_companies(conn: asyncpg.Connection, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    async def get_all_companies(conn: asyncpg.Connection, limit: int = 50, offset: int = 0) -> List[Dict[str]]:
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             query = """
                 SELECT c.uuid, c.user_uuid, c.product_uuid, c.commune_uuid, c.name, c.description_es, c.description_en,
@@ -667,7 +667,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_companies_by_user_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> List[Dict[str, Any]]:
+    async def get_companies_by_user_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> List[Dict[str]]:
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             query = """
                 SELECT c.uuid, c.user_uuid, c.product_uuid, c.commune_uuid, c.name, c.description_es, c.description_en,
@@ -701,7 +701,7 @@ class DB:
         image_url: str,                 
         image_extension: str,           
         company_uuid: str               
-    ) -> Dict[str, Any]:
+    ) -> Dict[str]:
         async with transaction(conn,isolation=IsolationLevel.SERIALIZABLE):
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
@@ -760,7 +760,7 @@ class DB:
         image_url: Optional[str] = None,
         product_uuid: Optional[UUID] = None,
         commune_uuid: Optional[UUID] = None
-    ) -> Dict[str, Any]:
+    ) -> Dict[str]:
         async with transaction(conn,isolation=IsolationLevel.SERIALIZABLE):
             owner_check = await conn.fetchval("SELECT user_uuid FROM proveo.companies WHERE uuid=$1", company_uuid)
             if not owner_check:
@@ -905,7 +905,7 @@ class DB:
         product: Optional[str] = None,
         limit: int = 20,
         offset: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Dict[str]]:
 
         
         search = (query or "").strip().lower()
@@ -964,7 +964,7 @@ class DB:
         sql = base_query + order_clause + pagination_clause
         rows = await conn.fetch(sql, *params)
         
-        results: List[Dict[str, Any]] = []
+        results: List[Dict[str]] = []
         for row in rows:
             results.append({
                 "uuid": row["company_id"],
@@ -982,7 +982,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def admin_delete_company_by_uuid(conn: asyncpg.Connection, company_uuid: UUID, admin_email: str) -> Dict[str, Any]:
+    async def admin_delete_company_by_uuid(conn: asyncpg.Connection, company_uuid: UUID, admin_email: str) -> Dict[str]:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             admin_email
