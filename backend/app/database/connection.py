@@ -92,6 +92,7 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
             logger.error(
                 "database_connection_error",
                 error=str(e),
+                stack_info=True,
                 exc_info=True,
             )
             raise

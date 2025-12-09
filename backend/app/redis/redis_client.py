@@ -45,6 +45,7 @@ class RedisClient:
             logger.warning(
                 "redis_connection_failed_continuing_without_cache",
                 error=str(e),
+                stack_info=True,
                 message="Application will run without caching"
             )
     

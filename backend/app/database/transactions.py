@@ -9,8 +9,9 @@ from app.auth.jwt import get_password_hash
 from app.config import settings
 import uuid
 from app.auth.csrf import generate_csrf_token
-from datetime import datetime,timedelta,timezone
+from datetime import datetime, timedelta, timezone
 from app.services.image_service_client import image_service_client
+import asyncio
 
 logger = structlog.get_logger(__name__)
 
@@ -46,10 +47,6 @@ class DB:
     @db_retry()
     async def create_user(conn: asyncpg.Connection, name: str, email: str, password: str) -> Dict[str, Any]:
         async with transaction(conn):
-            existing = await conn.fetchval("SELECT 1 FROM proveo.users WHERE email = $1", email)
-            if existing:
-                raise ValueError(f"Email {email} is already registered")
-            
             hashed_password = get_password_hash(password)
             user_uuid = str(uuid.uuid4())
             
@@ -60,12 +57,16 @@ class DB:
                 INSERT INTO proveo.users 
                     (uuid, name, email, hashed_password, role, verification_token, verification_token_expires)
                 VALUES ($1, $2, $3, $4, 'user', $5, $6)
+                ON CONFLICT (email) DO NOTHING
                 RETURNING uuid, name, email, role, email_verified, verification_token, created_at
             """
             row = await conn.fetchrow(
                 query, user_uuid, name, email, hashed_password, 
                 verification_token, token_expires
             )
+            
+            if row is None:
+                raise ValueError(f"Email {email} is already registered")
             
             logger.info("user_created_pending_verification", 
                        user_uuid=str(row["uuid"]), 
@@ -75,18 +76,18 @@ class DB:
     @staticmethod
     @db_retry()
     async def get_user_by_email(conn: asyncpg.Connection, email: str) -> Optional[Dict[str, Any]]:
-        query = """
-            SELECT uuid, name, email, hashed_password, role, email_verified, created_at 
-            FROM proveo.users 
-            WHERE email = $1
-        """
-        row = await conn.fetchrow(query, email)
-        return dict(row) if row else None
+        async with transaction(conn, readonly=True):
+            query = """
+                SELECT uuid, name, email, hashed_password, role, email_verified, created_at 
+                FROM proveo.users 
+                WHERE email = $1
+            """
+            row = await conn.fetchrow(query, email)
+            return dict(row) if row else None
     
     @staticmethod
     @db_retry()
     async def verify_email(conn: asyncpg.Connection, token: str) -> Dict[str, Any]:
-        """Verify user email with token"""
         async with transaction(conn):
             query = """
                 SELECT uuid, name, email, verification_token_expires
@@ -117,7 +118,6 @@ class DB:
     @staticmethod
     @db_retry()
     async def resend_verification_email(conn: asyncpg.Connection, email: str) -> Dict[str, Any]:
-        """Generate new verification token for user"""
         async with transaction(conn):
             query = """
                 SELECT uuid, name, email, email_verified
@@ -154,13 +154,8 @@ class DB:
     @staticmethod
     @db_retry()
     async def delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> Dict[str, Any]:
-        """User deletes their own account"""
-
-        deleted_images: list[str] = []
-        companies: list[asyncpg.Record] = []
-
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
-
+        deleted_image: str | None = None
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             user_query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
@@ -170,16 +165,22 @@ class DB:
             if not user:
                 raise ValueError(f"User with UUID {user_uuid} not found")
 
-            companies_query = """
+            company_query = """
                 SELECT uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
                     description_en, address, phone, email, image_url, image_extension,
                     created_at, updated_at
                 FROM proveo.companies
                 WHERE user_uuid = $1
             """
-            companies = await conn.fetch(companies_query, user_uuid)
+            company = await conn.fetchrow(company_query, user_uuid)
 
-            if companies:
+            if company:
+                image_id = company.get("image_url")
+                image_ext = company.get("image_extension")
+                if image_id and image_ext:
+                    deleted_image = f"{image_id}{image_ext}"
+                    company_uuid = str(company["uuid"])
+
                 insert_deleted_company = """
                     INSERT INTO proveo.companies_deleted
                         (uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
@@ -187,24 +188,21 @@ class DB:
                         created_at, updated_at)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 """
+                await conn.execute(
+                    insert_deleted_company,
+                    company["uuid"], company["user_uuid"], company["product_uuid"],
+                    company["commune_uuid"], company["name"], company["description_es"],
+                    company["description_en"], company["address"], company["phone"],
+                    company["email"], company["image_url"], company["image_extension"],
+                    company["created_at"], company["updated_at"]
+                )
 
-                for company in companies:
-                    await conn.execute(
-                        insert_deleted_company,
-                        company["uuid"], company["user_uuid"], company["product_uuid"],
-                        company["commune_uuid"], company["name"], company["description_es"],
-                        company["description_en"], company["address"], company["phone"],
-                        company["email"], company["image_url"], company["image_extension"],
-                        company["created_at"], company["updated_at"]
-                    )
-
-                await conn.execute("DELETE FROM proveo.companies WHERE user_uuid = $1", user_uuid)
-                await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+                await conn.execute("DELETE FROM proveo.companies WHERE uuid = $1", company["uuid"])
 
                 logger.info(
-                    "user_companies_deleted",
+                    "user_company_deleted",
                     user_uuid=str(user_uuid),
-                    companies_count=len(companies)
+                    company_uuid=str(company["uuid"])
                 )
 
             insert_deleted_user = """
@@ -224,35 +222,47 @@ class DB:
                 "user_deleted_with_cascade",
                 user_uuid=str(user_uuid),
                 email=user["email"],
-                companies_deleted=len(companies)
+                company_deleted=1 if company else 0
             )
-
-        if companies:
-            for company in companies:
-                image_id = company.get("image_url")
-                image_ext = company.get("image_extension")
-
-                if image_id and image_ext:
-                    success = await image_service_client.delete_image(f"{image_id}{image_ext}")
-                    if success:
-                        deleted_images.append(f"{image_id}{image_ext}")
-                        logger.info(
-                            "user_self_delete_image_removed",
-                            company_uuid=str(company["uuid"]),
-                            image_path=f"{image_id}{image_ext}"
-                        )
-                    else:
-                        logger.warning(
-                            "user_self_delete_image_not_found",
-                            company_uuid=str(company["uuid"]),
-                            image_path=f"{image_id}{image_ext}"
-                        )
+        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+        if deleted_image:
+            try:
+                success = await asyncio.wait_for(
+                    image_service_client.delete_image(deleted_image),
+                    timeout=15.0
+                )
+                if success:
+                    logger.info(
+                        "user_self_delete_image_removed",
+                        company_uuid=company_uuid,
+                        image_path=deleted_image
+                    )
+                else:
+                    logger.warning(
+                        "user_self_delete_image_not_found",
+                        company_uuid=company_uuid,
+                        image_path=deleted_image
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "user_self_delete_image_timeout",
+                    company_uuid=company_uuid,
+                    image_path=deleted_image,
+                    message="Image deletion timed out after 15s - will be cleaned by cronjob"
+                )
+            except Exception as e:
+                logger.error(
+                    "user_self_delete_image_error",
+                    company_uuid=company_uuid,
+                    image_path=deleted_image,
+                    error=str(e)
+                )
 
         return {
             "user_uuid": str(user_uuid),
             "email": user["email"],
-            "companies_deleted": len(companies),
-            "images_deleted": len(deleted_images)
+            "company_deleted": 1 if company else 0,
+            "image_deleted": 1 if deleted_image else 0
         }
 
         
@@ -272,7 +282,10 @@ class DB:
     @staticmethod
     @db_retry()
     async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID, admin_email: str) -> Dict[str, Any]:
-        """Admin deletes another user's account"""
+        deleted_images: list[str] = []
+        images_to_delete: list[tuple[str, str, str]] = []
+
+        # Verify admin permissions before transaction
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             admin_email
@@ -280,7 +293,7 @@ class DB:
         if not admin_user or admin_user['role'] != 'admin':
             raise PermissionError("Only admin users can delete other users.")
         
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             user_query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users WHERE uuid=$1
@@ -298,29 +311,14 @@ class DB:
             companies = await conn.fetch(companies_query, user_uuid)
             
             if companies:
-                deleted_images = []
+                # Collect images for deletion after transaction
                 for company in companies:
                     image_id = company.get("image_url")
                     image_ext = company.get("image_extension")
-                    
                     if image_id and image_ext:
-                        success = await image_service_client.delete_image(f"{image_id}{image_ext}")
-                        if success:
-                            deleted_images.append(f"{image_id}{image_ext}")
-                            logger.info(
-                                "admin_delete_user_image_removed",
-                                company_uuid=str(company["uuid"]),
-                                image_path=f"{image_id}{image_ext}",
-                                admin_email=admin_email
-                            )
-                        else:
-                            logger.warning(
-                                "admin_delete_user_image_not_found",
-                                company_uuid=str(company["uuid"]),
-                                image_path=f"{image_id}{image_ext}",
-                                admin_email=admin_email
-                            )
+                        images_to_delete.append((image_id, image_ext, str(company["uuid"])))
                 
+                # Batch insert deleted companies
                 delete_companies_query = """
                     INSERT INTO proveo.companies_deleted
                         (uuid, user_uuid, product_uuid, commune_uuid, name, description_es, 
@@ -328,14 +326,17 @@ class DB:
                         created_at, updated_at)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 """
-                for company in companies:
-                    await conn.execute(delete_companies_query,
+                company_data = [
+                    (
                         company["uuid"], company["user_uuid"], company["product_uuid"],
                         company["commune_uuid"], company["name"], company["description_es"],
                         company["description_en"], company["address"], company["phone"],
                         company["email"], company["image_url"], company["image_extension"],
                         company["created_at"], company["updated_at"]
                     )
+                    for company in companies
+                ]
+                await conn.executemany(delete_companies_query, company_data)
                 
                 await conn.execute("DELETE FROM proveo.companies WHERE user_uuid=$1", user_uuid)
                 
@@ -343,7 +344,6 @@ class DB:
                     "admin_deleted_user_companies", 
                     user_uuid=str(user_uuid), 
                     companies_count=len(companies),
-                    images_deleted=len(deleted_images),
                     admin_email=admin_email
                 )
             
@@ -366,14 +366,55 @@ class DB:
                 companies_deleted=len(companies), 
                 admin_email=admin_email
             )
-            
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
-            
-            return {
-                "user_uuid": str(user_uuid), 
-                "email": user["email"], 
-                "companies_deleted": len(companies)
-            }
+
+        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+        if images_to_delete:
+            for image_id, image_ext, company_uuid in images_to_delete:
+                image_path = f"{image_id}{image_ext}"
+                try:
+                    success = await asyncio.wait_for(
+                        image_service_client.delete_image(image_path),
+                        timeout=15.0
+                    )
+                    if success:
+                        deleted_images.append(image_path)
+                        logger.info(
+                            "admin_delete_user_image_removed",
+                            company_uuid=company_uuid,
+                            image_path=image_path,
+                            admin_email=admin_email
+                        )
+                    else:
+                        logger.warning(
+                            "admin_delete_user_image_not_found",
+                            company_uuid=company_uuid,
+                            image_path=image_path,
+                            admin_email=admin_email
+                        )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "admin_delete_user_image_timeout",
+                        company_uuid=company_uuid,
+                        image_path=image_path,
+                        admin_email=admin_email,
+                        message="Image deletion timed out after 15s - will be cleaned by cronjob"
+                    )
+                except Exception as e:
+                    logger.error(
+                        "admin_delete_user_image_error",
+                        company_uuid=company_uuid,
+                        image_path=image_path,
+                        error=str(e),
+                        admin_email=admin_email
+                    )
+
+        
+        return {
+            "user_uuid": str(user_uuid), 
+            "email": user["email"], 
+            "companies_deleted": len(companies),
+            "images_deleted": len(deleted_images)
+        }
         
     @staticmethod
     @db_retry()
@@ -390,14 +431,22 @@ class DB:
             user_email
         )
         if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete other users.")
+            raise PermissionError("Only admin users can create products.")
+        
         async with transaction(conn):
-            existing = await conn.fetchval("SELECT 1 FROM proveo.products WHERE name_en=$1 OR name_es=$2", name_en, name_es)
-            if existing:
-                raise ValueError("Product with this name already exists")
+            # Use ON CONFLICT to prevent race condition
             product_uuid = str(uuid.uuid4())
-            insert_query = "INSERT INTO proveo.products (uuid,name_es,name_en) VALUES ($1,$2,$3) RETURNING uuid,name_es,name_en,created_at"
+            insert_query = """
+                INSERT INTO proveo.products (uuid,name_es,name_en) 
+                VALUES ($1,$2,$3) 
+                ON CONFLICT (name_es) DO NOTHING
+                RETURNING uuid,name_es,name_en,created_at
+            """
             row = await conn.fetchrow(insert_query, product_uuid, name_es, name_en)
+            
+            if row is None:
+                raise ValueError("Product with this name already exists")
+            
             logger.info("product_created", product_uuid=str(row["uuid"]))
             return dict(row)
 
@@ -409,14 +458,17 @@ class DB:
             user_email
         )
         if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete other users.")
+            raise PermissionError("Only admin users can update products.")
+        
         async with transaction(conn):
             existing = await conn.fetchval("SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid)
             if not existing:
                 raise ValueError(f"Product with UUID {product_uuid} not found")
+            
             update_fields = []
             params = []
             param_count = 1
+            
             if name_es is not None:
                 update_fields.append(f"name_es=${param_count}")
                 params.append(name_es)
@@ -425,13 +477,15 @@ class DB:
                 update_fields.append(f"name_en=${param_count}")
                 params.append(name_en)
                 param_count += 1
+            
             if not update_fields:
                 raise ValueError("No fields provided for update")
+            
             params.append(product_uuid)
             update_query = f"UPDATE proveo.products SET {', '.join(update_fields)} WHERE uuid=${param_count} RETURNING uuid,name_es,name_en,created_at"
             row = await conn.fetchrow(update_query, *params)
+            
             logger.info("product_updated", product_uuid=str(product_uuid))
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
             return dict(row)
         
     @staticmethod
@@ -442,20 +496,24 @@ class DB:
             user_email
         )
         if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete other users.")
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+            raise PermissionError("Only admin users can delete products.")
+        
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             product_query = "SELECT uuid,name_es,name_en,created_at FROM proveo.products WHERE uuid=$1"
             product = await conn.fetchrow(product_query, product_uuid)
             if not product:
                 raise ValueError(f"Product with UUID {product_uuid} not found")
+            
             company_count = await conn.fetchval("SELECT COUNT(*) FROM proveo.companies WHERE product_uuid=$1", product_uuid)
             if company_count > 0:
                 raise ValueError(f"Cannot delete product '{product['name_en']}'. {company_count} company(ies) are still using this product.")
+            
             insert_deleted = "INSERT INTO proveo.products_deleted (uuid,name_es,name_en,created_at) VALUES ($1,$2,$3,$4)"
             await conn.execute(insert_deleted, product["uuid"], product["name_es"], product["name_en"], product["created_at"])
+            
             await conn.execute("DELETE FROM proveo.products WHERE uuid=$1", product_uuid)
+            
             logger.info("product_deleted", product_uuid=str(product_uuid))
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
             return {"uuid": str(product["uuid"]), "name_es": product["name_es"], "name_en": product["name_en"]}
 
     @staticmethod
@@ -473,14 +531,21 @@ class DB:
             user_email
         )
         if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete other users.")
+            raise PermissionError("Only admin users can create communes.")
+        
         async with transaction(conn):
-            existing = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE name=$1", name)
-            if existing:
-                raise ValueError("Commune with this name already exists")
             commune_uuid = str(uuid.uuid4())
-            insert_query = "INSERT INTO proveo.communes (name,uuid) VALUES ($1,$2) RETURNING uuid,name,created_at"
+            insert_query = """
+                INSERT INTO proveo.communes (name,uuid) 
+                VALUES ($1,$2) 
+                ON CONFLICT (name) DO NOTHING
+                RETURNING uuid,name,created_at
+            """
             row = await conn.fetchrow(insert_query, name, commune_uuid)
+            
+            if row is None:
+                raise ValueError("Commune with this name already exists")
+            
             logger.info("commune_created", uuid=commune_uuid)
             return dict(row)
 
@@ -492,17 +557,20 @@ class DB:
             user_email
         )
         if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete other users.")
+            raise PermissionError("Only admin users can update communes.")
+        
         async with transaction(conn):
             existing = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
             if not existing:
                 raise ValueError(f"Commune with UUID {commune_uuid} not found")
+            
             if name is None:
                 raise ValueError("Name is required for update")
+            
             update_query = "UPDATE proveo.communes SET name=$1 WHERE uuid=$2 RETURNING uuid,name,created_at"
             row = await conn.fetchrow(update_query, name, commune_uuid)
+            
             logger.info("commune_updated", commune_uuid=str(commune_uuid))
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
             return dict(row)
 
     @staticmethod
@@ -513,20 +581,24 @@ class DB:
             user_email
         )
         if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete other users.")
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+            raise PermissionError("Only admin users can delete communes.")
+        
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             commune_query = "SELECT uuid,name,created_at FROM proveo.communes WHERE uuid=$1"
             commune = await conn.fetchrow(commune_query, commune_uuid)
             if not commune:
                 raise ValueError(f"Commune with UUID {commune_uuid} not found")
+            
             company_count = await conn.fetchval("SELECT COUNT(*) FROM proveo.companies WHERE commune_uuid=$1", commune_uuid)
             if company_count > 0:
                 raise ValueError(f"Cannot delete commune '{commune['name']}'. {company_count} company(ies) are still located in this commune.")
+            
             insert_deleted = "INSERT INTO proveo.communes_deleted (uuid,name,created_at) VALUES ($1,$2,$3)"
             await conn.execute(insert_deleted, commune["uuid"], commune["name"], commune["created_at"])
+            
             await conn.execute("DELETE FROM proveo.communes WHERE uuid=$1", commune_uuid)
+            
             logger.info("commune_deleted", commune_uuid=str(commune_uuid))
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
             return {"uuid": str(commune["uuid"]), "name": commune["name"]}
 
     @staticmethod
@@ -534,7 +606,7 @@ class DB:
     async def get_company_by_uuid(conn: asyncpg.Connection, company_uuid: UUID) -> Optional[Dict[str, Any]]:
         query = """
             SELECT c.uuid,c.user_uuid,c.product_uuid,c.commune_uuid,c.name,c.description_es,c.description_en,
-                   c.address,c.phone,c.email,c.image_url,c.created_at,c.updated_at,
+                   c.address,c.phone,c.email,c.image_url,c.image_extension,c.created_at,c.updated_at,
                    u.name as user_name,u.email as user_email,
                    p.name_es as product_name_es,p.name_en as product_name_en,
                    cm.name as commune_name
@@ -552,7 +624,7 @@ class DB:
     async def get_all_companies(conn: asyncpg.Connection, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
         query = """
             SELECT c.uuid,c.user_uuid,c.product_uuid,c.commune_uuid,c.name,c.description_es,c.description_en,
-                   c.address,c.phone,c.email,c.image_url,c.created_at,c.updated_at,
+                   c.address,c.phone,c.email,c.image_url,c.image_extension,c.created_at,c.updated_at,
                    u.name as user_name,u.email as user_email,
                    p.name_es as product_name_es,p.name_en as product_name_en,
                    cm.name as commune_name
@@ -571,7 +643,7 @@ class DB:
     async def get_companies_by_user_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> List[Dict[str, Any]]:
         query = """
             SELECT c.uuid,c.user_uuid,c.product_uuid,c.commune_uuid,c.name,c.description_es,c.description_en,
-                   c.address,c.phone,c.email,c.image_url,c.created_at,c.updated_at,
+                   c.address,c.phone,c.email,c.image_url,c.image_extension,c.created_at,c.updated_at,
                    u.name as user_name,u.email as user_email,
                    p.name_es as product_name_es,p.name_en as product_name_en,
                    cm.name as commune_name
@@ -602,14 +674,6 @@ class DB:
         image_extension: str,           
         company_uuid: str               
     ) -> Dict[str, Any]:
-        """
-        Create a new company with pre-generated UUID
-        
-        IMPORTANT CHANGE: 
-        - company_uuid parameter is now REQUIRED (was auto-generated before)
-        - This must match the image filename uploaded to storage
-        - Caller (companies.py router) generates UUID before upload
-        """
         async with transaction(conn):
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
@@ -625,7 +689,6 @@ class DB:
             commune_exists = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
             if not commune_exists:
                 raise ValueError(f"Commune with UUID {commune_uuid} does not exist")
-            
             
             insert_query = """
                 INSERT INTO proveo.companies
@@ -650,7 +713,6 @@ class DB:
             )
             
             logger.info("company_created", company_uuid=str(row["uuid"]), user_uuid=str(user_uuid))
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
             return await DB.get_company_by_uuid(conn, row["uuid"])
         
     @staticmethod
@@ -676,17 +738,21 @@ class DB:
                 raise ValueError(f"Company with UUID {company_uuid} not found")
             if owner_check != user_uuid:
                 raise PermissionError("You can only update your own companies")
+            
             update_fields = []
             params = []
             param_count = 1
+            
             for field, value in [
                 ("name", name), ("description_es", description_es), ("description_en", description_en),
-                ("address", address), ("phone", phone), ("email", email), ("image_url", image_url),("image_extension", image_extension)
+                ("address", address), ("phone", phone), ("email", email), ("image_url", image_url),
+                ("image_extension", image_extension)
             ]:
                 if value is not None:
                     update_fields.append(f"{field}=${param_count}")
                     params.append(value)
                     param_count += 1
+            
             if product_uuid is not None:
                 product_exists = await conn.fetchval("SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid)
                 if not product_exists:
@@ -694,6 +760,7 @@ class DB:
                 update_fields.append(f"product_uuid=${param_count}")
                 params.append(product_uuid)
                 param_count += 1
+            
             if commune_uuid is not None:
                 commune_exists = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
                 if not commune_exists:
@@ -701,14 +768,16 @@ class DB:
                 update_fields.append(f"commune_uuid=${param_count}")
                 params.append(commune_uuid)
                 param_count += 1
+            
             if not update_fields:
                 raise ValueError("No fields provided for update")
+            
             update_fields.append("updated_at=NOW()")
             params.append(company_uuid)
             update_query = f"UPDATE proveo.companies SET {', '.join(update_fields)} WHERE uuid=${param_count} RETURNING uuid"
             await conn.execute(update_query, *params)
+            
             logger.info("company_updated", company_uuid=str(company_uuid), user_uuid=str(user_uuid))
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
             return await DB.get_company_by_uuid(conn, company_uuid)
 
     @staticmethod
@@ -719,7 +788,7 @@ class DB:
             company = await conn.fetchrow(company_query, company_uuid, user_uuid)
             if not company:
                 return False
-            
+
             insert_deleted = """
                 INSERT INTO proveo.companies_deleted
                     (uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
@@ -734,10 +803,48 @@ class DB:
                 company["email"], company["image_url"], company["image_extension"],
                 company["created_at"], company["updated_at"]
             )
+
             await conn.execute("DELETE FROM proveo.companies WHERE uuid=$1", company_uuid)
             logger.info("company_deleted", company_uuid=str(company_uuid))
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
-            return True
+
+        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+        image_id = company.get("image_url")
+        image_ext = company.get("image_extension")
+        if image_id and image_ext:
+            image_path = f"{image_id}{image_ext}"
+            try:
+                success = await asyncio.wait_for(
+                    image_service_client.delete_image(image_path),
+                    timeout=15.0
+                )
+                if success:
+                    logger.info(
+                        "company_image_deleted",
+                        company_uuid=str(company_uuid),
+                        image_path=image_path
+                    )
+                else:
+                    logger.warning(
+                        "company_image_not_found",
+                        company_uuid=str(company_uuid),
+                        image_path=image_path
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "company_image_delete_timeout",
+                    company_uuid=str(company_uuid),
+                    image_path=image_path
+                )
+            except Exception as e:
+                logger.error(
+                    "company_image_delete_error",
+                    company_uuid=str(company_uuid),
+                    image_path=image_path,
+                    error=str(e)
+                )
+
+        return True
+
 
     @staticmethod
     @db_retry()
@@ -750,16 +857,9 @@ class DB:
         limit: int = 20,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """
-        Hybrid search:
-        - No query: list all (no search filter)
-        - Short query (< 4 chars): ILIKE '%q%' for predictable substring matching
-        - Long query (>= 4 chars): trigram similarity (pg_trgm % operator) for typo tolerance
-        """
         from typing import Any
         
         search = (query or "").strip().lower()
-        
         params: List[Any] = []
         
         if not search:
@@ -771,7 +871,6 @@ class DB:
                 WHERE 1=1
             """
             order_clause = " ORDER BY company_name ASC"
-            
         elif len(search) < 4:
             base_query = """
                 SELECT company_id, company_name, company_description_es, company_description_en,
@@ -782,7 +881,6 @@ class DB:
             """
             params.append(f"%{search}%")
             order_clause = " ORDER BY company_name ASC"
-            
         else:
             base_query = """
                 SELECT company_id, company_name, company_description_es, company_description_en,
@@ -815,7 +913,6 @@ class DB:
         params.extend([limit, offset])
         
         sql = base_query + order_clause + pagination_clause
-        
         rows = await conn.fetch(sql, *params)
         
         results: List[Dict[str, Any]] = []
@@ -842,7 +939,7 @@ class DB:
             admin_email
         )
         if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete other users.")
+            raise PermissionError("Only admin users can delete companies.")
 
         async with transaction(conn):
             company_query = """
@@ -854,26 +951,6 @@ class DB:
             company = await conn.fetchrow(company_query, company_uuid)
             if not company:
                 raise ValueError(f"Company with UUID {company_uuid} not found")
-
-            image_id = company.get("image_url")
-            image_ext = company.get("image_extension")
-            
-            if image_id and image_ext:
-                success = await image_service_client.delete_image(f"{image_id}{image_ext}")
-                if success:
-                    logger.info(
-                        "admin_deleted_company_image",
-                        company_uuid=str(company_uuid),
-                        image_path=f"{image_id}{image_ext}",
-                        admin_email=admin_email
-                    )
-                else:
-                    logger.warning(
-                        "admin_delete_company_image_not_found",
-                        company_uuid=str(company_uuid),
-                        image_path=f"{image_id}{image_ext}",
-                        admin_email=admin_email
-                    )
 
             insert_deleted = """
                 INSERT INTO proveo.companies_deleted
@@ -891,12 +968,53 @@ class DB:
             )
             
             await conn.execute("DELETE FROM proveo.companies WHERE uuid=$1", company_uuid)
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
 
             logger.info("admin_deleted_company", company_uuid=str(company_uuid), admin_email=admin_email)
 
-            return {
-                "uuid": str(company["uuid"]),
-                "name": company["name"],
-                "image_url": company["image_url"]
-            }
+        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+        image_id = company.get("image_url")
+        image_ext = company.get("image_extension")
+        
+        if image_id and image_ext:
+            image_path = f"{image_id}{image_ext}"
+            try:
+                success = await asyncio.wait_for(
+                    image_service_client.delete_image(image_path),
+                    timeout=15.0
+                )
+                if success:
+                    logger.info(
+                        "admin_deleted_company_image",
+                        company_uuid=str(company_uuid),
+                        image_path=image_path,
+                        admin_email=admin_email
+                    )
+                else:
+                    logger.warning(
+                        "admin_delete_company_image_not_found",
+                        company_uuid=str(company_uuid),
+                        image_path=image_path,
+                        admin_email=admin_email
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "admin_delete_company_image_timeout",
+                    company_uuid=str(company_uuid),
+                    image_path=image_path,
+                    admin_email=admin_email,
+                    message="Image deletion timed out after 15s - will be cleaned by cronjob"
+                )
+            except Exception as e:
+                logger.error(
+                    "admin_delete_company_image_error",
+                    company_uuid=str(company_uuid),
+                    image_path=image_path,
+                    error=str(e),
+                    admin_email=admin_email
+                )
+
+        return {
+            "uuid": str(company["uuid"]),
+            "name": company["name"],
+            "image_url": company["image_url"]
+        }

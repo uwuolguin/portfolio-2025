@@ -46,7 +46,8 @@ async def validate_csrf_token(request: Request) -> None:
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid admin bypass key"
+                detail="Invalid admin bypass key",
+                
             )
     
     cookie_token = request.cookies.get("csrf_token")
@@ -60,10 +61,11 @@ async def validate_csrf_token(request: Request) -> None:
         )
     
     if not secrets.compare_digest(cookie_token, header_token):
-        logger.warning("csrf_validation_failed", reason="token_mismatch")
+        logger.warning("csrf_validation_failed", reason="token_mismatch",stack_info=True)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="CSRF token invalid"
+            detail="CSRF token invalid",
+            
         )
     
     logger.debug("csrf_validation_success")
