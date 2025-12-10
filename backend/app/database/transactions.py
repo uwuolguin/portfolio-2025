@@ -802,7 +802,6 @@ class DB:
         commune_uuid: Optional[UUID] = None
     ) -> Dict[str, Any]:
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
-            # Check ownership
             owner_check = await conn.fetchval(
                 "SELECT user_uuid FROM proveo.companies WHERE uuid=$1", company_uuid
             )
@@ -1032,7 +1031,7 @@ class DB:
             params.extend([limit, offset])
 
             sql = base_query + order_clause + pagination_clause
-            rows = await conn.fetch(sql, *params)  # ✅ fetch is inside transaction
+            rows = await conn.fetch(sql, *params)
 
             results: List[Dict[str, Any]] = []
             for row in rows:
