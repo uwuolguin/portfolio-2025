@@ -932,87 +932,87 @@ class DB:
     @staticmethod
     @db_retry()
     async def search_companies(
-        conn: asyncpg.Connection,
-        query: str,
-        lang: str = "es",
-        commune: Optional[str] = None,
-        product: Optional[str] = None,
-        limit: int = 20,
-        offset: int = 0
-    ) -> List[Dict[str, Any]]:
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+            conn: asyncpg.Connection,
+            query: str,
+            lang: str = "es",
+            commune: Optional[str] = None,
+            product: Optional[str] = None,
+            limit: int = 20,
+            offset: int = 0
+        ) -> List[Dict[str, Any]]:
             search = (query or "").strip().lower()
             params: List[Any] = []
-        
-        if not search:
-            base_query = """
-                SELECT company_id, company_name, company_description_es, company_description_en,
-                    address, company_email, product_name_es, product_name_en,
-                    phone, image_url, user_name, user_email, commune_name
-                FROM proveo.company_search
-                WHERE 1=1
-            """
-            order_clause = " ORDER BY company_name ASC"
-        elif len(search) < 4:
-            base_query = """
-                SELECT company_id, company_name, company_description_es, company_description_en,
-                    address, company_email, product_name_es, product_name_en,
-                    phone, image_url, user_name, user_email, commune_name
-                FROM proveo.company_search
-                WHERE searchable_text ILIKE $1
-            """
-            params.append(f"%{search}%")
-            order_clause = " ORDER BY company_name ASC"
-        else:
-            base_query = """
-                SELECT company_id, company_name, company_description_es, company_description_en,
-                    address, company_email, product_name_es, product_name_en,
-                    phone, image_url, user_name, user_email, commune_name,
-                    similarity(searchable_text, $1) AS score
-                FROM proveo.company_search
-                WHERE searchable_text % $1
-            """
-            params.append(search)
-            order_clause = " ORDER BY score DESC, company_name ASC"
-        
-        if commune:
-            next_param = len(params) + 1
-            base_query += " AND LOWER(commune_name) = LOWER($" + str(next_param) + ")"
-            params.append(commune)
-        
-        if product:
-            idx1 = len(params) + 1
-            idx2 = len(params) + 2
-            base_query += (
-                f" AND (LOWER(product_name_es) = LOWER(${idx1}) "
-                f"OR LOWER(product_name_en) = LOWER(${idx2}))"
-            )
-            params.extend([product, product])
-        
-        limit_idx = len(params) + 1
-        offset_idx = len(params) + 2
-        pagination_clause = f" LIMIT ${limit_idx} OFFSET ${offset_idx}"
-        params.extend([limit, offset])
-        
-        sql = base_query + order_clause + pagination_clause
-        rows = await conn.fetch(sql, *params)
-        
-        results: List[Dict[str, Any]] = []
-        for row in rows:
-            results.append({
-                "uuid": row["company_id"],
-                "name": row["company_name"],
-                "description": row[f"company_description_{lang}"],
-                "address": row["address"],
-                "email": row["company_email"],
-                "product_name": row[f"product_name_{lang}"],
-                "commune_name": row["commune_name"],
-                "phone": row["phone"],
-                "img_url": row["image_url"]
-            })
-        
-        return results
 
+            async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+                if not search:
+                    base_query = """
+                        SELECT company_id, company_name, company_description_es, company_description_en,
+                            address, company_email, product_name_es, product_name_en,
+                            phone, image_url, user_name, user_email, commune_name
+                        FROM proveo.company_search
+                        WHERE 1=1
+                    """
+                    order_clause = " ORDER BY company_name ASC"
+                elif len(search) < 4:
+                    base_query = """
+                        SELECT company_id, company_name, company_description_es, company_description_en,
+                            address, company_email, product_name_es, product_name_en,
+                            phone, image_url, user_name, user_email, commune_name
+                        FROM proveo.company_search
+                        WHERE searchable_text ILIKE $1
+                    """
+                    params.append(f"%{search}%")
+                    order_clause = " ORDER BY company_name ASC"
+                else:
+                    base_query = """
+                        SELECT company_id, company_name, company_description_es, company_description_en,
+                            address, company_email, product_name_es, product_name_en,
+                            phone, image_url, user_name, user_email, commune_name,
+                            similarity(searchable_text, $1) AS score
+                        FROM proveo.company_search
+                        WHERE searchable_text % $1
+                    """
+                    params.append(search)
+                    order_clause = " ORDER BY score DESC, company_name ASC"
+
+                if commune:
+                    next_param = len(params) + 1
+                    base_query += " AND LOWER(commune_name) = LOWER($" + str(next_param) + ")"
+                    params.append(commune)
+
+                if product:
+                    idx1 = len(params) + 1
+                    idx2 = len(params) + 2
+                    base_query += (
+                        f" AND (LOWER(product_name_es) = LOWER(${idx1}) "
+                        f"OR LOWER(product_name_en) = LOWER(${idx2}))"
+                    )
+                    params.extend([product, product])
+
+                limit_idx = len(params) + 1
+                offset_idx = len(params) + 2
+                pagination_clause = f" LIMIT ${limit_idx} OFFSET ${offset_idx}"
+                params.extend([limit, offset])
+
+                sql = base_query + order_clause + pagination_clause
+                rows = await conn.fetch(sql, *params)
+
+            results: List[Dict[str, Any]] = []
+            for row in rows:
+                results.append({
+                    "uuid": row["company_id"],
+                    "name": row["company_name"],
+                    "description": row[f"company_description_{lang}"],
+                    "address": row["address"],
+                    "email": row["company_email"],
+                    "product_name": row[f"product_name_{lang}"],
+                    "commune_name": row["commune_name"],
+                    "phone": row["phone"],
+                    "img_url": row["image_url"]
+                })
+
+            return results
+    
     @staticmethod
     @db_retry()
     async def admin_delete_company_by_uuid(conn: asyncpg.Connection, company_uuid: UUID, admin_email: str) -> Dict[str, Any]:
