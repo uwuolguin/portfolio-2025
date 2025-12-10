@@ -181,6 +181,7 @@ class DB:
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
                 WHERE uuid = $1
+                FOR UPDATE
             """
             user = await conn.fetchrow(user_query, user_uuid)
             if not user:
@@ -192,6 +193,7 @@ class DB:
                     created_at, updated_at
                 FROM proveo.companies
                 WHERE user_uuid = $1
+                FOR UPDATE
             """
             company = await conn.fetchrow(company_query, user_uuid)
 
@@ -301,7 +303,7 @@ class DB:
     @staticmethod
     @db_retry()
     async def get_all_users_admin(conn: asyncpg.Connection, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-        async with transaction(conn, readonly=True):
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT u.uuid, u.name, u.email, u.created_at
                 FROM proveo.users u
@@ -329,6 +331,7 @@ class DB:
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
                 WHERE uuid = $1
+                FOR UPDATE
             """
             user = await conn.fetchrow(user_query, user_uuid)
             if not user:
@@ -340,6 +343,7 @@ class DB:
                     created_at, updated_at
                 FROM proveo.companies
                 WHERE user_uuid = $1
+                FOR UPDATE
             """
             company = await conn.fetchrow(company_query, user_uuid)
 
@@ -445,7 +449,7 @@ class DB:
             "user_uuid": str(user_uuid),
             "email": user["email"],
             "company_deleted": 1 if company else 0,
-            "image_deleted": deleted_image_path 
+            "image_deleted": 1 if deleted_image_path else 0
         }
         
 
@@ -925,7 +929,6 @@ class DB:
 
         return True
 
-
     @staticmethod
     @db_retry()
     async def search_companies(
@@ -937,10 +940,9 @@ class DB:
         limit: int = 20,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-
-        
-        search = (query or "").strip().lower()
-        params: List[Any] = []
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+            search = (query or "").strip().lower()
+            params: List[Any] = []
         
         if not search:
             base_query = """
@@ -974,8 +976,8 @@ class DB:
             order_clause = " ORDER BY score DESC, company_name ASC"
         
         if commune:
-            param_index = len(params) + 1
-            base_query += f" AND LOWER(commune_name) = LOWER(${param_index})"
+            next_param = len(params) + 1
+            base_query += " AND LOWER(commune_name) = LOWER($" + str(next_param) + ")"
             params.append(commune)
         
         if product:
@@ -1047,7 +1049,10 @@ class DB:
                 company["created_at"], company["updated_at"]
             )
             
-            deleted_company = await conn.fetchrow("DELETE FROM proveo.companies WHERE uuid=$1", company_uuid)
+            deleted_company = await conn.fetchrow(
+                "DELETE FROM proveo.companies WHERE uuid=$1 RETURNING uuid", 
+                company_uuid
+            )
             if not deleted_company:
                 logger.error(
                     "company_delete_race_condition_detected",
