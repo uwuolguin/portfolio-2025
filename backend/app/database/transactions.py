@@ -722,7 +722,7 @@ class DB:
         image_extension: str,           
         company_uuid: str               
     ) -> Dict[str, Any]:
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
                 user_uuid
@@ -801,7 +801,7 @@ class DB:
         product_uuid: Optional[UUID] = None,
         commune_uuid: Optional[UUID] = None
     ) -> Dict[str, Any]:
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
             owner_check = await conn.fetchval(
                 "SELECT user_uuid FROM proveo.companies WHERE uuid=$1", company_uuid
             )
