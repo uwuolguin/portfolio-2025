@@ -456,7 +456,7 @@ class DB:
     @staticmethod
     @db_retry()
     async def get_all_products(conn: asyncpg.Connection) -> List[Dict[str, Any]]:
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED,readonly=True):
             query = """
                 SELECT uuid, name_es, name_en, created_at
                 FROM proveo.products
@@ -559,7 +559,7 @@ class DB:
     @staticmethod
     @db_retry()
     async def get_all_communes(conn: asyncpg.Connection) -> List[Dict[str, Any]]:
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED,readonly=True):
             query = """
                 SELECT uuid, name, created_at
                 FROM proveo.communes
@@ -722,7 +722,7 @@ class DB:
         image_extension: str,           
         company_uuid: str               
     ) -> Dict[str, Any]:
-        async with transaction(conn,isolation=IsolationLevel.SERIALIZABLE):
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
                 user_uuid
@@ -743,7 +743,9 @@ class DB:
                     (user_uuid, product_uuid, commune_uuid, name, description_es, description_en,
                     address, phone, email, image_url, image_extension, uuid)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-                RETURNING uuid """
+                RETURNING uuid, user_uuid, product_uuid, commune_uuid, name, description_es, description_en,
+                        address, phone, email, image_url, image_extension, created_at, updated_at
+            """
             row = await conn.fetchrow(
                 insert_query, 
                 user_uuid, 
@@ -761,8 +763,26 @@ class DB:
             )
 
             logger.info("company_created", company_uuid=str(row["uuid"]), user_uuid=str(user_uuid))
-    
-            return await DB.get_company_by_uuid(conn, row["uuid"])
+
+            company_data = {
+                "uuid": row["uuid"],
+                "user_uuid": row["user_uuid"],
+                "product_uuid": row["product_uuid"],
+                "commune_uuid": row["commune_uuid"],
+                "name": row["name"],
+                "description_es": row["description_es"],
+                "description_en": row["description_en"],
+                "address": row["address"],
+                "phone": row["phone"],
+                "email": row["email"],
+                "image_url": row["image_url"],
+                "image_extension": row["image_extension"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+
+            return company_data
+
         
     @staticmethod
     @db_retry()
@@ -781,53 +801,70 @@ class DB:
         product_uuid: Optional[UUID] = None,
         commune_uuid: Optional[UUID] = None
     ) -> Dict[str, Any]:
-        async with transaction(conn,isolation=IsolationLevel.SERIALIZABLE):
-            owner_check = await conn.fetchval("SELECT user_uuid FROM proveo.companies WHERE uuid=$1", company_uuid)
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
+            # Check ownership
+            owner_check = await conn.fetchval(
+                "SELECT user_uuid FROM proveo.companies WHERE uuid=$1", company_uuid
+            )
             if not owner_check:
                 raise ValueError(f"Company with UUID {company_uuid} not found")
             if owner_check != user_uuid:
                 raise PermissionError("You can only update your own companies")
-            
+
             update_fields = []
             params = []
             param_count = 1
-            
+
             for field, value in [
                 ("name", name), ("description_es", description_es), ("description_en", description_en),
-                ("address", address), ("phone", phone), ("email", email), ("image_url", image_url),
-                ("image_extension", image_extension)
+                ("address", address), ("phone", phone), ("email", email),
+                ("image_url", image_url), ("image_extension", image_extension)
             ]:
                 if value is not None:
                     update_fields.append(f"{field}=${param_count}")
                     params.append(value)
                     param_count += 1
-            
+
             if product_uuid is not None:
-                product_exists = await conn.fetchval("SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid)
+                product_exists = await conn.fetchval(
+                    "SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid
+                )
                 if not product_exists:
                     raise ValueError(f"Product with UUID {product_uuid} does not exist")
                 update_fields.append(f"product_uuid=${param_count}")
                 params.append(product_uuid)
                 param_count += 1
-            
+
             if commune_uuid is not None:
-                commune_exists = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
+                commune_exists = await conn.fetchval(
+                    "SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid
+                )
                 if not commune_exists:
                     raise ValueError(f"Commune with UUID {commune_uuid} does not exist")
                 update_fields.append(f"commune_uuid=${param_count}")
                 params.append(commune_uuid)
                 param_count += 1
-            
+
             if not update_fields:
                 raise ValueError("No fields provided for update")
-            
+
             update_fields.append("updated_at=NOW()")
             params.append(company_uuid)
-            update_query = f"UPDATE proveo.companies SET {', '.join(update_fields)} WHERE uuid=${param_count} RETURNING uuid"
-            await conn.execute(update_query, *params)
-            
+
+            update_query = f"""
+                UPDATE proveo.companies
+                SET {', '.join(update_fields)}
+                WHERE uuid=${param_count}
+                RETURNING uuid, user_uuid, product_uuid, commune_uuid, name, description_es, description_en,
+                        address, phone, email, image_url, image_extension, created_at, updated_at
+            """
+            row = await conn.fetchrow(update_query, *params)
+            if not row:
+                raise RuntimeError("Failed to update company")
+
             logger.info("company_updated", company_uuid=str(company_uuid), user_uuid=str(user_uuid))
-            return await DB.get_company_by_uuid(conn, company_uuid)
+            return dict(row)
+
 
     @staticmethod
     @db_retry()
@@ -940,62 +977,62 @@ class DB:
             limit: int = 20,
             offset: int = 0
         ) -> List[Dict[str, Any]]:
-            search = (query or "").strip().lower()
-            params: List[Any] = []
+        search = (query or "").strip().lower()
+        params: List[Any] = []
 
-            async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
-                if not search:
-                    base_query = """
-                        SELECT company_id, company_name, company_description_es, company_description_en,
-                            address, company_email, product_name_es, product_name_en,
-                            phone, image_url, user_name, user_email, commune_name
-                        FROM proveo.company_search
-                        WHERE 1=1
-                    """
-                    order_clause = " ORDER BY company_name ASC"
-                elif len(search) < 4:
-                    base_query = """
-                        SELECT company_id, company_name, company_description_es, company_description_en,
-                            address, company_email, product_name_es, product_name_en,
-                            phone, image_url, user_name, user_email, commune_name
-                        FROM proveo.company_search
-                        WHERE searchable_text ILIKE $1
-                    """
-                    params.append(f"%{search}%")
-                    order_clause = " ORDER BY company_name ASC"
-                else:
-                    base_query = """
-                        SELECT company_id, company_name, company_description_es, company_description_en,
-                            address, company_email, product_name_es, product_name_en,
-                            phone, image_url, user_name, user_email, commune_name,
-                            similarity(searchable_text, $1) AS score
-                        FROM proveo.company_search
-                        WHERE searchable_text % $1
-                    """
-                    params.append(search)
-                    order_clause = " ORDER BY score DESC, company_name ASC"
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+            if not search:
+                base_query = """
+                    SELECT company_id, company_name, company_description_es, company_description_en,
+                        address, company_email, product_name_es, product_name_en,
+                        phone, image_url, user_name, user_email, commune_name
+                    FROM proveo.company_search
+                    WHERE 1=1
+                """
+                order_clause = " ORDER BY company_name ASC"
+            elif len(search) < 4:
+                base_query = """
+                    SELECT company_id, company_name, company_description_es, company_description_en,
+                        address, company_email, product_name_es, product_name_en,
+                        phone, image_url, user_name, user_email, commune_name
+                    FROM proveo.company_search
+                    WHERE searchable_text ILIKE $1
+                """
+                params.append(f"%{search}%")
+                order_clause = " ORDER BY company_name ASC"
+            else:
+                base_query = """
+                    SELECT company_id, company_name, company_description_es, company_description_en,
+                        address, company_email, product_name_es, product_name_en,
+                        phone, image_url, user_name, user_email, commune_name,
+                        similarity(searchable_text, $1) AS score
+                    FROM proveo.company_search
+                    WHERE searchable_text % $1
+                """
+                params.append(search)
+                order_clause = " ORDER BY score DESC, company_name ASC"
 
-                if commune:
-                    next_param = len(params) + 1
-                    base_query += " AND LOWER(commune_name) = LOWER($" + str(next_param) + ")"
-                    params.append(commune)
+            if commune:
+                next_param = len(params) + 1
+                base_query += f" AND LOWER(commune_name) = LOWER(${next_param})"
+                params.append(commune)
 
-                if product:
-                    idx1 = len(params) + 1
-                    idx2 = len(params) + 2
-                    base_query += (
-                        f" AND (LOWER(product_name_es) = LOWER(${idx1}) "
-                        f"OR LOWER(product_name_en) = LOWER(${idx2}))"
-                    )
-                    params.extend([product, product])
+            if product:
+                idx1 = len(params) + 1
+                idx2 = len(params) + 2
+                base_query += (
+                    f" AND (LOWER(product_name_es) = LOWER(${idx1}) "
+                    f"OR LOWER(product_name_en) = LOWER(${idx2}))"
+                )
+                params.extend([product, product])
 
-                limit_idx = len(params) + 1
-                offset_idx = len(params) + 2
-                pagination_clause = f" LIMIT ${limit_idx} OFFSET ${offset_idx}"
-                params.extend([limit, offset])
+            limit_idx = len(params) + 1
+            offset_idx = len(params) + 2
+            pagination_clause = f" LIMIT ${limit_idx} OFFSET ${offset_idx}"
+            params.extend([limit, offset])
 
-                sql = base_query + order_clause + pagination_clause
-                rows = await conn.fetch(sql, *params)
+            sql = base_query + order_clause + pagination_clause
+            rows = await conn.fetch(sql, *params)  # ✅ fetch is inside transaction
 
             results: List[Dict[str, Any]] = []
             for row in rows:
@@ -1011,7 +1048,8 @@ class DB:
                     "img_url": row["image_url"]
                 })
 
-            return results
+        return results
+
     
     @staticmethod
     @db_retry()
