@@ -4,7 +4,7 @@ Handles all communication with the image storage microservice
 """
 import httpx
 import structlog
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -12,11 +12,19 @@ from tenacity import (
     retry_if_exception_type,
     before_sleep_log
 )
+from typing import TypedDict
 from app.config import settings
 import logging
 
 logger = structlog.get_logger(__name__)
 
+class UploadedImage(TypedDict):
+    image_id: str
+    extension: str
+    url: str
+    size: int
+    nsfw_score: float
+    nsfw_checked: bool
 
 class ImageServiceError(Exception):
     """Base exception for image service errors"""
@@ -96,7 +104,7 @@ class ImageServiceClient:
         content_type: str,
         extension: str,
         user_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> UploadedImage:
         """
         Upload image to storage service
         
@@ -151,7 +159,15 @@ class ImageServiceClient:
                            image_id=result.get('image_id'),
                            extension=result.get('extension'),
                            size=result.get('size'))
-                return result
+                typed_result: UploadedImage = UploadedImage(
+                    image_id=result['image_id'],
+                    extension=result['extension'],
+                    url=result['url'],
+                    size=result['size'],
+                    nsfw_score=result['nsfw_score'],
+                    nsfw_checked=result['nsfw_checked']
+                )
+                return typed_result
             else:
                 error_detail = response.json().get('detail', 'Unknown error')
                 logger.error("image_upload_failed",
