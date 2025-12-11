@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from uuid import UUID
 import asyncpg
@@ -19,7 +19,7 @@ router = APIRouter(
 
 
 @router.get("/", response_model=List[CommuneResponse])
-@cache_response(key_prefix="communes:all", ttl=259200)  # Cache for 3 days
+@cache_response(key_prefix="communes:all", ttl=259200)
 async def list_communes(
     db: asyncpg.Connection = Depends(get_db)
 ):
@@ -47,7 +47,6 @@ async def create_commune(
             user_email=current_user["email"]
         )
         
-        # Invalidate cache so next request gets fresh data
         await cache_manager.invalidate_communes()
         
         return CommuneResponse(**commune)

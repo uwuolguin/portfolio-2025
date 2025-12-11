@@ -9,7 +9,6 @@ from uuid import UUID
 import asyncpg
 import uuid
 
-from app.config import settings
 from app.database.connection import get_db
 from app.database.transactions import DB
 from app.auth.dependencies import require_verified_email, require_admin, verify_csrf, get_current_user

@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Optional, List, Dict, Any
 from enum import Enum
 from uuid import UUID
 from app.database.db_retry import db_retry
+from app.schemas.communes import CommuneRecord
 from app.auth.jwt import get_password_hash
 from app.config import settings
 import uuid
@@ -558,15 +559,15 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_all_communes(conn: asyncpg.Connection) -> List[Dict[str, Any]]:
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED,readonly=True):
+    async def get_all_communes(conn: asyncpg.Connection) -> List[CommuneRecord]:
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT uuid, name, created_at
                 FROM proveo.communes
                 ORDER BY name ASC
             """
             rows = await conn.fetch(query)
-            return [dict(row) for row in rows]
+            return [CommuneRecord(**dict(row)) for row in rows]
 
     @staticmethod
     @db_retry()
