@@ -1,12 +1,14 @@
 from pydantic import BaseModel, Field
 from uuid import UUID
 from datetime import datetime
-from typing import TypedDict
 
-class CommuneRecord(TypedDict):
+class CommuneRecord(BaseModel):
     uuid: UUID
     name: str
     created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 class CommuneCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Commune name (e.g., 'Santiago', 'Valparaíso')")

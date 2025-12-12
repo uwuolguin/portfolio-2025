@@ -584,7 +584,6 @@ class DB:
             insert_query = """
                 INSERT INTO proveo.communes (name,uuid) 
                 VALUES ($1,$2) 
-                ON CONFLICT (name) DO NOTHING
                 RETURNING uuid,name,created_at
             """
             row = await conn.fetchrow(insert_query, name, commune_uuid)
