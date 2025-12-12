@@ -571,7 +571,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_commune(conn: asyncpg.Connection, name: str, user_email: str) -> Dict[str, Any]:
+    async def create_commune(conn: asyncpg.Connection, name: str, user_email: str) -> CommuneRecord:
         admin_user = await conn.fetchrow(
             "SELECT role FROM proveo.users WHERE email = $1", 
             user_email
@@ -593,7 +593,7 @@ class DB:
                 raise ValueError("Commune with this name already exists")
             
             logger.info("commune_created", uuid=commune_uuid)
-            return dict(row)
+            return CommuneRecord(**dict(row))
 
     @staticmethod
     @db_retry()
