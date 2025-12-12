@@ -24,8 +24,8 @@ class Product(Base):
     __table_args__ = {"schema": "proveo"}
     
     uuid = Column(UUID(as_uuid=True), primary_key=True)
-    name_es = Column(String(100), nullable=False)
-    name_en = Column(String(100), nullable=False)
+    name_es = Column(String(100), nullable=False, unique=True)
+    name_en = Column(String(100), nullable=False,unique= True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 class Commune(Base):
@@ -33,7 +33,7 @@ class Commune(Base):
     __table_args__ = {"schema": "proveo"}
     
     uuid = Column(UUID(as_uuid=True), primary_key=True)
-    name = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 class Company(Base):

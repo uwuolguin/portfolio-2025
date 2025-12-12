@@ -25,6 +25,7 @@ def upgrade() -> None:
         sa.Column('name', sa.String(length=100), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.PrimaryKeyConstraint('uuid'),
+        sa.UniqueConstraint('name'),
         schema='proveo'
     )
 
@@ -65,6 +66,8 @@ def upgrade() -> None:
         sa.Column('name_en', sa.String(length=100), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.PrimaryKeyConstraint('uuid'),
+        sa.UniqueConstraint('name_es'),
+        sa.UniqueConstraint('name_en'),
         schema='proveo'
     )
 

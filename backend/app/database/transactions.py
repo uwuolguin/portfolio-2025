@@ -486,7 +486,15 @@ class DB:
             row = await conn.fetchrow(insert_query, product_uuid, name_es, name_en)
             
             if row is None:
-                raise ValueError("Product with this name already exists")
+                existing_es = await conn.fetchval("SELECT 1 FROM proveo.products WHERE name_es=$1", name_es)
+                existing_en = await conn.fetchval("SELECT 1 FROM proveo.products WHERE name_en=$1", name_en)
+                
+                if existing_es:
+                    raise ValueError(f"Product with Spanish name '{name_es}' already exists")
+                elif existing_en:
+                    raise ValueError(f"Product with English name '{name_en}' already exists")
+                else:
+                    raise ValueError("Product with this name already exists")
             
             logger.info("product_created", product_uuid=str(row["uuid"]))
             return dict(row)
@@ -578,18 +586,19 @@ class DB:
         )
         if not admin_user or admin_user['role'] != 'admin':
             raise PermissionError("Only admin users can create communes.")
+        
         commune_uuid = str(uuid.uuid4())
         async with transaction(conn):
-            
             insert_query = """
                 INSERT INTO proveo.communes (name,uuid) 
                 VALUES ($1,$2) 
+                ON CONFLICT (name) DO NOTHING
                 RETURNING uuid,name,created_at
             """
             row = await conn.fetchrow(insert_query, name, commune_uuid)
             
             if row is None:
-                raise ValueError("Commune with this name already exists")
+                raise ValueError(f"Commune with name '{name}' already exists")
             
             logger.info("commune_created", uuid=commune_uuid)
             return CommuneRecord(**dict(row))
