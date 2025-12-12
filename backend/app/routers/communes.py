@@ -43,8 +43,7 @@ async def create_commune(
     try:
         commune = await DB.create_commune(
             conn=db,
-            name=commune_data.name,
-            user_email=current_user["email"]
+            name=commune_data.name
         )
         
         await cache_manager.invalidate_communes()
@@ -79,11 +78,9 @@ async def update_commune(
         commune = await DB.update_commune_by_uuid(
             conn=db,
             commune_uuid=commune_uuid,
-            name=commune_data.name,
-            user_email=current_user["email"]
+            name=commune_data.name
         )
         
-        # Invalidate cache so next request gets fresh data
         await cache_manager.invalidate_communes()
         
         return CommuneResponse(**commune)
@@ -114,11 +111,9 @@ async def delete_commune(
     try:
         result = await DB.delete_commune_by_uuid(
             conn=db,
-            commune_uuid=commune_uuid,
-            user_email=current_user["email"]
+            commune_uuid=commune_uuid
         )
         
-        # Invalidate cache so next request gets fresh data
         await cache_manager.invalidate_communes()
         
         logger.info(

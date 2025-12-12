@@ -595,14 +595,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_commune(conn: asyncpg.Connection, name: str, user_email: str) -> CommuneRecord:
-        admin_user = await conn.fetchrow(
-            "SELECT role FROM proveo.users WHERE email = $1", 
-            user_email
-        )
-        if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can create communes.")
-        
+    async def create_commune(conn: asyncpg.Connection, name: str) -> CommuneRecord:        
         commune_uuid = str(uuid.uuid4())
         async with transaction(conn):
             insert_query = """
@@ -621,14 +614,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: Optional[str], user_email: str) -> Dict[str, Any]:
-        admin_user = await conn.fetchrow(
-            "SELECT role FROM proveo.users WHERE email = $1", 
-            user_email
-        )
-        if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can update communes.")
-        
+    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: Optional[str]) -> CommuneRecord:        
         async with transaction(conn):
             existing = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
             if not existing:
@@ -647,35 +633,49 @@ class DB:
             row = await conn.fetchrow(update_query, name, commune_uuid)
             
             logger.info("commune_updated", commune_uuid=str(commune_uuid))
-            return dict(row)
+            return CommuneRecord(**dict(row))
 
     @staticmethod
     @db_retry()
-    async def delete_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, user_email: str) -> Dict[str, Any]:
-        admin_user = await conn.fetchrow(
-            "SELECT role FROM proveo.users WHERE email = $1", 
-            user_email
-        )
-        if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete communes.")
-        
+    async def delete_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID) -> CommuneRecord:
         async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
-            commune_query = "SELECT uuid,name,created_at FROM proveo.communes WHERE uuid=$1"
+            commune_query = """
+                SELECT uuid, name, created_at
+                FROM proveo.communes
+                WHERE uuid = $1
+            """
             commune = await conn.fetchrow(commune_query, commune_uuid)
             if not commune:
                 raise ValueError(f"Commune with UUID {commune_uuid} not found")
-            
-            company_count = await conn.fetchval("SELECT COUNT(*) FROM proveo.companies WHERE commune_uuid=$1", commune_uuid)
+
+            company_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM proveo.companies WHERE commune_uuid = $1",
+                commune_uuid,
+            )
             if company_count > 0:
-                raise ValueError(f"Cannot delete commune '{commune['name']}'. {company_count} company(ies) are still located in this commune.")
-            
-            insert_deleted = "INSERT INTO proveo.communes_deleted (uuid,name,created_at) VALUES ($1,$2,$3)"
-            await conn.execute(insert_deleted, commune["uuid"], commune["name"], commune["created_at"])
-            
-            await conn.execute("DELETE FROM proveo.communes WHERE uuid=$1", commune_uuid)
-            
+                raise ValueError(
+                    f"Cannot delete commune '{commune['name']}'. {company_count} company(ies) are still located in this commune."
+                )
+
+            await conn.execute(
+                "INSERT INTO proveo.communes_deleted (uuid, name, created_at) VALUES ($1, $2, $3)",
+                commune["uuid"],
+                commune["name"],
+                commune["created_at"],
+            )
+
+            await conn.execute(
+                "DELETE FROM proveo.communes WHERE uuid = $1",
+                commune_uuid,
+            )
+
             logger.info("commune_deleted", commune_uuid=str(commune_uuid))
-            return {"uuid": str(commune["uuid"]), "name": commune["name"]}
+
+            return CommuneRecord(
+                uuid=str(commune["uuid"]),
+                name=commune["name"],
+            )
+
 
     @staticmethod
     @db_retry()
