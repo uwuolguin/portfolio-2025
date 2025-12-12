@@ -514,6 +514,25 @@ class DB:
             if not existing:
                 raise ValueError(f"Product with UUID {product_uuid} not found")
             
+            if name_es is None and name_en is None:
+                raise ValueError("No fields provided for update")
+            
+            if name_es is not None:
+                conflict = await conn.fetchval(
+                    "SELECT 1 FROM proveo.products WHERE name_es=$1 AND uuid!=$2", 
+                    name_es, product_uuid
+                )
+                if conflict:
+                    raise ValueError(f"Another product with Spanish name '{name_es}' already exists")
+
+            if name_en is not None:
+                conflict = await conn.fetchval(
+                    "SELECT 1 FROM proveo.products WHERE name_en=$1 AND uuid!=$2", 
+                    name_en, product_uuid
+                )
+                if conflict:
+                    raise ValueError(f"Another product with English name '{name_en}' already exists")
+            
             update_fields = []
             params = []
             param_count = 1
@@ -527,16 +546,13 @@ class DB:
                 params.append(name_en)
                 param_count += 1
             
-            if not update_fields:
-                raise ValueError("No fields provided for update")
-            
             params.append(product_uuid)
             update_query = f"UPDATE proveo.products SET {', '.join(update_fields)} WHERE uuid=${param_count} RETURNING uuid,name_es,name_en,created_at"
             row = await conn.fetchrow(update_query, *params)
-            
+
             logger.info("product_updated", product_uuid=str(product_uuid))
-            return dict(row)
-        
+            return dict(row) 
+      
     @staticmethod
     @db_retry()
     async def delete_product_by_uuid(conn: asyncpg.Connection, product_uuid: UUID, user_email: str) -> Dict[str, Any]:
@@ -620,6 +636,12 @@ class DB:
             
             if name is None:
                 raise ValueError("Name is required for update")
+            conflict = await conn.fetchval(
+                "SELECT 1 FROM proveo.communes WHERE name=$1 AND uuid!=$2", 
+                name, commune_uuid
+            )
+            if conflict:
+                raise ValueError(f"Another commune with name '{name}' already exists")
             
             update_query = "UPDATE proveo.communes SET name=$1 WHERE uuid=$2 RETURNING uuid,name,created_at"
             row = await conn.fetchrow(update_query, name, commune_uuid)
