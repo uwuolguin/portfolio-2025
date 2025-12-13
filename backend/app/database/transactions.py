@@ -6,6 +6,7 @@ from enum import Enum
 from uuid import UUID
 from app.database.db_retry import db_retry
 from app.schemas.communes import CommuneRecord
+from app.schemas.products import ProductRecord
 from app.auth.jwt import get_password_hash
 from app.config import settings
 import uuid
@@ -452,134 +453,164 @@ class DB:
             "company_deleted": 1 if company else 0,
             "image_deleted": 1 if deleted_image_path else 0
         }
-        
-
+                
     @staticmethod
     @db_retry()
-    async def get_all_products(conn: asyncpg.Connection) -> List[Dict[str, Any]]:
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED,readonly=True):
+    async def get_all_products(conn: asyncpg.Connection) -> List[ProductRecord]:
+        """
+        Get all products ordered by English name
+        
+        Returns:
+            List of ProductRecord objects (not Dict)
+        
+        Note: Matches communes pattern for consistency
+        """
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT uuid, name_es, name_en, created_at
                 FROM proveo.products
                 ORDER BY name_en ASC
             """
             rows = await conn.fetch(query)
-            return [dict(row) for row in rows]
-        
-    @staticmethod
-    @db_retry()
-    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str, user_email: str) -> Dict[str, Any]:
-        admin_user = await conn.fetchrow(
-            "SELECT role FROM proveo.users WHERE email = $1", 
-            user_email
-        )
-        if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can create products.")
-        product_uuid = str(uuid.uuid4())
-        async with transaction(conn):
-            insert_query = """
-                INSERT INTO proveo.products (uuid,name_es,name_en) 
-                VALUES ($1,$2,$3) 
-                ON CONFLICT (name_es) DO NOTHING
-                RETURNING uuid,name_es,name_en,created_at
-            """
-            row = await conn.fetchrow(insert_query, product_uuid, name_es, name_en)
-            
-            if row is None:
-                existing_es = await conn.fetchval("SELECT 1 FROM proveo.products WHERE name_es=$1", name_es)
-                existing_en = await conn.fetchval("SELECT 1 FROM proveo.products WHERE name_en=$1", name_en)
-                
-                if existing_es:
-                    raise ValueError(f"Product with Spanish name '{name_es}' already exists")
-                elif existing_en:
-                    raise ValueError(f"Product with English name '{name_en}' already exists")
-                else:
-                    raise ValueError("Product with this name already exists")
-            
-            logger.info("product_created", product_uuid=str(row["uuid"]))
-            return dict(row)
+            return [ProductRecord(**dict(row)) for row in rows]
 
     @staticmethod
     @db_retry()
-    async def update_product_by_uuid(conn: asyncpg.Connection, product_uuid: UUID, name_es: Optional[str], name_en: Optional[str], user_email: str) -> Dict[str, Any]:
-        admin_user = await conn.fetchrow(
-            "SELECT role FROM proveo.users WHERE email = $1", 
-            user_email
-        )
-        if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can update products.")
-        
+    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str) -> ProductRecord:
+        product_uuid = str(uuid.uuid4())
+
+        try:
+            async with transaction(conn):
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO proveo.products (uuid, name_es, name_en)
+                    VALUES ($1, $2, $3)
+                    RETURNING uuid, name_es, name_en, created_at
+                    """,
+                    product_uuid,
+                    name_es,
+                    name_en,
+                )
+
+                logger.info("product_created", product_uuid=str(row["uuid"]))
+                return ProductRecord(**dict(row))
+
+        except asyncpg.UniqueViolationError:
+            raise ValueError("Product with this name already exists")
+
+    @staticmethod
+    @db_retry()
+    async def update_product_by_uuid(
+        conn: asyncpg.Connection,
+        product_uuid: UUID,
+        name_es: str,
+        name_en: str,
+    ) -> ProductRecord:
+
         async with transaction(conn):
-            existing = await conn.fetchval("SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid)
+            existing = await conn.fetchval(
+                "SELECT 1 FROM proveo.products WHERE uuid=$1",
+                product_uuid,
+            )
             if not existing:
                 raise ValueError(f"Product with UUID {product_uuid} not found")
-            
-            if name_es is None and name_en is None:
-                raise ValueError("No fields provided for update")
-            
-            if name_es is not None:
-                conflict = await conn.fetchval(
-                    "SELECT 1 FROM proveo.products WHERE name_es=$1 AND uuid!=$2", 
-                    name_es, product_uuid
-                )
-                if conflict:
-                    raise ValueError(f"Another product with Spanish name '{name_es}' already exists")
 
-            if name_en is not None:
-                conflict = await conn.fetchval(
-                    "SELECT 1 FROM proveo.products WHERE name_en=$1 AND uuid!=$2", 
-                    name_en, product_uuid
+            conflict_es = await conn.fetchval(
+                "SELECT 1 FROM proveo.products WHERE name_es=$1 AND uuid!=$2",
+                name_es,
+                product_uuid,
+            )
+            if conflict_es:
+                raise ValueError(
+                    f"Another product with Spanish name '{name_es}' already exists"
                 )
-                if conflict:
-                    raise ValueError(f"Another product with English name '{name_en}' already exists")
-            
-            update_fields = []
-            params = []
-            param_count = 1
-            
-            if name_es is not None:
-                update_fields.append(f"name_es=${param_count}")
-                params.append(name_es)
-                param_count += 1
-            if name_en is not None:
-                update_fields.append(f"name_en=${param_count}")
-                params.append(name_en)
-                param_count += 1
-            
-            params.append(product_uuid)
-            update_query = f"UPDATE proveo.products SET {', '.join(update_fields)} WHERE uuid=${param_count} RETURNING uuid,name_es,name_en,created_at"
-            row = await conn.fetchrow(update_query, *params)
+
+            conflict_en = await conn.fetchval(
+                "SELECT 1 FROM proveo.products WHERE name_en=$1 AND uuid!=$2",
+                name_en,
+                product_uuid,
+            )
+            if conflict_en:
+                raise ValueError(
+                    f"Another product with English name '{name_en}' already exists"
+                )
+
+            row = await conn.fetchrow(
+                """
+                UPDATE proveo.products
+                SET name_es=$1, name_en=$2
+                WHERE uuid=$3
+                RETURNING uuid, name_es, name_en, created_at
+                """,
+                name_es,
+                name_en,
+                product_uuid,
+            )
 
             logger.info("product_updated", product_uuid=str(product_uuid))
-            return dict(row) 
-      
+            return ProductRecord(**dict(row))
+
+
     @staticmethod
     @db_retry()
-    async def delete_product_by_uuid(conn: asyncpg.Connection, product_uuid: UUID, user_email: str) -> Dict[str, Any]:
-        admin_user = await conn.fetchrow(
-            "SELECT role FROM proveo.users WHERE email = $1", 
-            user_email
-        )
-        if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete products.")
+    async def delete_product_by_uuid(
+        conn: asyncpg.Connection, 
+        product_uuid: UUID
+    ) -> ProductRecord:
+        """
+        Delete product by UUID (soft delete to products_deleted table)
         
+        Args:
+            conn: Database connection
+            product_uuid: Product UUID to delete
+        
+        Returns:
+            ProductRecord object (the deleted product)
+        
+        Raises:
+            ValueError: If product not found or still in use by companies
+        
+        Note: Admin validation must be done in router layer
+        """
         async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
-            product_query = "SELECT uuid,name_es,name_en,created_at FROM proveo.products WHERE uuid=$1"
+            product_query = """
+                SELECT uuid, name_es, name_en, created_at 
+                FROM proveo.products 
+                WHERE uuid=$1
+            """
             product = await conn.fetchrow(product_query, product_uuid)
+            
             if not product:
                 raise ValueError(f"Product with UUID {product_uuid} not found")
             
-            company_count = await conn.fetchval("SELECT COUNT(*) FROM proveo.companies WHERE product_uuid=$1", product_uuid)
-            if company_count > 0:
-                raise ValueError(f"Cannot delete product '{product['name_en']}'. {company_count} company(ies) are still using this product.")
+            company_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM proveo.companies WHERE product_uuid=$1", 
+                product_uuid
+            )
             
-            insert_deleted = "INSERT INTO proveo.products_deleted (uuid,name_es,name_en,created_at) VALUES ($1,$2,$3,$4)"
-            await conn.execute(insert_deleted, product["uuid"], product["name_es"], product["name_en"], product["created_at"])
+            if company_count > 0:
+                raise ValueError(
+                    f"Cannot delete product '{product['name_en']}'. "
+                    f"{company_count} company(ies) are still using this product."
+                )
+            
+            insert_deleted = """
+                INSERT INTO proveo.products_deleted (uuid, name_es, name_en, created_at) 
+                VALUES ($1, $2, $3, $4)
+            """
+            await conn.execute(
+                insert_deleted, 
+                product["uuid"], 
+                product["name_es"], 
+                product["name_en"], 
+                product["created_at"]
+            )
             
             await conn.execute("DELETE FROM proveo.products WHERE uuid=$1", product_uuid)
             
             logger.info("product_deleted", product_uuid=str(product_uuid))
-            return {"uuid": str(product["uuid"]), "name_es": product["name_es"], "name_en": product["name_en"]}
+            
+            return ProductRecord(**dict(product))
 
     @staticmethod
     @db_retry()
@@ -614,7 +645,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: Optional[str]) -> CommuneRecord:        
+    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: str) -> CommuneRecord:        
         async with transaction(conn):
             existing = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
             if not existing:

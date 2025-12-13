@@ -4,7 +4,7 @@ from uuid import UUID
 import asyncpg
 from app.database.connection import get_db
 from app.database.transactions import DB
-from app.auth.dependencies import  verify_csrf, require_admin
+from app.auth.dependencies import verify_csrf, require_admin
 from app.schemas.communes import CommuneCreate, CommuneUpdate, CommuneResponse
 from app.redis.decorators import cache_response
 from app.redis.cache_manager import cache_manager
@@ -23,7 +23,6 @@ router = APIRouter(
 async def list_communes(
     db: asyncpg.Connection = Depends(get_db)
 ):
-    """Public endpoint - cached for 3 days"""
     communes = await DB.get_all_communes(conn=db)
     return [CommuneResponse(**commune) for commune in communes]
 
@@ -36,7 +35,7 @@ async def list_communes(
 )
 async def create_commune(
     commune_data: CommuneCreate,
-    current_user: dict = Depends(require_admin), 
+    current_user: dict = Depends(require_admin),
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf)
 ):
@@ -45,19 +44,17 @@ async def create_commune(
             conn=db,
             name=commune_data.name
         )
-        
+
         await cache_manager.invalidate_communes()
-        
+
         return CommuneResponse(**commune)
-        
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
         logger.error("create_commune_error", error=str(e), exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create commune"
         )
 
@@ -70,7 +67,7 @@ async def create_commune(
 async def update_commune(
     commune_uuid: UUID,
     commune_data: CommuneUpdate,
-    current_user: dict = Depends(require_admin), 
+    current_user: dict = Depends(require_admin),
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf)
 ):
@@ -80,19 +77,17 @@ async def update_commune(
             commune_uuid=commune_uuid,
             name=commune_data.name
         )
-        
+
         await cache_manager.invalidate_communes()
-        
+
         return CommuneResponse(**commune)
-        
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error("update_commune_error", error=str(e), exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update commune"
         )
 
@@ -104,7 +99,7 @@ async def update_commune(
 )
 async def delete_commune(
     commune_uuid: UUID,
-    current_user: dict = Depends(require_admin),  
+    current_user: dict = Depends(require_admin),
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf)
 ):
@@ -113,29 +108,27 @@ async def delete_commune(
             conn=db,
             commune_uuid=commune_uuid
         )
-        
+
         await cache_manager.invalidate_communes()
-        
+
         logger.info(
             "commune_deleted_successfully",
             commune_uuid=str(commune_uuid),
             commune_name=result["name"],
             admin_email=current_user["email"]
         )
-        
+
         return {
             "message": "Commune successfully deleted",
             "uuid": result["uuid"],
             "name": result["name"]
         }
-        
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("commune_delete_unexpected_error", error=str(e), exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete commune"
         )

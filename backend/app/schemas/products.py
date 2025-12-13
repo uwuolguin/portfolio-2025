@@ -3,6 +3,22 @@ from uuid import UUID
 from datetime import datetime
 from typing import Optional
 
+class ProductRecord(BaseModel):
+    """
+    Internal representation of a product record from the database
+    Used by transaction layer for type-safe database operations
+    
+    Similar to CommuneRecord - provides a clean interface between
+    the database layer and the API layer
+    """
+    uuid: UUID
+    name_es: str
+    name_en: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
 class ProductCreate(BaseModel):
     name_es: Optional[str] = Field(None, min_length=1, max_length=100, description="Spanish product name (optional if name_en provided)")
     name_en: Optional[str] = Field(None, min_length=1, max_length=100, description="English product name (optional if name_es provided)")

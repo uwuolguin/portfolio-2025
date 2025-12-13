@@ -57,15 +57,6 @@ class UniversalTranslator:
             )
             return None
             
-        except (KeyError, IndexError, TypeError) as e:
-            logger.warning(
-                "translation_parse_error",
-                error=str(e),
-                source_lang=source_lang,
-                target_lang=target_lang
-            )
-            return None
-            
         except Exception as e:
             logger.error(
                 "translation_unexpected_error",
