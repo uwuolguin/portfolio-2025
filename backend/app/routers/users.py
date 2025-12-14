@@ -45,11 +45,18 @@ async def signup(
             password=user_data.password,
         )
 
-        if user.verification_token:
+        try:
             await email_service.send_verification_email(
                 to_email=user.email,
                 token=user.verification_token,
                 user_name=user.name,
+            )
+        except Exception as email_error:
+            logger.error("email_send_error", error=str(email_error))
+            await DB.delete_user_by_uuid(conn=db, user_uuid=user.uuid)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification email, user deleted",
             )
 
         return UserResponse.model_validate(user)
@@ -63,7 +70,7 @@ async def signup(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during signup",
         )
-
+    
 
 @router.get("/verify-email/{token}", response_class=HTMLResponse)
 async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db)):
