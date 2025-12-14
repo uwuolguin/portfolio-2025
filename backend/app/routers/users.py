@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from fastapi.responses import HTMLResponse
 from typing import List
 import asyncpg
@@ -16,44 +16,52 @@ from app.templates.email_verification import (
     verification_error_page,
     verification_server_error_page
 )
-from app.redis.rate_limit import get_rate_limiter
+from functools import partial
+from app.redis.rate_limit import enforce_rate_limit
 from app.config import settings
 import structlog
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
-resend_limit = Depends(get_rate_limiter(route_name="resend_verification", ip_limit=2, global_limit=10))
+
+resend_limit = partial(
+    enforce_rate_limit,
+    route_name="resend_verification",
+    ip_limit=2,
+    global_limit=10
+)
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def signup(user_data: UserSignup, db: asyncpg.Connection = Depends(get_db)):
+async def signup(
+    user_data: UserSignup,
+    db: asyncpg.Connection = Depends(get_db),
+):
     try:
         user = await DB.create_user(
-            conn=db, 
-            name=user_data.name, 
-            email=user_data.email, 
-            password=user_data.password
+            conn=db,
+            name=user_data.name,
+            email=user_data.email,
+            password=user_data.password,
         )
-        
-        verification_token = user.get('verification_token')
-        if verification_token:
+
+        if user.verification_token:
             await email_service.send_verification_email(
-                to_email=user['email'],
-                token=verification_token,
-                user_name=user['name']
+                to_email=user.email,
+                token=user.verification_token,
+                user_name=user.name,
             )
-        
-        user.pop('verification_token', None)
-        
-        return UserResponse(**user)
-        
+
+        return UserResponse.model_validate(user)
+
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
     except Exception as e:
         logger.error("signup_error", error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="An unexpected error occurred during signup"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during signup",
         )
 
 
@@ -76,7 +84,7 @@ async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db)):
 async def resend_verification(
     email: str,
     db: asyncpg.Connection = Depends(get_db),
-    _: None = resend_limit,
+    _: None = Depends(resend_limit)
 ):
     """Resend verification email"""
     try:

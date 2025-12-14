@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Optional, List, Dict, Any
 from enum import Enum
 from uuid import UUID
 from app.database.db_retry import db_retry
+from app.schemas.users import UserRecord
 from app.schemas.communes import CommuneRecord
 from app.schemas.products import ProductRecord
 from app.auth.jwt import get_password_hash
@@ -70,7 +71,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_user(conn: asyncpg.Connection, name: str, email: str, password: str) -> Dict[str, Any]:
+    async def create_user(conn: asyncpg.Connection, name: str, email: str, password: str) -> UserRecord:
         hashed_password = get_password_hash(password)
         user_uuid = str(uuid.uuid4())
         verification_token = generate_csrf_token()
@@ -94,7 +95,7 @@ class DB:
             logger.info("user_created_pending_verification", 
                        user_uuid=str(row["uuid"]), 
                        email=email)
-            return dict(row)
+            return UserRecord(**dict(row))
         
     @staticmethod
     @db_retry()

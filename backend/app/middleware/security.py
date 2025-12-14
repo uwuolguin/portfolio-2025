@@ -15,19 +15,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         
-        # Prevent clickjacking attacks
         response.headers["X-Frame-Options"] = "DENY"
 
-        # Prevent MIME type sniffing
         response.headers["X-Content-Type-Options"] = "nosniff"
         
-        # Enable XSS filter (legacy but still useful)
         response.headers["X-XSS-Protection"] = "1; mode=block"
         
-        # Control referrer information
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         
-        # Restrict browser features
         response.headers["Permissions-Policy"] = (
             "geolocation=(), "
             "microphone=(), "
@@ -39,7 +34,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "accelerometer=()"
         )
         
-        # Content Security Policy (skip for API docs)
         if not request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
@@ -54,14 +48,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "upgrade-insecure-requests;" 
             )
         
-        # HSTS (only in production)
         from app.config import settings
         if not settings.debug:
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains; preload"
             )
         
-        # Remove server identification headers
         for header in ["Server", "X-Powered-By", "X-AspNet-Version", "X-AspNetMvc-Version"]:
             if header in response.headers:
                 del response.headers[header]
@@ -84,20 +76,16 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         from app.config import settings
         
-        # Skip in development
         if settings.debug:
             return await call_next(request)
         
-        # Already HTTPS
         if request.url.scheme == "https":
             return await call_next(request)
         
-        # Check if behind reverse proxy
         forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
         if forwarded_proto == "https":
             return await call_next(request)
         
-        # Redirect to HTTPS
         https_url = request.url.replace(scheme="https")
         logger.warning(
             "https_redirect",

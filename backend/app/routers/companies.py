@@ -1,8 +1,3 @@
-"""
-Companies Router - Complete Implementation
-Handles all company CRUD operations with image management
-Uses image_service_client directly (no file_handler wrapper)
-"""
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, Query, Form
 from typing import List, Optional
 from uuid import UUID

@@ -5,23 +5,26 @@ from typing import Optional
 
 class ProductRecord(BaseModel):
     """
-    Internal representation of a product record from the database
-    Used by transaction layer for type-safe database operations
-    
-    Similar to CommuneRecord - provides a clean interface between
-    the database layer and the API layer
+    Internal representation of a product record from the database.
+    Used by transaction layer for type-safe database operations.
     """
     uuid: UUID
     name_es: str
     name_en: str
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
+
+    model_config = {"from_attributes": True}
+
 
 class ProductCreate(BaseModel):
-    name_es: Optional[str] = Field(None, min_length=1, max_length=100, description="Spanish product name (optional if name_en provided)")
-    name_en: Optional[str] = Field(None, min_length=1, max_length=100, description="English product name (optional if name_es provided)")
+    name_es: Optional[str] = Field(
+        None, min_length=1, max_length=100,
+        description="Spanish product name (optional if name_en provided)"
+    )
+    name_en: Optional[str] = Field(
+        None, min_length=1, max_length=100,
+        description="English product name (optional if name_es provided)"
+    )
 
     @model_validator(mode='after')
     def check_at_least_one_name(self):
@@ -35,9 +38,16 @@ class ProductCreate(BaseModel):
         }
     }
 
+
 class ProductUpdate(BaseModel):
-    name_es: Optional[str] = Field(None, min_length=1, max_length=100, description="Spanish product name")
-    name_en: Optional[str] = Field(None, min_length=1, max_length=100, description="English product name")
+    name_es: Optional[str] = Field(
+        None, min_length=1, max_length=100,
+        description="Spanish product name"
+    )
+    name_en: Optional[str] = Field(
+        None, min_length=1, max_length=100,
+        description="English product name"
+    )
 
     @model_validator(mode='after')
     def check_at_least_one_name(self):
@@ -51,6 +61,7 @@ class ProductUpdate(BaseModel):
         }
     }
 
+
 class ProductResponse(BaseModel):
     uuid: UUID
     name_es: str
@@ -58,6 +69,7 @@ class ProductResponse(BaseModel):
     created_at: datetime
 
     model_config = {
+        "from_attributes": True,
         "json_schema_extra": {
             "example": {
                 "uuid": "2b7f0b26-38ab-4a9f-8db6-4b2f8f7a24c2",
