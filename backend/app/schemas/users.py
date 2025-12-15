@@ -1,7 +1,6 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
-
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -15,6 +14,7 @@ class UserRecord(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
 
 class UserSignup(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="User's full name")
@@ -115,4 +115,53 @@ class AdminUserResponse(BaseModel):
                 "company_count": 2,
             }
         },
+    }
+
+
+class DeletedCompanyRecord(BaseModel):
+    uuid: UUID
+    user_uuid: UUID
+    product_uuid: UUID
+    commune_uuid: UUID
+    name: str
+    description_es: Optional[str]
+    description_en: Optional[str]
+    address: Optional[str]
+    phone: Optional[str]
+    email: Optional[EmailStr]
+    image_url: Optional[str]
+    image_extension: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DeletedUserRecord(BaseModel):
+    uuid: UUID
+    name: str
+    email: EmailStr
+    hashed_password: str
+    role: str
+    email_verified: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserDeletionResponse(BaseModel):
+    user_uuid: UUID
+    email: EmailStr
+    company_deleted: int = 0
+    image_deleted: int = 0
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "user_uuid": "4d6f9c3b-ef34-42b8-b2a5-9d4b8e7a12aa",
+                "email": "andres@example.com",
+                "company_deleted": 1,
+                "image_deleted": 1,
+            }
+        }
     }
