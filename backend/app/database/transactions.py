@@ -254,15 +254,11 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID, admin_email: str) -> UserDeletionResponse:
+    async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> UserDeletionResponse:
         deleted_image_path: Optional[str] = None
-        image_to_delete: Optional[tuple[str, str, str]] = None
+        company_uuid: Optional[str] = None
 
         async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
-            admin_user = await conn.fetchrow("SELECT role FROM proveo.users WHERE email = $1", admin_email)
-            if not admin_user or admin_user['role'] != 'admin':
-                raise PermissionError("Only admin users can delete other users.")
-
             user_query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
@@ -275,8 +271,8 @@ class DB:
 
             company_query = """
                 SELECT uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
-                       description_en, address, phone, email, image_url, image_extension,
-                       created_at, updated_at
+                    description_en, address, phone, email, image_url, image_extension,
+                    created_at, updated_at
                 FROM proveo.companies
                 WHERE user_uuid = $1
                 FOR UPDATE
@@ -286,56 +282,71 @@ class DB:
             if company:
                 image_id = company.get("image_url")
                 image_ext = company.get("image_extension")
-                if image_id and image_ext:
-                    image_to_delete = (image_id, image_ext, str(company["uuid"]))
+                deleted_image_path = f"{image_id}{image_ext}" if image_id and image_ext else None
+                company_uuid = str(company["uuid"])
 
                 insert_deleted_company = """
                     INSERT INTO proveo.companies_deleted
                         (uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
-                         description_en, address, phone, email, image_url, image_extension,
-                         created_at, updated_at)
+                        description_en, address, phone, email, image_url, image_extension,
+                        created_at, updated_at)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 """
-                await conn.execute(insert_deleted_company,
-                                   company["uuid"], company["user_uuid"], company["product_uuid"],
-                                   company["commune_uuid"], company["name"], company["description_es"],
-                                   company["description_en"], company["address"], company["phone"],
-                                   company["email"], company["image_url"], company["image_extension"],
-                                   company["created_at"], company["updated_at"])
-                deleted_company = await conn.fetchrow("DELETE FROM proveo.companies WHERE uuid=$1 RETURNING uuid", company["uuid"])
+                await conn.execute(
+                    insert_deleted_company,
+                    company["uuid"], company["user_uuid"], company["product_uuid"],
+                    company["commune_uuid"], company["name"], company["description_es"],
+                    company["description_en"], company["address"], company["phone"],
+                    company["email"], company["image_url"], company["image_extension"],
+                    company["created_at"], company["updated_at"]
+                )
+
+                deleted_company = await conn.fetchrow(
+                    "DELETE FROM proveo.companies WHERE uuid = $1 RETURNING uuid", company["uuid"]
+                )
                 if not deleted_company:
                     raise RuntimeError("Race condition detected during company deletion")
-                logger.info("admin_deleted_user_company", user_uuid=str(user_uuid), company_uuid=str(company["uuid"]), admin_email=admin_email)
+
+                logger.info("user_company_deleted", user_uuid=str(user_uuid), company_uuid=company_uuid)
 
             insert_deleted_user = """
                 INSERT INTO proveo.users_deleted
                     (uuid, name, email, hashed_password, role, email_verified, created_at)
                 VALUES ($1,$2,$3,$4,$5,$6,$7)
             """
-            await conn.execute(insert_deleted_user,
-                               user["uuid"], user["name"], user["email"], user["hashed_password"],
-                               user["role"], user["email_verified"], user["created_at"])
+            await conn.execute(
+                insert_deleted_user,
+                user["uuid"], user["name"], user["email"], user["hashed_password"],
+                user["role"], user["email_verified"], user["created_at"]
+            )
 
-            deleted_user = await conn.fetchrow("DELETE FROM proveo.users WHERE uuid = $1 RETURNING uuid", user_uuid)
+            deleted_user = await conn.fetchrow(
+                "DELETE FROM proveo.users WHERE uuid = $1 RETURNING uuid", user_uuid
+            )
             if not deleted_user:
                 raise RuntimeError("Race condition detected during user deletion")
-            logger.info("admin_deleted_user_with_cascade", deleted_user_uuid=str(user_uuid), deleted_user_email=user["email"], company_deleted=1 if company else 0, admin_email=admin_email)
 
-        if image_to_delete:
-            image_id, image_ext, company_uuid = image_to_delete
-            image_path = f"{image_id}{image_ext}"
+            logger.info(
+                "user_deleted_with_cascade",
+                user_uuid=str(user_uuid),
+                email=user["email"],
+                company_deleted=1 if company else 0
+            )
+
+        if deleted_image_path:
             try:
-                success = await asyncio.wait_for(image_service_client.delete_image(image_path), timeout=15.0)
+                success = await asyncio.wait_for(
+                    image_service_client.delete_image(deleted_image_path),
+                    timeout=15.0
+                )
                 if success:
-                    deleted_image_path = image_path
-                    logger.info("admin_delete_user_image_removed", company_uuid=company_uuid, image_path=image_path, admin_email=admin_email)
+                    logger.info("user_image_removed", company_uuid=company_uuid, image_path=deleted_image_path)
                 else:
-                    deleted_image_path = None
-                    logger.warning("admin_delete_user_image_not_found", company_uuid=company_uuid, image_path=image_path, admin_email=admin_email)
+                    logger.warning("user_image_not_found", company_uuid=company_uuid, image_path=deleted_image_path)
             except asyncio.TimeoutError:
-                logger.warning("admin_delete_user_image_timeout", company_uuid=company_uuid, image_path=image_path, admin_email=admin_email)
+                logger.warning("user_image_timeout", company_uuid=company_uuid, image_path=deleted_image_path)
             except Exception as e:
-                logger.error("admin_delete_user_image_error", company_uuid=company_uuid, image_path=image_path, error=str(e), admin_email=admin_email, exc_info=True)
+                logger.error("user_image_error", company_uuid=company_uuid, image_path=deleted_image_path, error=str(e), exc_info=True)
 
         return UserDeletionResponse(
             user_uuid=user_uuid,
