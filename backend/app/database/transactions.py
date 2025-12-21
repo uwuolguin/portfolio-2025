@@ -1,7 +1,7 @@
 import asyncpg
 import structlog
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional, List, Dict, Any
+from typing import AsyncGenerator, Optional, List
 from enum import Enum
 from uuid import UUID
 from app.database.db_retry import db_retry
@@ -15,6 +15,12 @@ from app.auth.csrf import generate_csrf_token
 from datetime import datetime, timedelta, timezone
 from app.services.image_service_client import image_service_client
 import asyncio
+from app.schemas.companies import (
+    CompanyRecord, 
+    CompanyWithRelations, 
+    CompanyDeleteResponse,
+    CompanySearchResponse
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -607,21 +613,7 @@ class DB:
                 uuid=str(commune["uuid"]),
                 name=commune["name"],
             )
-"""
-backend/app/database/transactions.py (Company section updates)
 
-Clean transaction functions following the communes/products pattern
-"""
-from app.schemas.companies import (
-    CompanyRecord, 
-    CompanyWithRelations, 
-    CompanyDeleteResponse,
-    CompanySearchResponse
-)
-
-class DB:
-    # ... existing methods ...
-    
     @staticmethod
     @db_retry()
     async def get_company_by_uuid(
@@ -927,12 +919,14 @@ class DB:
 
             # Always update timestamp
             update_fields.append("updated_at=NOW()")
+
+            where_idx = len(params) + 1
             params.append(company_uuid)
 
             update_query = f"""
                 UPDATE proveo.companies
                 SET {', '.join(update_fields)}
-                WHERE uuid=${param_count}
+                WHERE uuid=${where_idx}
                 RETURNING 
                     uuid, user_uuid, product_uuid, commune_uuid,
                     name, description_es, description_en,
@@ -1220,12 +1214,10 @@ class DB:
             List of CompanySearchResponse objects
         """
         search = (query or "").strip().lower()
-        params: List[Any] = []
+        params: List = []
 
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
-            # Build base query based on search term
             if not search:
-                # No search term: return all with filters
                 base_query = """
                     SELECT 
                         company_id, company_name, company_description_es,
@@ -1237,7 +1229,6 @@ class DB:
                 """
                 order_clause = " ORDER BY company_name ASC"
             elif len(search) < 4:
-                # Short search: use ILIKE
                 base_query = """
                     SELECT 
                         company_id, company_name, company_description_es,
@@ -1250,7 +1241,6 @@ class DB:
                 params.append(f"%{search}%")
                 order_clause = " ORDER BY company_name ASC"
             else:
-                # Long search: use trigram similarity
                 base_query = """
                     SELECT 
                         company_id, company_name, company_description_es,
@@ -1264,7 +1254,6 @@ class DB:
                 params.append(search)
                 order_clause = " ORDER BY score DESC, company_name ASC"
 
-            # Add filters
             if commune:
                 next_param = len(params) + 1
                 base_query += f" AND LOWER(commune_name) = LOWER(${next_param})"
@@ -1279,7 +1268,6 @@ class DB:
                 )
                 params.extend([product, product])
 
-            # Add pagination
             limit_idx = len(params) + 1
             offset_idx = len(params) + 2
             pagination_clause = f" LIMIT ${limit_idx} OFFSET ${offset_idx}"
@@ -1288,7 +1276,6 @@ class DB:
             sql = base_query + order_clause + pagination_clause
             rows = await conn.fetch(sql, *params)
 
-            # Transform to CompanySearchResponse objects
             results: List[CompanySearchResponse] = []
             for row in rows:
                 results.append(CompanySearchResponse(
@@ -1304,96 +1291,3 @@ class DB:
                 ))
 
             return results
-        admin_user = await conn.fetchrow(
-            "SELECT role FROM proveo.users WHERE email = $1", 
-            admin_email
-        )
-        if not admin_user or admin_user['role'] != 'admin':
-            raise PermissionError("Only admin users can delete companies.")
-
-        async with transaction(conn,isolation=IsolationLevel.SERIALIZABLE):
-            company_query = """
-                SELECT uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
-                    description_en, address, phone, email, image_url, image_extension,
-                    created_at, updated_at
-                FROM proveo.companies WHERE uuid=$1
-            """
-            company = await conn.fetchrow(company_query, company_uuid)
-            if not company:
-                raise ValueError(f"Company with UUID {company_uuid} not found")
-
-            insert_deleted = """
-                INSERT INTO proveo.companies_deleted
-                    (uuid, user_uuid, product_uuid, commune_uuid, name, description_es,
-                    description_en, address, phone, email, image_url, image_extension,
-                    created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-            """
-            await conn.execute(insert_deleted,
-                company["uuid"], company["user_uuid"], company["product_uuid"],
-                company["commune_uuid"], company["name"], company["description_es"],
-                company["description_en"], company["address"], company["phone"],
-                company["email"], company["image_url"], company["image_extension"],
-                company["created_at"], company["updated_at"]
-            )
-            
-            deleted_company = await conn.fetchrow(
-                "DELETE FROM proveo.companies WHERE uuid=$1 RETURNING uuid", 
-                company_uuid
-            )
-            if not deleted_company:
-                logger.error(
-                    "company_delete_race_condition_detected",
-                    company_uuid=str(company_uuid),
-                    message="Company was deleted between SELECT and DELETE"
-                )
-                raise RuntimeError("Race condition detected during company deletion")
-            logger.info("admin_deleted_company", company_uuid=str(company_uuid), admin_email=admin_email)
-
-        image_id = company.get("image_url")
-        image_ext = company.get("image_extension")
-        
-        if image_id and image_ext:
-            image_path = f"{image_id}{image_ext}"
-            try:
-                success = await asyncio.wait_for(
-                    image_service_client.delete_image(image_path),
-                    timeout=15.0
-                )
-                if success:
-                    logger.info(
-                        "admin_deleted_company_image",
-                        company_uuid=str(company_uuid),
-                        image_path=image_path,
-                        admin_email=admin_email
-                    )
-                else:
-                    logger.warning(
-                        "admin_delete_company_image_not_found",
-                        company_uuid=str(company_uuid),
-                        image_path=image_path,
-                        admin_email=admin_email
-                    )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "admin_delete_company_image_timeout",
-                    company_uuid=str(company_uuid),
-                    image_path=image_path,
-                    admin_email=admin_email,
-                    message="Image deletion timed out after 15s - will be cleaned by cronjob"
-                )
-            except Exception as e:
-                logger.error(
-                    "admin_delete_company_image_error",
-                    company_uuid=str(company_uuid),
-                    image_path=image_path,
-                    error=str(e),
-                    exc_info=True,
-                    admin_email=admin_email
-                )
-
-        return {
-            "uuid": str(company["uuid"]),
-            "name": company["name"],
-            "image_url": company["image_url"]
-        }

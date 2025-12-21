@@ -24,11 +24,6 @@ from app.services.image_service_client import image_service_client
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/companies", tags=["companies"])
 
-
-# ============================================================================
-# PUBLIC ENDPOINTS
-# ============================================================================
-
 @router.get(
     "/search", 
     response_model=List[CompanySearchResponse],
@@ -69,11 +64,6 @@ async def search_companies(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search failed"
         )
-
-
-# ============================================================================
-# AUTHENTICATED USER ENDPOINTS
-# ============================================================================
 
 @router.get(
     "/user/my-company", 
@@ -157,7 +147,6 @@ async def create_company(
     company_uuid = uuid.uuid4()
 
     try:
-        # Handle translation
         if lang == "es":
             if not description_es:
                 raise HTTPException(
@@ -177,7 +166,6 @@ async def create_company(
                 "company_description", description_es, description_en
             )
 
-        # Upload image
         image_ext = image_service_client.get_extension_from_content_type(
             image.content_type
         )
@@ -194,7 +182,6 @@ async def create_company(
         image_id = upload_result["image_id"]
         image_ext = upload_result["extension"]
 
-        # Create company in database
         company = await DB.create_company(
             conn=db,
             company_uuid=company_uuid,
