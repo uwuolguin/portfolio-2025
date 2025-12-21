@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 
@@ -13,13 +13,27 @@ class UserRecord(BaseModel):
     verification_token: Optional[str]
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "uuid": "4d6f9c3b-ef34-42b8-b2a5-9d4b8e7a12aa",
+                "name": "Andres Olguin",
+                "email": "andres@example.com",
+                "role": "user",
+                "email_verified": False,
+                "verification_token": "token123",
+                "created_at": "2025-10-19T15:30:00Z",
+            }
+        }
+    }
 
 
 class UserSignup(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="User's full name")
     email: EmailStr = Field(..., description="User's email address")
-    password: str = Field(..., min_length=8, max_length=100, description="User's password (min 8 chars)")
+    password: str = Field(
+        ..., min_length=8, max_length=100, description="User's password (min 8 chars)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -41,7 +55,6 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     model_config = {
-        "from_attributes": True,
         "json_schema_extra": {
             "example": {
                 "uuid": "4d6f9c3b-ef34-42b8-b2a5-9d4b8e7a12aa",
@@ -51,7 +64,7 @@ class UserResponse(BaseModel):
                 "email_verified": True,
                 "created_at": "2025-10-19T15:30:00Z",
             }
-        },
+        }
     }
 
 
@@ -72,6 +85,15 @@ class UserLogin(BaseModel):
 class LoginUserInfo(BaseModel):
     email: EmailStr
     email_verified: bool
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "andres@example.com",
+                "email_verified": True,
+            }
+        }
+    }
 
 
 class LoginResponse(BaseModel):
@@ -103,7 +125,6 @@ class AdminUserResponse(BaseModel):
     company_count: int = 0
 
     model_config = {
-        "from_attributes": True,
         "json_schema_extra": {
             "example": {
                 "uuid": "7bde63f0-5d79-41b3-bd8f-5a23f44dbd94",
@@ -114,7 +135,7 @@ class AdminUserResponse(BaseModel):
                 "created_at": "2025-10-19T12:00:00Z",
                 "company_count": 2,
             }
-        },
+        }
     }
 
 
@@ -134,7 +155,26 @@ class DeletedCompanyRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "uuid": "1a2b3c4d-1111-2222-3333-444455556666",
+                "user_uuid": "4d6f9c3b-ef34-42b8-b2a5-9d4b8e7a12aa",
+                "product_uuid": "9a8b7c6d-aaaa-bbbb-cccc-ddddeeeeffff",
+                "commune_uuid": "a3c1d96b-0a3b-4d53-bb32-9e8e9cf5a71e",
+                "name": "Deleted Company",
+                "description_es": "Descripción",
+                "description_en": "Description",
+                "address": "Some address",
+                "phone": "+56 9 1234 5678",
+                "email": "company@example.com",
+                "image_url": "https://example.com/image.png",
+                "image_extension": "png",
+                "created_at": "2025-10-01T10:00:00Z",
+                "updated_at": "2025-10-19T15:30:00Z",
+            }
+        }
+    }
 
 
 class DeletedUserRecord(BaseModel):
@@ -146,7 +186,19 @@ class DeletedUserRecord(BaseModel):
     email_verified: bool
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "uuid": "4d6f9c3b-ef34-42b8-b2a5-9d4b8e7a12aa",
+                "name": "Deleted User",
+                "email": "deleted@example.com",
+                "hashed_password": "$2b$12$...",
+                "role": "user",
+                "email_verified": False,
+                "created_at": "2025-10-01T09:00:00Z",
+            }
+        }
+    }
 
 
 class UserDeletionResponse(BaseModel):

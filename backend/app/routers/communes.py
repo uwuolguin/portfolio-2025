@@ -26,7 +26,7 @@ async def list_communes(
     db: asyncpg.Connection = Depends(get_db),
 ):
     communes = await DB.get_all_communes(conn=db)
-    return [CommuneResponse.model_validate(c) for c in communes]
+    return communes
 
 
 @router.post(
@@ -49,7 +49,7 @@ async def create_commune(
 
         await cache_manager.invalidate_communes()
 
-        return CommuneResponse.model_validate(commune)
+        return commune
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -83,7 +83,7 @@ async def update_commune(
 
         await cache_manager.invalidate_communes()
 
-        return CommuneResponse.model_validate(commune)
+        return commune
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

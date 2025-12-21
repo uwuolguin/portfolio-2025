@@ -62,7 +62,7 @@ async def signup(
                 detail="Failed to send verification email, user deleted",
             )
 
-        return UserResponse.model_validate(user)
+        return user
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))

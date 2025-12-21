@@ -15,15 +15,10 @@ from app.auth.dependencies import (
 )
 from app.schemas.companies import CompanyResponse, CompanySearchResponse
 from app.services.translation_service import translate_field
-from app.services.image_service_client import image_service_client, ImageServiceError
+from app.services.image_service_client import image_service_client
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/companies", tags=["companies"])
-
-
-# ============================================================================
-# PUBLIC
-# ============================================================================
 
 @router.get("/search", response_model=List[CompanySearchResponse])
 async def search_companies(

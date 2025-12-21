@@ -25,7 +25,7 @@ async def list_products(
     db: asyncpg.Connection = Depends(get_db)
 ):
     products = await DB.get_all_products(conn=db)
-    return [ProductResponse.model_validate(p) for p in products]
+    return products
 
 
 @router.post(
@@ -49,7 +49,7 @@ async def create_product(
 
         await cache_manager.invalidate_products()
 
-        return ProductResponse.model_validate(product)
+        return product
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -83,7 +83,7 @@ async def update_product(
 
         await cache_manager.invalidate_products()
 
-        return ProductResponse.model_validate(product)
+        return product
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
