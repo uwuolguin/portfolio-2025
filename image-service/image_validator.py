@@ -1,6 +1,12 @@
 """
 Image Validation and NSFW Detection Module
 Handles image processing, optimization, and content moderation
+
+OPTIMIZED VERSION:
+- Accepts file-like objects (BytesIO) consistently
+- Minimizes memory copies
+- Clear type hints
+- Returns BytesIO for efficient streaming
 """
 
 from typing import Tuple
@@ -92,28 +98,38 @@ class ImageValidator:
     @classmethod
     def validate_and_process_image(
         cls,
-        file_obj,
+        image_stream: BytesIO,
         content_type: str,
         extension: str
     ) -> BytesIO:
+        """
+        Validate and process an image from a file-like stream.
+        
+        Args:
+            image_stream: BytesIO object containing image data (size pre-validated)
+            content_type: MIME type (e.g., "image/jpeg")
+            extension: File extension (e.g., ".jpg", ".png")
+            
+        Returns:
+            BytesIO: Processed and optimized image stream
+            
+        Raises:
+            ValueError: If validation fails
+            
+        Note:
+            Size validation is handled by main.py during streaming upload.
+            This function focuses on format, dimensions, and optimization.
+        """
         if content_type not in settings.allowed_types:
             raise ValueError(
                 f"Unsupported MIME type: {content_type}. "
                 f"Allowed: {', '.join(sorted(settings.allowed_types))}"
             )
-
-        file_obj.seek(0, 2)
-        size = file_obj.tell()
-        file_obj.seek(0)
-        if size > settings.max_file_size:
-            size_mb = size / 1_048_576
-            limit_mb = settings.max_file_size / 1_048_576
-            raise ValueError(
-                f"Image too large ({size_mb:.2f}MB). Limit: {limit_mb:.2f}MB"
-            )
+        
+        image_stream.seek(0)
 
         try:
-            with Image.open(file_obj) as img:
+            with Image.open(image_stream) as img:
                 img.load()
                 fmt = (img.format or "").upper()
                 img_copy = img.copy()
@@ -145,7 +161,7 @@ class ImageValidator:
 
         if img_copy.mode in ("RGBA", "P", "LA"):
             background = Image.new("RGB", img_copy.size, (255, 255, 255))
-            if img_copy.mode == "P":
+            if img_copy.mode == "P)":
                 img_copy = img_copy.convert("RGBA")
             background.paste(img_copy, mask=img_copy.split()[-1])
             img_copy = background
@@ -159,21 +175,35 @@ class ImageValidator:
 
         img_copy.save(out, format=expected_format, **save_params)
         out.seek(0)
-
+        processed_size = out.getbuffer().nbytes
         logger.info(
             "image_validated_and_processed",
             format=expected_format,
             extension=extension,
-            original_size_kb=size / 1024,
-            processed_size_kb=out.getbuffer().nbytes / 1024,
-            compression_ratio=f"{(1 - out.getbuffer().nbytes / size) * 100:.1f}%",
+            processed_size_kb=processed_size / 1024,
             dimensions=f"{img_copy.width}x{img_copy.height}",
         )
 
         return out
 
     @classmethod
-    def check_nsfw_content(cls, image_stream) -> Tuple[float, bool]:
+    def check_nsfw_content(cls, image_stream: BytesIO) -> Tuple[float, bool]:
+        """
+        Check if image contains NSFW content.
+        
+        Args:
+            image_stream: BytesIO object containing image data
+            
+        Returns:
+            Tuple[float, bool]: (nsfw_score, check_performed)
+                - nsfw_score: 0.0-1.0, higher = more NSFW
+                - check_performed: True if model ran, False if failed/disabled
+                
+        Memory efficiency:
+            - Reuses input stream (no copy)
+            - OpenNSFW2 loads into memory (unavoidable)
+            - Stream is rewound after check
+        """
         if not settings.nsfw_enabled:
             return (0.0, False)
 
@@ -187,7 +217,7 @@ class ImageValidator:
 
         try:
             from opennsfw2 import predict_image
-
+            image_stream.seek(0)
             score = predict_image(image_stream)
             image_stream.seek(0)
 

@@ -2,8 +2,11 @@
 Image Service Client
 Handles communication with the image storage microservice
 
-Optimized for memory efficiency by streaming file uploads instead of
-loading entire files into memory.
+OPTIMIZED VERSION:
+- Streams files directly without intermediate buffering
+- Minimal memory footprint
+- Clear error handling
+- Type-safe responses
 """
 
 from typing import Optional, TypedDict, Final
@@ -153,14 +156,13 @@ class ImageServiceClient:
         user_id: Optional[str] = None,
     ) -> UploadedImage:
         """
-        Upload image using streaming to avoid loading entire file into memory.
+        Upload image using streaming to minimize memory usage.
         
-        This is the RECOMMENDED method for uploading images as it minimizes
-        memory usage by streaming the file directly from the request to the
-        image service.
+        RECOMMENDED METHOD: Streams file directly from FastAPI's UploadFile
+        to the image service without intermediate buffering.
         
         Args:
-            file_obj: File-like object (SpooledTemporaryFile, BytesIO, etc.)
+            file_obj: File-like object (SpooledTemporaryFile from FastAPI)
             company_id: UUID of the company (used as base filename)
             content_type: MIME type (e.g., "image/jpeg")
             extension: File extension (e.g., ".jpg", ".png")
@@ -179,8 +181,10 @@ class ImageServiceClient:
             ImageServiceError: On upload failure or validation error
             httpx exceptions: On network/connection failures
             
+        Memory usage: Minimal - file streams through without buffering
+            
         Example:
-            >>> with open('image.jpg', 'rb') as f:
+            >>> async with open('image.jpg', 'rb') as f:
             ...     result = await client.upload_image_streaming(
             ...         file_obj=f,
             ...         company_id="550e8400-e29b-41d4-a716-446655440001",
@@ -233,59 +237,6 @@ class ImageServiceClient:
             "nsfw_score": result.get("nsfw_score"),
             "nsfw_checked": result["nsfw_checked"],
         }
-
-    @_RETRY_POLICY
-    async def upload_image(
-        self,
-        file_bytes: bytes,
-        company_id: str,
-        content_type: str,
-        extension: str,
-        user_id: Optional[str] = None,
-    ) -> UploadedImage:
-        """
-        Upload image from bytes (legacy method).
-        
-        DEPRECATED: Use upload_image_streaming() instead to reduce memory usage.
-        This method is kept for backwards compatibility.
-        
-        Args:
-            file_bytes: Complete file contents as bytes
-            company_id: UUID of the company
-            content_type: MIME type
-            extension: File extension
-            user_id: Optional user UUID for logging
-            
-        Returns:
-            UploadedImage dict (same as upload_image_streaming)
-            
-        Example:
-            >>> with open('image.jpg', 'rb') as f:
-            ...     data = f.read()
-            >>> result = await client.upload_image(
-            ...     file_bytes=data,
-            ...     company_id="550e8400-e29b-41d4-a716-446655440001",
-            ...     content_type="image/jpeg",
-            ...     extension=".jpg"
-            ... )
-        """
-        from io import BytesIO
-        
-        logger.warning(
-            "upload_image_bytes_deprecated",
-            message="Using legacy upload_image() method. Consider using upload_image_streaming() instead.",
-            company_id=company_id,
-            size_kb=len(file_bytes) / 1024
-        )
-        
-        file_obj = BytesIO(file_bytes)
-        return await self.upload_image_streaming(
-            file_obj=file_obj,
-            company_id=company_id,
-            content_type=content_type,
-            extension=extension,
-            user_id=user_id,
-        )
 
     async def delete_image(self, filename: str) -> bool:
         """
