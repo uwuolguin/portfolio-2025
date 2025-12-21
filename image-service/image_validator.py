@@ -92,45 +92,28 @@ class ImageValidator:
     @classmethod
     def validate_and_process_image(
         cls,
-        file_bytes: bytes,
+        file_obj,
         content_type: str,
         extension: str
-    ) -> bytes:
-        """
-        Validate and process image synchronously
-
-        Args:
-            file_bytes: Raw image bytes
-            content_type: MIME type from upload
-            extension: Expected extension (e.g., ".jpg", ".png")
-
-        Steps:
-        1. Validate MIME type
-        2. Check file size
-        3. Open and validate image
-        4. Check dimensions
-        5. Convert to RGB if needed
-        6. Optimize and compress
-
-        Returns: processed_bytes (no extension - we already know it!)
-        Raises: ValueError on validation failure
-        """
-
+    ) -> BytesIO:
         if content_type not in settings.allowed_types:
             raise ValueError(
                 f"Unsupported MIME type: {content_type}. "
                 f"Allowed: {', '.join(sorted(settings.allowed_types))}"
             )
 
-        if len(file_bytes) > settings.max_file_size:
-            size_mb = len(file_bytes) / 1_048_576
+        file_obj.seek(0, 2)
+        size = file_obj.tell()
+        file_obj.seek(0)
+        if size > settings.max_file_size:
+            size_mb = size / 1_048_576
             limit_mb = settings.max_file_size / 1_048_576
             raise ValueError(
                 f"Image too large ({size_mb:.2f}MB). Limit: {limit_mb:.2f}MB"
             )
 
         try:
-            with Image.open(BytesIO(file_bytes)) as img:
+            with Image.open(file_obj) as img:
                 img.load()
                 fmt = (img.format or "").upper()
                 img_copy = img.copy()
@@ -144,20 +127,17 @@ class ImageValidator:
             if ext == extension:
                 expected_format = format_name
                 break
-        
+
         if not expected_format:
             raise ValueError(f"Unknown extension: {extension}")
-        
+
         if fmt != expected_format:
             raise ValueError(
                 f"Image format mismatch: file is {fmt} but extension is {extension} "
                 f"(expected {expected_format})"
             )
 
-        if (
-            img_copy.width > settings.max_width
-            or img_copy.height > settings.max_height
-        ):
+        if img_copy.width > settings.max_width or img_copy.height > settings.max_height:
             raise ValueError(
                 f"Image too large ({img_copy.width}x{img_copy.height}). "
                 f"Max: {settings.max_width}x{settings.max_height}"
@@ -171,43 +151,29 @@ class ImageValidator:
             img_copy = background
 
         out = BytesIO()
-
         save_params = {}
         if expected_format == "JPEG":
-            save_params = {
-                "quality": 90,
-                "optimize": True,
-                "progressive": True,
-            }
+            save_params = {"quality": 90, "optimize": True, "progressive": True}
         elif expected_format == "PNG":
-            save_params = {
-                "optimize": True,
-                "compress_level": 6,
-            }
+            save_params = {"optimize": True, "compress_level": 6}
 
         img_copy.save(out, format=expected_format, **save_params)
-
-        processed_bytes = out.getvalue()
+        out.seek(0)
 
         logger.info(
             "image_validated_and_processed",
             format=expected_format,
             extension=extension,
-            original_size_kb=len(file_bytes) / 1024,
-            processed_size_kb=len(processed_bytes) / 1024,
-            compression_ratio=f"{(1 - len(processed_bytes) / len(file_bytes)) * 100:.1f}%",
+            original_size_kb=size / 1024,
+            processed_size_kb=out.getbuffer().nbytes / 1024,
+            compression_ratio=f"{(1 - out.getbuffer().nbytes / size) * 100:.1f}%",
             dimensions=f"{img_copy.width}x{img_copy.height}",
         )
 
-        return processed_bytes
+        return out
 
     @classmethod
-    def check_nsfw_content(cls, image_bytes: bytes) -> Tuple[float, bool]:
-        """
-        Run NSFW detection on processed image bytes
-
-        Returns: (score, check_performed)
-        """
+    def check_nsfw_content(cls, image_stream) -> Tuple[float, bool]:
         if not settings.nsfw_enabled:
             return (0.0, False)
 
@@ -222,8 +188,8 @@ class ImageValidator:
         try:
             from opennsfw2 import predict_image
 
-            img_stream = BytesIO(image_bytes)
-            score = predict_image(img_stream)
+            score = predict_image(image_stream)
+            image_stream.seek(0)
 
             logger.info(
                 "nsfw_check_completed",

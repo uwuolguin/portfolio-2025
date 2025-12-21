@@ -1,10 +1,12 @@
 """
 Image Service Client
 Handles communication with the image storage microservice
+
+Optimized for memory efficiency by streaming file uploads instead of
+loading entire files into memory.
 """
 
 from typing import Optional, TypedDict, Final
-
 import httpx
 import structlog
 import logging
@@ -21,7 +23,9 @@ from app.config import settings
 
 logger = structlog.get_logger(__name__)
 
+
 class UploadedImage(TypedDict):
+    """Type definition for uploaded image response"""
     image_id: str
     extension: str
     url: str
@@ -29,8 +33,11 @@ class UploadedImage(TypedDict):
     nsfw_score: Optional[float]
     nsfw_checked: bool
 
+
 class ImageServiceError(Exception):
     """Base exception for image service errors"""
+    pass
+
 
 _RETRY_POLICY: Final = retry(
     stop=stop_after_attempt(settings.max_retries),
@@ -42,10 +49,26 @@ _RETRY_POLICY: Final = retry(
     reraise=True,
 )
 
+
 class ImageServiceClient:
-    """Async client for Image Storage Microservice"""
+    """
+    Async client for Image Storage Microservice
+    
+    Features:
+    - Streaming uploads to minimize memory usage
+    - Automatic retries with exponential backoff
+    - Connection pooling and keepalive
+    - Structured logging with correlation
+    """
 
     def __init__(self, client: Optional[httpx.AsyncClient] = None) -> None:
+        """
+        Initialize the image service client.
+        
+        Args:
+            client: Optional pre-configured httpx client. If not provided,
+                   creates a new client with connection pooling.
+        """
         if client is not None:
             self._client = client
             return
@@ -75,11 +98,22 @@ class ImageServiceClient:
         )
 
     async def close(self) -> None:
+        """Close the HTTP client and release resources"""
         await self._client.aclose()
         logger.info("image_service_client_closed")
 
     @staticmethod
     def _raise_for_error(response: httpx.Response, action: str) -> None:
+        """
+        Check response status and raise ImageServiceError if not successful.
+        
+        Args:
+            response: HTTP response object
+            action: Description of the action being performed
+            
+        Raises:
+            ImageServiceError: If response status is not 200/201
+        """
         if response.status_code in (200, 201):
             return
 
@@ -97,21 +131,68 @@ class ImageServiceClient:
 
     @_RETRY_POLICY
     async def health_check(self) -> bool:
+        """
+        Check if image service is healthy.
+        
+        Returns:
+            bool: True if service is healthy
+            
+        Raises:
+            httpx exceptions on connection failures
+        """
         response = await self._client.get("/health", timeout=5.0)
         return response.status_code == 200
 
     @_RETRY_POLICY
-    async def upload_image(
+    async def upload_image_streaming(
         self,
-        file_bytes: bytes,
+        file_obj,
         company_id: str,
         content_type: str,
         extension: str,
         user_id: Optional[str] = None,
     ) -> UploadedImage:
-
+        """
+        Upload image using streaming to avoid loading entire file into memory.
+        
+        This is the RECOMMENDED method for uploading images as it minimizes
+        memory usage by streaming the file directly from the request to the
+        image service.
+        
+        Args:
+            file_obj: File-like object (SpooledTemporaryFile, BytesIO, etc.)
+            company_id: UUID of the company (used as base filename)
+            content_type: MIME type (e.g., "image/jpeg")
+            extension: File extension (e.g., ".jpg", ".png")
+            user_id: Optional user UUID for audit logging
+            
+        Returns:
+            UploadedImage dict containing:
+                - image_id: Company UUID
+                - extension: File extension
+                - url: Relative URL to access image
+                - size: File size in bytes
+                - nsfw_score: NSFW detection score (0.0-1.0) or None
+                - nsfw_checked: Whether NSFW check was performed
+                
+        Raises:
+            ImageServiceError: On upload failure or validation error
+            httpx exceptions: On network/connection failures
+            
+        Example:
+            >>> with open('image.jpg', 'rb') as f:
+            ...     result = await client.upload_image_streaming(
+            ...         file_obj=f,
+            ...         company_id="550e8400-e29b-41d4-a716-446655440001",
+            ...         content_type="image/jpeg",
+            ...         extension=".jpg"
+            ...     )
+            >>> print(result['url'])
+            /images/550e8400-e29b-41d4-a716-446655440001.jpg
+        """
+        
         files = {
-            "file": (f"{company_id}{extension}", file_bytes, content_type)
+            "file": (f"{company_id}{extension}", file_obj, content_type)
         }
 
         data = {
@@ -123,9 +204,8 @@ class ImageServiceClient:
             data["user_id"] = user_id
 
         logger.info(
-            "uploading_to_image_service",
+            "uploading_to_image_service_streaming",
             company_id=company_id,
-            size_kb=len(file_bytes) / 1024,
             content_type=content_type,
             extension=extension,
             user_id=user_id,
@@ -141,6 +221,8 @@ class ImageServiceClient:
             image_id=result["image_id"],
             extension=result["extension"],
             size=result["size"],
+            nsfw_checked=result["nsfw_checked"],
+            nsfw_score=result.get("nsfw_score"),
         )
 
         return {
@@ -152,7 +234,80 @@ class ImageServiceClient:
             "nsfw_checked": result["nsfw_checked"],
         }
 
+    @_RETRY_POLICY
+    async def upload_image(
+        self,
+        file_bytes: bytes,
+        company_id: str,
+        content_type: str,
+        extension: str,
+        user_id: Optional[str] = None,
+    ) -> UploadedImage:
+        """
+        Upload image from bytes (legacy method).
+        
+        DEPRECATED: Use upload_image_streaming() instead to reduce memory usage.
+        This method is kept for backwards compatibility.
+        
+        Args:
+            file_bytes: Complete file contents as bytes
+            company_id: UUID of the company
+            content_type: MIME type
+            extension: File extension
+            user_id: Optional user UUID for logging
+            
+        Returns:
+            UploadedImage dict (same as upload_image_streaming)
+            
+        Example:
+            >>> with open('image.jpg', 'rb') as f:
+            ...     data = f.read()
+            >>> result = await client.upload_image(
+            ...     file_bytes=data,
+            ...     company_id="550e8400-e29b-41d4-a716-446655440001",
+            ...     content_type="image/jpeg",
+            ...     extension=".jpg"
+            ... )
+        """
+        from io import BytesIO
+        
+        logger.warning(
+            "upload_image_bytes_deprecated",
+            message="Using legacy upload_image() method. Consider using upload_image_streaming() instead.",
+            company_id=company_id,
+            size_kb=len(file_bytes) / 1024
+        )
+        
+        file_obj = BytesIO(file_bytes)
+        return await self.upload_image_streaming(
+            file_obj=file_obj,
+            company_id=company_id,
+            content_type=content_type,
+            extension=extension,
+            user_id=user_id,
+        )
+
     async def delete_image(self, filename: str) -> bool:
+        """
+        Delete an image from storage.
+        
+        Args:
+            filename: Complete filename including extension
+                     (e.g., "550e8400-e29b-41d4-a716-446655440001.jpg")
+                     
+        Returns:
+            bool: True if deleted, False if not found
+            
+        Raises:
+            ImageServiceError: On deletion failure (other than 404)
+            
+        Example:
+            >>> success = await client.delete_image(
+            ...     "550e8400-e29b-41d4-a716-446655440001.jpg"
+            ... )
+            >>> if success:
+            ...     print("Image deleted successfully")
+        """
         logger.info("deleting_from_image_service", filename=filename)
 
         response = await self._client.delete(f"/images/{filename}")
@@ -170,6 +325,23 @@ class ImageServiceClient:
 
     @staticmethod
     def get_extension_from_content_type(content_type: str) -> str:
+        """
+        Map MIME type to file extension.
+        
+        Args:
+            content_type: MIME type (e.g., "image/jpeg")
+            
+        Returns:
+            str: File extension (e.g., ".jpg")
+            
+        Raises:
+            ValueError: If content type is not supported
+            
+        Example:
+            >>> ext = ImageServiceClient.get_extension_from_content_type("image/jpeg")
+            >>> print(ext)
+            .jpg
+        """
         extension = settings.content_type_map.get(content_type)
         if not extension:
             raise ValueError(
@@ -180,6 +352,26 @@ class ImageServiceClient:
 
     @staticmethod
     def build_image_url(image_id: str, extension: str, base_url: str) -> str:
+        """
+        Build full URL for accessing an image.
+        
+        Args:
+            image_id: Company UUID (base filename)
+            extension: File extension including dot (e.g., ".jpg")
+            base_url: Base URL of the application
+            
+        Returns:
+            str: Complete URL to access the image
+            
+        Example:
+            >>> url = ImageServiceClient.build_image_url(
+            ...     "550e8400-e29b-41d4-a716-446655440001",
+            ...     ".jpg",
+            ...     "http://localhost"
+            ... )
+            >>> print(url)
+            http://localhost/images/550e8400-e29b-41d4-a716-446655440001.jpg
+        """
         base = base_url.rstrip("/")
         return f"{base}/images/{image_id}{extension}"
 

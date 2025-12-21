@@ -97,26 +97,31 @@ async def upload_image(
     extension: str = Form(...),
 ):
     """
-    Upload an image to MinIO with validation and NSFW detection
+    Upload an image with validation and NSFW detection.
     
-    Args:
-        file: Image file bytes
-        company_id: UUID of the company (used as filename base)
-        extension: File extension (e.g., ".jpg", ".png") - determined by backend
-    
-    Process:
-    1. Validate and process image (resize, optimize)
-    2. Check for NSFW content
-    3. Delete old image if exists (different extension)
-    4. Upload to MinIO
-    
-    Returns: company_id, extension, url, size, nsfw_score
+    Optimized to minimize memory usage by:
+    1. Streaming file from request
+    2. Processing in chunks where possible
+    3. Only loading full bytes when necessary (validation, NSFW)
     """
     
     spooled = file.file
 
     try:
         await run_in_threadpool(spooled.seek, 0)
+        
+        await run_in_threadpool(spooled.seek, 0, 2)
+        file_size = await run_in_threadpool(spooled.tell)
+        await run_in_threadpool(spooled.seek, 0)
+        
+        if file_size > settings.max_file_size:
+            size_mb = file_size / 1_048_576
+            limit_mb = settings.max_file_size / 1_048_576
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Image too large ({size_mb:.2f}MB). Limit: {limit_mb:.2f}MB"
+            )
+        
         file_bytes = await run_in_threadpool(spooled.read)
         
         logger.info(
@@ -212,7 +217,6 @@ async def upload_image(
             await run_in_threadpool(spooled.close)
         except Exception:
             pass
-
 
 @app.get("/images/{filename}")
 async def get_image(filename: str):

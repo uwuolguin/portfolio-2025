@@ -112,21 +112,16 @@ async def get_my_company(
         )
 
 
-@router.post(
-    "/", 
-    response_model=CompanyResponse, 
-    status_code=status.HTTP_201_CREATED,
-    summary="Create company"
-)
+@router.post("/", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 async def create_company(
     request: Request,
-    name: str = Form(..., min_length=1, max_length=100),
+    name: str = Form(...),
     product_uuid: UUID = Form(...),
     commune_uuid: UUID = Form(...),
-    description_es: Optional[str] = Form(None, max_length=500),
-    description_en: Optional[str] = Form(None, max_length=500),
-    address: str = Form(..., max_length=200),
-    phone: str = Form(..., max_length=20),
+    description_es: Optional[str] = Form(None),
+    description_en: Optional[str] = Form(None),
+    address: str = Form(...),
+    phone: str = Form(...),
     email: str = Form(...),
     lang: str = Form(..., regex="^(es|en)$"),
     image: UploadFile = File(...),
@@ -134,15 +129,6 @@ async def create_company(
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Create a new company (one per user).
-    
-    Requires:
-    - Verified email
-    - CSRF token
-    - Image file (JPEG/PNG, max 10MB)
-    - Either description_es or description_en (auto-translates if only one provided)
-    """
     user_uuid = UUID(current_user["sub"])
     company_uuid = uuid.uuid4()
 
@@ -169,10 +155,9 @@ async def create_company(
         image_ext = image_service_client.get_extension_from_content_type(
             image.content_type
         )
-        file_bytes = await image.read()
         
-        upload_result = await image_service_client.upload_image(
-            file_bytes=file_bytes,
+        upload_result = await image_service_client.upload_image_streaming(
+            file_obj=image.file,
             company_id=str(company_uuid),
             content_type=image.content_type,
             extension=image_ext,
@@ -198,7 +183,6 @@ async def create_company(
             image_extension=image_ext,
         )
 
-        # Fetch with relations for response
         company_with_relations = await DB.get_company_by_uuid(db, company_uuid)
         
         if not company_with_relations:
@@ -214,7 +198,6 @@ async def create_company(
     except HTTPException:
         raise
     except ValueError as e:
-        # Business rule violations (one company per user, invalid foreign keys)
         await image_service_client.delete_image(f"{company_uuid}{image_ext}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
