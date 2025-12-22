@@ -693,10 +693,10 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_companies_by_user_uuid(
+    async def get_company_by_user_uuid(
         conn: asyncpg.Connection, 
         user_uuid: UUID
-    ) -> List[CompanyWithRelations]:
+    ) -> CompanyWithRelations:
         """
         Get all companies belonging to a specific user.
         
@@ -705,7 +705,7 @@ class DB:
             user_uuid: User UUID
             
         Returns:
-            List of CompanyWithRelations (typically just one due to business rule)
+            List of CompanyWithRelations (Just one due to business rule)
         """
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
@@ -724,8 +724,8 @@ class DB:
                 WHERE c.user_uuid = $1
                 ORDER BY c.created_at DESC
             """
-            rows = await conn.fetch(query, user_uuid)
-            return [CompanyWithRelations(**dict(row)) for row in rows]
+            row = await conn.fetchrow(query, user_uuid)
+            return CompanyWithRelations(**dict(row))
 
     @staticmethod
     @db_retry()
@@ -769,7 +769,6 @@ class DB:
             ValueError: If business rules violated or foreign keys invalid
         """
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
-            # Check one-company-per-user constraint
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
                 user_uuid
@@ -780,7 +779,6 @@ class DB:
                     "Please update your existing company."
                 )
             
-            # Validate product exists
             product_exists = await conn.fetchval(
                 "SELECT 1 FROM proveo.products WHERE uuid=$1", 
                 product_uuid
@@ -788,7 +786,6 @@ class DB:
             if not product_exists:
                 raise ValueError(f"Product with UUID {product_uuid} does not exist")
             
-            # Validate commune exists
             commune_exists = await conn.fetchval(
                 "SELECT 1 FROM proveo.communes WHERE uuid=$1", 
                 commune_uuid
@@ -796,7 +793,6 @@ class DB:
             if not commune_exists:
                 raise ValueError(f"Commune with UUID {commune_uuid} does not exist")
             
-            # Insert company
             insert_query = """
                 INSERT INTO proveo.companies (
                     uuid, user_uuid, product_uuid, commune_uuid,
@@ -859,7 +855,6 @@ class DB:
             PermissionError: If user doesn't own the company
         """
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
-            # Verify ownership
             owner_check = await conn.fetchval(
                 "SELECT user_uuid FROM proveo.companies WHERE uuid=$1", 
                 company_uuid
@@ -869,7 +864,6 @@ class DB:
             if owner_check != user_uuid:
                 raise PermissionError("You can only update your own companies")
 
-            # Build dynamic update query
             update_fields = []
             params = []
             param_count = 1
@@ -891,7 +885,6 @@ class DB:
                     params.append(value)
                     param_count += 1
 
-            # Handle foreign key updates with validation
             if product_uuid is not None:
                 product_exists = await conn.fetchval(
                     "SELECT 1 FROM proveo.products WHERE uuid=$1", 
@@ -917,7 +910,6 @@ class DB:
             if not update_fields:
                 raise ValueError("No fields provided for update")
 
-            # Always update timestamp
             update_fields.append("updated_at=NOW()")
 
             where_idx = len(params) + 1
@@ -972,7 +964,6 @@ class DB:
         deleted_image: str | None = None
         
         async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
-            # Fetch company with ownership check
             company_query = """
                 SELECT 
                     uuid, user_uuid, product_uuid, commune_uuid,
@@ -995,7 +986,6 @@ class DB:
                     "you don't have permission to delete it"
                 )
             
-            # Soft delete: move to deleted table
             insert_deleted = """
                 INSERT INTO proveo.companies_deleted (
                     uuid, user_uuid, product_uuid, commune_uuid,
@@ -1014,7 +1004,6 @@ class DB:
                 company["created_at"], company["updated_at"]
             )
 
-            # Delete from active table
             delete_query = "DELETE FROM proveo.companies WHERE uuid = $1 RETURNING uuid"
             deleted_row = await conn.fetchrow(delete_query, company_uuid)
 
@@ -1031,13 +1020,11 @@ class DB:
                 user_uuid=str(user_uuid)
             )
 
-            # Prepare image path for deletion
             image_id = company.get("image_url")
             image_ext = company.get("image_extension")
             if image_id and image_ext:
                 deleted_image = f"{image_id}{image_ext}"
 
-        # Delete image outside transaction (async operation)
         if deleted_image:
             try:
                 success = await asyncio.wait_for(
@@ -1114,7 +1101,6 @@ class DB:
             if not company:
                 raise ValueError(f"Company with UUID {company_uuid} not found")
 
-            # Soft delete
             insert_deleted = """
                 INSERT INTO proveo.companies_deleted (
                     uuid, user_uuid, product_uuid, commune_uuid,
@@ -1148,7 +1134,6 @@ class DB:
             if image_id and image_ext:
                 deleted_image_path = f"{image_id}{image_ext}"
 
-        # Delete image outside transaction
         if deleted_image_path:
             try:
                 success = await asyncio.wait_for(

@@ -82,17 +82,14 @@ async def get_my_company(
     user_uuid = UUID(current_user["sub"])
     
     try:
-        companies = await DB.get_companies_by_user_uuid(db, user_uuid)
+        company = await DB.get_company_by_user_uuid(db, user_uuid)
         
-        if not companies:
+        if not company:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No company found for this user"
             )
         
-        company = companies[0]  # Business rule: one company per user
-        
-        # Build full image URL
         response_dict = company.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
             company.image_url, 
@@ -349,10 +346,6 @@ async def delete_company(
             detail="Failed to delete company"
         )
 
-
-# ============================================================================
-# ADMIN ENDPOINTS
-# ============================================================================
 
 @router.get(
     "/admin/all-companies/use-postman-or-similar-to-bypass-csrf",
