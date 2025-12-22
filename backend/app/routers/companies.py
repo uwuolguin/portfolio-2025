@@ -93,8 +93,7 @@ async def get_my_company(
         response_dict = company.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
             company.image_url, 
-            company.image_extension, 
-            str(request.base_url)
+            company.image_extension
         )
         
         return CompanyResponse(**response_dict)
@@ -187,7 +186,7 @@ async def create_company(
 
         response_dict = company_with_relations.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
-            image_id, image_ext, str(request.base_url)
+            image_id, image_ext
         )
 
         return CompanyResponse(**response_dict)
@@ -242,15 +241,12 @@ async def update_company(
     image_ext = None
 
     try:
-        # Handle image upload if provided
         if image:
             image_ext = image_service_client.get_extension_from_content_type(
                 image.content_type
             )
-            file_bytes = await image.read()
-
-            upload_result = await image_service_client.upload_image(
-                file_bytes=file_bytes,
+            upload_result = await image_service_client.upload_image_streaming(
+                file_obj=image.file,
                 company_id=str(company_uuid),
                 content_type=image.content_type,
                 extension=image_ext,
@@ -260,7 +256,6 @@ async def update_company(
             image_id = upload_result["image_id"]
             image_ext = upload_result["extension"]
 
-        # Update company
         company = await DB.update_company_by_uuid(
             conn=db,
             company_uuid=company_uuid,
@@ -277,17 +272,17 @@ async def update_company(
             commune_uuid=commune_uuid,
         )
 
-        # Fetch with relations
         company_with_relations = await DB.get_company_by_uuid(db, company_uuid)
         
         if not company_with_relations:
             raise RuntimeError("Failed to fetch updated company")
 
+        from app.config import settings
+        
         response_dict = company_with_relations.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
             company_with_relations.image_url,
-            company_with_relations.image_extension,
-            str(request.base_url)
+            company_with_relations.image_extension
         )
 
         return CompanyResponse(**response_dict)
@@ -310,7 +305,6 @@ async def update_company(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update company"
         )
-
 
 @router.delete(
     "/{company_uuid}",
@@ -371,8 +365,7 @@ async def admin_list_companies(
             response_dict = company.model_dump()
             response_dict["image_url"] = image_service_client.build_image_url(
                 company.image_url, 
-                company.image_extension, 
-                base_url
+                company.image_extension
             )
             result.append(CompanyResponse(**response_dict))
 

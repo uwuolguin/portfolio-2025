@@ -1,3 +1,8 @@
+# NOTE:
+# I pre-build library wheels to drastically reduce build time and startup latency.
+# This can increase significantly the final image size.
+# Acceptable for PoC and frequent rebuilds.
+# Re-evaluate if disk pressure or registry costs become a concern
 FROM python:3.11-slim AS builder
 
 WORKDIR /build

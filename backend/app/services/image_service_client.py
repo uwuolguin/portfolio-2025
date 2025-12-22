@@ -169,43 +169,17 @@ class ImageServiceClient:
             user_id: Optional user UUID for audit logging
             
         Returns:
-            UploadedImage dict containing:
-                - image_id: Company UUID
-                - extension: File extension
-                - url: Relative URL to access image
-                - size: File size in bytes
-                - nsfw_score: NSFW detection score (0.0-1.0) or None
-                - nsfw_checked: Whether NSFW check was performed
-                
-        Raises:
-            ImageServiceError: On upload failure or validation error
-            httpx exceptions: On network/connection failures
-            
-        Memory usage: Minimal - file streams through without buffering
-            
-        Example:
-            >>> async with open('image.jpg', 'rb') as f:
-            ...     result = await client.upload_image_streaming(
-            ...         file_obj=f,
-            ...         company_id="550e8400-e29b-41d4-a716-446655440001",
-            ...         content_type="image/jpeg",
-            ...         extension=".jpg"
-            ...     )
-            >>> print(result['url'])
-            /images/550e8400-e29b-41d4-a716-446655440001.jpg
+            UploadedImage dict
         """
         
         files = {
-            "file": (f"{company_id}{extension}", file_obj, content_type)
-        }
-
-        data = {
-            "company_id": company_id,
-            "extension": extension,
+            "file": (f"{company_id}{extension}", file_obj, content_type),
+            "company_id": (None, company_id),
+            "extension": (None, extension),
         }
 
         if user_id:
-            data["user_id"] = user_id
+            files["user_id"] = (None, user_id),
 
         logger.info(
             "uploading_to_image_service_streaming",
@@ -215,7 +189,7 @@ class ImageServiceClient:
             user_id=user_id,
         )
 
-        response = await self._client.post("/upload", files=files, data=data)
+        response = await self._client.post("/upload", files=files)
         self._raise_for_error(response, "image_upload_failed")
 
         result = response.json()
@@ -237,7 +211,7 @@ class ImageServiceClient:
             "nsfw_score": result.get("nsfw_score"),
             "nsfw_checked": result["nsfw_checked"],
         }
-
+    
     async def delete_image(self, filename: str) -> bool:
         """
         Delete an image from storage.
@@ -302,14 +276,13 @@ class ImageServiceClient:
         return extension
 
     @staticmethod
-    def build_image_url(image_id: str, extension: str, base_url: str) -> str:
+    def build_image_url(image_id: str, extension: str) -> str:
         """
         Build full URL for accessing an image.
         
         Args:
             image_id: Company UUID (base filename)
             extension: File extension including dot (e.g., ".jpg")
-            base_url: Base URL of the application
             
         Returns:
             str: Complete URL to access the image
@@ -317,13 +290,13 @@ class ImageServiceClient:
         Example:
             >>> url = ImageServiceClient.build_image_url(
             ...     "550e8400-e29b-41d4-a716-446655440001",
-            ...     ".jpg",
-            ...     "http://localhost"
+            ...     ".jpg"
             ... )
             >>> print(url)
             http://localhost/images/550e8400-e29b-41d4-a716-446655440001.jpg
         """
-        base = base_url.rstrip("/")
+        from app.config import settings
+        base = settings.api_base_url.rstrip("/")
         return f"{base}/images/{image_id}{extension}"
 
 
