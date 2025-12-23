@@ -11,7 +11,7 @@ import sys
 async def create_admin_user():
     """Create the initial admin user if not exists"""
     
-    admin_email = input("Enter admin email").strip()
+    admin_email = input("Enter admin email: ").strip()
     admin_password = input("Enter admin password (min 8 chars): ").strip()
     
     if len(admin_password) < 8:
@@ -42,7 +42,7 @@ async def create_admin_user():
             if existing:
                 await conn.execute("""
                     UPDATE proveo.users 
-                    SET role = 'admin', email_verified = true, hashed_password = $1
+                    SET role = 'admin', email_verified = true,verification_token= NULL,verification_token_expires= NULL, hashed_password = $1
                     WHERE email = $2
                 """, get_password_hash(admin_password), admin_email)
                 

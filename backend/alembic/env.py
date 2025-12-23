@@ -20,17 +20,9 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-def get_database_url():
-    base_url = settings.alembic_database_url
-
-    if hasattr(settings, 'db_ssl_mode') and settings.db_ssl_mode != "disable":
-        separator = "&" if "?" in base_url else "?"
-        base_url += f"{separator}sslmode={settings.db_ssl_mode}"
-    
-    return base_url
 
 def run_migrations_offline() -> None:
-    url = get_database_url()
+    url = settings.alembic_database_url
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -43,7 +35,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = get_database_url()
+    configuration["sqlalchemy.url"] =settings.alembic_database_url
     
     connect_args = {}
     connect_args["options"] = "-c statement_timeout=60000 -c search_path=public"

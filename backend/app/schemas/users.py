@@ -10,7 +10,6 @@ class UserRecord(BaseModel):
     email: EmailStr
     role: str
     email_verified: bool
-    verification_token: Optional[str]
     created_at: datetime
 
     model_config = {
@@ -21,12 +20,33 @@ class UserRecord(BaseModel):
                 "email": "andres@example.com",
                 "role": "user",
                 "email_verified": False,
-                "verification_token": "token123",
                 "created_at": "2025-10-19T15:30:00Z",
             }
         }
     }
 
+class UserRecordHash(BaseModel):
+    uuid: UUID
+    name: str
+    email: EmailStr
+    role: str
+    email_verified: bool
+    created_at: datetime
+    hashed_password: str
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "uuid": "4d6f9c3b-ef34-42b8-b2a5-9d4b8e7a12aa",
+                "name": "Andres Olguin",
+                "email": "andres@example.com",
+                "role": "user",
+                "email_verified": False,
+                "hashed_password": "zajbasbsas",
+                "created_at": "2025-10-19T15:30:00Z",
+            }
+        }
+    }
 
 class UserSignup(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="User's full name")

@@ -5,7 +5,7 @@ from typing import AsyncGenerator, Optional, List
 from enum import Enum
 from uuid import UUID
 from app.database.db_retry import db_retry
-from app.schemas.users import UserRecord,UserDeletionResponse,AdminUserResponse
+from app.schemas.users import UserRecord,UserRecordHash,UserDeletionResponse,AdminUserResponse
 from app.schemas.communes import CommuneRecord
 from app.schemas.products import ProductRecord
 from app.auth.jwt import get_password_hash
@@ -99,7 +99,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def get_user_by_email(conn: asyncpg.Connection, email: str) -> Optional[UserRecord]:
+    async def get_user_by_email(conn: asyncpg.Connection, email: str) -> Optional[UserRecordHash]:
         async with transaction(conn, readonly=True):
             query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
@@ -107,7 +107,7 @@ class DB:
                 WHERE email = $1
             """
             row = await conn.fetchrow(query, email)
-            return UserRecord(**dict(row)) if row else None
+            return UserRecordHash(**dict(row)) if row else None
 
     @staticmethod
     @db_retry()
