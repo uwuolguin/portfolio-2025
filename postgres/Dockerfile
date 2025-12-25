@@ -1,5 +1,5 @@
 FROM postgres:15-alpine
-RUN apk add --no-cache openssl dos2unix
+RUN apk add --no-cache openssl dos2unix postgresql15-contrib
 
 COPY init-ssl.sh /docker-entrypoint-initdb.d/01-init-ssl.sh
 RUN dos2unix /docker-entrypoint-initdb.d/01-init-ssl.sh

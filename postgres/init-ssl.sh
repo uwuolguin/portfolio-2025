@@ -33,9 +33,11 @@ ssl_cert_file = 'ssl/server.crt'
 ssl_key_file = 'ssl/server.key'
 ssl_min_protocol_version = 'TLSv1.2'
 password_encryption = 'scram-sha-256'
+shared_preload_libraries = 'pg_cron'
+cron.database_name = 'portfolio'
 EOF
     chown postgres:postgres "$CUSTOM_CONF"
-    echo "Persistent SSL config created"
+    echo "Persistent SSL + pg_cron config created"
 fi
 
 if ! grep -q "include.*postgresql.ssl.conf" "$PGDATA/postgresql.conf"; then
@@ -69,4 +71,6 @@ if [ ! -L "$PGDATA/pg_hba.conf" ]; then
     echo "Authentication config linked"
 fi
 
-echo "PostgreSQL SSL setup finished successfully!"
+echo "Restarting PostgreSQL to load pg_cron..."
+pg_ctl restart -D "$PGDATA" -m fast -w
+echo "PostgreSQL restarted successfully!"
