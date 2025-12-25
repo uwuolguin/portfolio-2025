@@ -23,12 +23,15 @@ from tenacity import (
 )
 
 from app.config import settings
+from app.services.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerOpen,
+)
 
 logger = structlog.get_logger(__name__)
 
 
 class UploadedImage(TypedDict):
-    """Type definition for uploaded image response"""
     image_id: str
     extension: str
     url: str
@@ -38,7 +41,6 @@ class UploadedImage(TypedDict):
 
 
 class ImageServiceError(Exception):
-    """Base exception for image service errors"""
     pass
 
 
@@ -51,27 +53,18 @@ _RETRY_POLICY: Final = retry(
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
+_circuit_breaker = CircuitBreaker(
+    failure_threshold=5,
+    recovery_timeout=60,
+)
 
 
 class ImageServiceClient:
     """
     Async client for Image Storage Microservice
-    
-    Features:
-    - Streaming uploads to minimize memory usage
-    - Automatic retries with exponential backoff
-    - Connection pooling and keepalive
-    - Structured logging with correlation
     """
 
     def __init__(self, client: Optional[httpx.AsyncClient] = None) -> None:
-        """
-        Initialize the image service client.
-        
-        Args:
-            client: Optional pre-configured httpx client. If not provided,
-                   creates a new client with connection pooling.
-        """
         if client is not None:
             self._client = client
             return
@@ -101,22 +94,11 @@ class ImageServiceClient:
         )
 
     async def close(self) -> None:
-        """Close the HTTP client and release resources"""
         await self._client.aclose()
         logger.info("image_service_client_closed")
 
     @staticmethod
     def _raise_for_error(response: httpx.Response, action: str) -> None:
-        """
-        Check response status and raise ImageServiceError if not successful.
-        
-        Args:
-            response: HTTP response object
-            action: Description of the action being performed
-            
-        Raises:
-            ImageServiceError: If response status is not 200/201
-        """
         if response.status_code in (200, 201):
             return
 
@@ -133,45 +115,13 @@ class ImageServiceClient:
         raise ImageServiceError(f"{action}: {detail}")
 
     @_RETRY_POLICY
-    async def health_check(self) -> bool:
-        """
-        Check if image service is healthy.
-        
-        Returns:
-            bool: True if service is healthy
-            
-        Raises:
-            httpx exceptions on connection failures
-        """
-        response = await self._client.get("/health", timeout=5.0)
-        return response.status_code == 200
-
-    @_RETRY_POLICY
-    async def upload_image_streaming(
+    async def _upload_request(
         self,
         file_obj,
         company_id: str,
         content_type: str,
         extension: str,
-        user_id: Optional[str] = None,
-    ) -> UploadedImage:
-        """
-        Upload image using streaming to minimize memory usage.
-        
-        RECOMMENDED METHOD: Streams file directly from FastAPI's UploadFile
-        to the image service without intermediate buffering.
-        
-        Args:
-            file_obj: File-like object (SpooledTemporaryFile from FastAPI)
-            company_id: UUID of the company (used as base filename)
-            content_type: MIME type (e.g., "image/jpeg")
-            extension: File extension (e.g., ".jpg", ".png")
-            user_id: Optional user UUID for audit logging
-            
-        Returns:
-            UploadedImage dict
-        """
-        
+    ) -> httpx.Response:
         files = {
             "file": (f"{company_id}{extension}", file_obj, content_type),
         }
@@ -181,96 +131,104 @@ class ImageServiceClient:
             "extension": extension,
         }
 
-        logger.info(
-            "uploading_to_image_service_streaming",
-            company_id=company_id,
-            content_type=content_type,
-            extension=extension,
-            user_id=user_id,
-        )
-
-        response = await self._client.post(
+        return await self._client.post(
             "/upload",
             files=files,
             data=data,
         )
-        self._raise_for_error(response, "image_upload_failed")
 
-        result = response.json()
+    async def upload_image_streaming(
+        self,
+        file_obj,
+        company_id: str,
+        content_type: str,
+        extension: str,
+        user_id: Optional[str] = None,
+    ) -> UploadedImage:
+        await _circuit_breaker.allow_call()
 
-        logger.info(
-            "image_upload_successful",
-            image_id=result["image_id"],
-            extension=result["extension"],
-            size=result["size"],
-            nsfw_checked=result["nsfw_checked"],
-            nsfw_score=result.get("nsfw_score"),
-        )
+        try:
+            response = await self._upload_request(
+                file_obj=file_obj,
+                company_id=company_id,
+                content_type=content_type,
+                extension=extension,
+            )
 
-        return {
-            "image_id": result["image_id"],
-            "extension": result["extension"],
-            "url": result["url"],
-            "size": result["size"],
-            "nsfw_score": result.get("nsfw_score"),
-            "nsfw_checked": result["nsfw_checked"],
-        }
-    
+            if response.status_code >= 500:
+                raise httpx.HTTPStatusError(
+                    "Image service error",
+                    request=response.request,
+                    response=response,
+                )
+
+            self._raise_for_error(response, "image_upload_failed")
+
+            result = response.json()
+            await _circuit_breaker.record_success()
+
+            logger.info(
+                "image_upload_successful",
+                image_id=result["image_id"],
+                extension=result["extension"],
+                size=result["size"],
+                nsfw_checked=result["nsfw_checked"],
+                nsfw_score=result.get("nsfw_score"),
+            )
+
+            return {
+                "image_id": result["image_id"],
+                "extension": result["extension"],
+                "url": result["url"],
+                "size": result["size"],
+                "nsfw_score": result.get("nsfw_score"),
+                "nsfw_checked": result["nsfw_checked"],
+            }
+
+        except CircuitBreakerOpen:
+            raise
+
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
+            await _circuit_breaker.record_failure()
+            raise
+
+        except ImageServiceError:
+            raise
+
     async def delete_image(self, filename: str) -> bool:
-        """
-        Delete an image from storage.
-        
-        Args:
-            filename: Complete filename including extension
-                     (e.g., "550e8400-e29b-41d4-a716-446655440001.jpg")
-                     
-        Returns:
-            bool: True if deleted, False if not found
-            
-        Raises:
-            ImageServiceError: On deletion failure (other than 404)
-            
-        Example:
-            >>> success = await client.delete_image(
-            ...     "550e8400-e29b-41d4-a716-446655440001.jpg"
-            ... )
-            >>> if success:
-            ...     print("Image deleted successfully")
-        """
-        logger.info("deleting_from_image_service", filename=filename)
+        await _circuit_breaker.allow_call()
 
-        response = await self._client.delete(f"/images/{filename}")
+        try:
+            response = await self._client.delete(f"/images/{filename}")
 
-        if response.status_code == 200:
-            logger.info("image_delete_successful", filename=filename)
-            return True
+            if response.status_code == 200:
+                await _circuit_breaker.record_success()
+                return True
 
-        if response.status_code == 404:
-            logger.warning("image_delete_not_found", filename=filename)
+            if response.status_code == 404:
+                await _circuit_breaker.record_success()
+                return False
+
+            if response.status_code >= 500:
+                raise httpx.HTTPStatusError(
+                    "Image service error",
+                    request=response.request,
+                    response=response,
+                )
+
+            self._raise_for_error(response, "image_delete_failed")
+            await _circuit_breaker.record_success()
             return False
 
-        self._raise_for_error(response, "image_delete_failed")
-        return False
+        except CircuitBreakerOpen:
+            raise
+
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
+            await _circuit_breaker.record_failure()
+            raise
 
     @staticmethod
     def get_extension_from_content_type(content_type: str) -> str:
-        """
-        Map MIME type to file extension.
-        
-        Args:
-            content_type: MIME type (e.g., "image/jpeg")
-            
-        Returns:
-            str: File extension (e.g., ".jpg")
-            
-        Raises:
-            ValueError: If content type is not supported
-            
-        Example:
-            >>> ext = ImageServiceClient.get_extension_from_content_type("image/jpeg")
-            >>> print(ext)
-            .jpg
-        """
         extension = settings.content_type_map.get(content_type)
         if not extension:
             raise ValueError(
@@ -281,25 +239,6 @@ class ImageServiceClient:
 
     @staticmethod
     def build_image_url(image_id: str, extension: str) -> str:
-        """
-        Build full URL for accessing an image.
-        
-        Args:
-            image_id: Company UUID (base filename)
-            extension: File extension including dot (e.g., ".jpg")
-            
-        Returns:
-            str: Complete URL to access the image
-            
-        Example:
-            >>> url = ImageServiceClient.build_image_url(
-            ...     "550e8400-e29b-41d4-a716-446655440001",
-            ...     ".jpg"
-            ... )
-            >>> print(url)
-            http://localhost/images/550e8400-e29b-41d4-a716-446655440001.jpg
-        """
-        from app.config import settings
         base = settings.api_base_url.rstrip("/")
         return f"{base}/images/{image_id}{extension}"
 
