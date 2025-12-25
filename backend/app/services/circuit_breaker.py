@@ -4,7 +4,6 @@ import asyncio
 class CircuitBreakerOpen(Exception):
     pass
 
-
 class CircuitBreaker:
     def __init__(
         self,

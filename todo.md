@@ -34,63 +34,6 @@ Add/verify image-orphan cleanup cron job in image-service :
                             return {"deleted_count": deleted_count, "valid_count": len(valid_filenames)}
 
 
-Circuit breaker: implement, fix bugs, integrate into backend client:
-
-                            # backend/app/utils/image_service_client.py
-                            from tenacity import retry, stop_after_attempt, wait_exponential
-
-                            class ImageServiceCircuitBreaker:
-                                def __init__(self):
-                                    self.failure_count = 0
-                                    self.last_failure_time = None
-                                    self.is_open = False
-                                    self.threshold = 5
-                                    self.timeout = 60  # seconds
-                                
-                                def call_allowed(self) -> bool:
-                                    if not self.is_open:
-                                        return True
-                                    
-                                    # Check if timeout has passed
-                                    if time.time() - self.last_failure_time > self.timeout:
-                                        self.is_open = False
-                                        self.failure_count = 0
-                                        return True
-                                    
-                                    return False
-                                
-                                def record_success(self):
-                                    self.failure_count = 0
-                                    self.is_open = False
-                                
-                                def record_failure(self):
-                                    self.failure_count += 1
-                                    self.last_failure_time = time.time()
-                                    
-                                    if self.failure_count >= self.threshold:
-                                        self.is_open = True
-                                        logger.error("circuit_breaker_opened", 
-                                                    failure_count=self.failure_count)
-
-                            circuit_breaker = ImageServiceCircuitBreaker()
-
-                            class ImageServiceClient:
-                                @retry(
-                                    stop=stop_after_attempt(3),
-                                    wait=wait_exponential(multiplier=1, min=1, max=10)
-                                )
-                                async def upload_image(self, file_bytes, filename, content_type, user_id):
-                                    if not circuit_breaker.call_allowed():
-                                        raise ImageServiceError("Circuit breaker is open - service unavailable")
-                                    
-                                    try:
-                                        response = await self.client.post("/upload", ...)
-                                        circuit_breaker.record_success()
-                                        return response.json()
-                                    except Exception as e:
-                                        circuit_breaker.record_failure()
-                                        raise
-
 Local integration testing:manually make sure everything is working, is an small app for now so unit testing is just for show
 
 Automation scripts: update init_backend.sh and any startup jobs to create buckets, run migrations, seed inventory.
