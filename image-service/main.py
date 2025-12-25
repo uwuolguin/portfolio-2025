@@ -284,7 +284,7 @@ async def get_image(filename: str):
                     pass
 
         headers = {
-            "Cache-Control": "public, max-age=2592000",  # 30 days
+            "Cache-Control": "public, max-age=2592000",
             "Content-Disposition": f'inline; filename="{filename}"',
         }
 

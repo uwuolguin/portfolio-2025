@@ -174,12 +174,12 @@ class ImageServiceClient:
         
         files = {
             "file": (f"{company_id}{extension}", file_obj, content_type),
-            "company_id": (None, company_id),
-            "extension": (None, extension),
         }
 
-        if user_id:
-            files["user_id"] = (None, user_id),
+        data = {
+            "company_id": company_id,
+            "extension": extension,
+        }
 
         logger.info(
             "uploading_to_image_service_streaming",
@@ -189,7 +189,11 @@ class ImageServiceClient:
             user_id=user_id,
         )
 
-        response = await self._client.post("/upload", files=files)
+        response = await self._client.post(
+            "/upload",
+            files=files,
+            data=data,
+        )
         self._raise_for_error(response, "image_upload_failed")
 
         result = response.json()

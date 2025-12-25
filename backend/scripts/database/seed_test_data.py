@@ -1,5 +1,5 @@
 """
-Seed test data: 16 users with companies
+Seed test data: 16 users with companies + 1 admin
 Usage:
   python -m app.services.testing_setup_users_data
   docker compose exec backend python -m app.services.testing_setup_users_data
@@ -7,27 +7,33 @@ Usage:
 import asyncio
 import asyncpg
 import httpx
+from pathlib import Path
+from io import BytesIO
 from app.config import settings
-from app.auth.jwt import get_password_hash
-import uuid
+from app.database.connection import get_db
+from app.database.transactions import DB
+from app.services.image_service_client import image_service_client
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 TEST_USERS = [
-    {"uuid":"550e8400-e29b-41d4-a716-446655440001","name":"Test User 01","email":"testuser01@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440002","name":"Test User 02","email":"testuser02@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440003","name":"Test User 03","email":"testuser03@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440004","name":"Test User 04","email":"testuser04@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440005","name":"Test User 05","email":"testuser05@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440006","name":"Test User 06","email":"testuser06@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440007","name":"Test User 07","email":"testuser07@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440008","name":"Test User 08","email":"testuser08@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440009","name":"Test User 09","email":"testuser09@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440010","name":"Test User 10","email":"testuser10@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440011","name":"Test User 11","email":"testuser11@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440012","name":"Test User 12","email":"testuser12@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440013","name":"Test User 13","email":"testuser13@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440014","name":"Test User 14","email":"testuser14@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440015","name":"Test User 15","email":"testuser15@proveo.com","password":"TestPass123!"},
-    {"uuid":"550e8400-e29b-41d4-a716-446655440016","name":"Test User 16","email":"testuser16@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 01","email":"testuser01@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 02","email":"testuser02@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 03","email":"testuser03@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 04","email":"testuser04@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 05","email":"testuser05@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 06","email":"testuser06@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 07","email":"testuser07@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 08","email":"testuser08@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 09","email":"testuser09@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 10","email":"testuser10@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 11","email":"testuser11@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 12","email":"testuser12@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 13","email":"testuser13@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 14","email":"testuser14@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 15","email":"testuser15@proveo.com","password":"TestPass123!"},
+    {"name":"Test User 16","email":"testuser16@proveo.com","password":"TestPass123!"},
 ]
 
 COMPANY_TEMPLATES = [
@@ -51,60 +57,192 @@ COMPANY_TEMPLATES = [
 
 TEST_IMAGES = ["test1.jpg","test2.jpg","test3.jpg"]
 
-async def fetch_test_image_bytes(image_name: str) -> bytes:
+
+async def fetch_test_image_bytes(image_name: str) -> BytesIO:
+    """Fetch test image from Nginx static files"""
     async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(f"http://nginx/files/test_pictures/{image_name}")
-        r.raise_for_status()
-        return r.content
+        response = await client.get(f"http://nginx/files/test_pictures/{image_name}")
+        response.raise_for_status()
+        image_bytes = BytesIO(response.content)
+        image_bytes.seek(0)
+        return image_bytes
 
-
-async def upload_test_image_to_minio(company_uuid: str, user_uuid: str, image_index: int):
-    image_bytes = await fetch_test_image_bytes(TEST_IMAGES[image_index % 3])
-    files = {"file":(f"{company_uuid}.jpg",image_bytes,"image/jpeg")}
-    data = {"company_id":company_uuid,"extension":".jpg","user_id":user_uuid}
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(f"{settings.image_service_url}/upload",files=files,data=data)
-        r.raise_for_status()
-        j = r.json()
-        return j["image_id"], j["extension"]
 
 async def seed_test_data():
+    """
+    Seed test data using proper DB transactions and image service client.
+    Creates 16 test users with companies and necessary communes/products.
+    """
     conn = await asyncpg.connect(settings.alembic_database_url)
-
-    commune_uuid_1, commune_uuid_2 = str(uuid.uuid4()), str(uuid.uuid4())
-    await conn.execute("INSERT INTO proveo.communes (name,uuid) VALUES ($1,$2)","commune",commune_uuid_1)
-    await conn.execute("INSERT INTO proveo.communes (name,uuid) VALUES ($1,$2)","commune2",commune_uuid_2)
-
-    product_uuid_1, product_uuid_2 = str(uuid.uuid4()), str(uuid.uuid4())
-    await conn.execute("INSERT INTO proveo.products (uuid,name_es,name_en) VALUES ($1,$2,$3)",product_uuid_1,"producto","product")
-    await conn.execute("INSERT INTO proveo.products (uuid,name_es,name_en) VALUES ($1,$2,$3)",product_uuid_2,"producto2","product2")
-
-    for i, user in enumerate(TEST_USERS):
-        await conn.execute(
-            "INSERT INTO proveo.users (uuid,name,email,hashed_password,role,email_verified) VALUES ($1,$2,$3,$4,'user',true)",
-            user["uuid"],user["name"],user["email"],get_password_hash(user["password"])
-        )
-
-        company_uuid = f"c50e8400-e29b-41d4-a716-44665544{i+1:04d}"
-        image_id, image_ext = await upload_test_image_to_minio(company_uuid,user["uuid"],i)
-        company = COMPANY_TEMPLATES[i]
-
-        await conn.execute(
-            """
-            INSERT INTO proveo.companies
-            (uuid,user_uuid,product_uuid,commune_uuid,name,description_es,description_en,address,phone,email,image_url,image_extension)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-            """,
-            company_uuid,user["uuid"],
-            product_uuid_1 if i < 8 else product_uuid_2,
-            commune_uuid_1 if i < 8 else commune_uuid_2,
-            company["name"],company["description_es"],company["description_en"],
-            company["address"],company["phone"],company["email"],
-            image_id,image_ext
-        )
-
-    await conn.close()
+    
+    try:
+        logger.info("seed_start", message="Starting test data seeding")
+        
+        # Create communes using DB.create_commune
+        logger.info("creating_communes")
+        commune_1 = await DB.create_commune(conn, "Santiago Centro")
+        commune_2 = await DB.create_commune(conn, "Providencia")
+        logger.info("communes_created", commune_1=commune_1.name, commune_2=commune_2.name)
+        
+        # Create products using DB.create_product
+        logger.info("creating_products")
+        product_1 = await DB.create_product(conn, "Tecnología", "Technology")
+        product_2 = await DB.create_product(conn, "Alimentos", "Food")
+        logger.info("products_created", product_1_es=product_1.name_es, product_2_es=product_2.name_es)
+        
+        # Create users and companies
+        for i, user_data in enumerate(TEST_USERS):
+            logger.info("processing_user", index=i+1, email=user_data["email"])
+            
+            try:
+                # Create user using DB.create_user
+                user = await DB.create_user(
+                    conn=conn,
+                    name=user_data["name"],
+                    email=user_data["email"],
+                    password=user_data["password"]
+                )
+                
+                # Mark email as verified for test users
+                await conn.execute(
+                    """
+                    UPDATE proveo.users 
+                    SET email_verified = TRUE,
+                        verification_token = NULL,
+                        verification_token_expires = NULL
+                    WHERE uuid = $1
+                    """,
+                    user.uuid
+                )
+                logger.info("user_created_and_verified", user_uuid=str(user.uuid), email=user.email)
+                
+                # Upload image to image service
+                company_template = COMPANY_TEMPLATES[i]
+                image_index = i % len(TEST_IMAGES)
+                test_image_name = TEST_IMAGES[image_index]
+                
+                logger.info("uploading_image", image=test_image_name, user_uuid=str(user.uuid))
+                image_stream = await fetch_test_image_bytes(test_image_name)
+                
+                # Generate company UUID
+                import uuid
+                company_uuid = uuid.uuid4()
+                
+                # Upload image using image_service_client
+                upload_result = await image_service_client.upload_image_streaming(
+                    file_obj=image_stream,
+                    company_id=str(company_uuid),
+                    content_type="image/jpeg",
+                    extension=".jpg",
+                    user_id=str(user.uuid)
+                )
+                
+                image_id = upload_result["image_id"]
+                image_ext = upload_result["extension"]
+                logger.info("image_uploaded", image_id=image_id, nsfw_checked=upload_result["nsfw_checked"])
+                
+                # Create company using DB.create_company
+                product_uuid = product_1.uuid if i < 8 else product_2.uuid
+                commune_uuid = commune_1.uuid if i < 8 else commune_2.uuid
+                
+                company = await DB.create_company(
+                    conn=conn,
+                    company_uuid=company_uuid,
+                    user_uuid=user.uuid,
+                    product_uuid=product_uuid,
+                    commune_uuid=commune_uuid,
+                    name=company_template["name"],
+                    description_es=company_template["description_es"],
+                    description_en=company_template["description_en"],
+                    address=company_template["address"],
+                    phone=company_template["phone"],
+                    email=company_template["email"],
+                    image_url=image_id,
+                    image_extension=image_ext
+                )
+                
+                logger.info("company_created", 
+                           company_uuid=str(company.uuid), 
+                           company_name=company.name,
+                           user_uuid=str(user.uuid))
+                
+            except ValueError as e:
+                # User or company already exists
+                logger.warning("entity_already_exists", error=str(e), user_email=user_data["email"])
+                continue
+            except Exception as e:
+                logger.error("error_processing_user", 
+                            index=i+1, 
+                            email=user_data["email"], 
+                            error=str(e),
+                            exc_info=True)
+                continue
+        
+        # Create admin user if doesn't exist
+        logger.info("creating_admin_user")
+        try:
+            admin = await DB.create_user(
+                conn=conn,
+                name="Admin User",
+                email="admin_test@mail.com",
+                password="password"
+            )
+            
+            # Mark admin as verified and set admin role
+            await conn.execute(
+                """
+                UPDATE proveo.users 
+                SET email_verified = TRUE,
+                    verification_token = NULL,
+                    verification_token_expires = NULL,
+                    role = 'admin'
+                WHERE uuid = $1
+                """,
+                admin.uuid
+            )
+            logger.info("admin_user_created", admin_uuid=str(admin.uuid), email=admin.email)
+            
+        except ValueError as e:
+            # Admin already exists, just update role
+            await conn.execute(
+                """
+                UPDATE proveo.users 
+                SET role = 'admin',
+                    email_verified = TRUE,
+                    verification_token = NULL,
+                    verification_token_expires = NULL
+                WHERE email = 'admin_test@mail.com'
+                """
+            )
+            logger.info("admin_user_already_exists", message="Updated existing admin")
+        
+        # Refresh materialized view for search
+        logger.info("refreshing_search_index")
+        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
+        logger.info("search_index_refreshed")
+        
+        logger.info("seed_complete", 
+                   message="Test data seeding completed successfully",
+                   users_count=len(TEST_USERS),
+                   admin_created=True)
+        
+        print("\n✅ Seeding completed successfully!")
+        print(f"Created {len(TEST_USERS)} test users with companies")
+        print("Created 2 communes: Santiago Centro, Providencia")
+        print("Created 2 products: Tecnología/Technology, Alimentos/Food")
+        print("\nTest user credentials:")
+        print("  Email: testuser01@proveo.com to testuser16@proveo.com")
+        print("  Password: TestPass123!")
+        print("\nAdmin credentials:")
+        print("  Email: admin_test@mail.com")
+        print("  Password: password")
+        
+    except Exception as e:
+        logger.error("seed_failed", error=str(e), exc_info=True)
+        raise
+    finally:
+        await conn.close()
+        logger.info("database_connection_closed")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, Query, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Form
 from typing import List, Optional
 from uuid import UUID
 import asyncpg
@@ -14,9 +14,9 @@ from app.auth.dependencies import (
     get_current_user,
 )
 from app.schemas.companies import (
-    CompanyResponse, 
+    CompanyResponse,
     CompanySearchResponse,
-    CompanyDeleteResponse
+    CompanyDeleteResponse,
 )
 from app.services.translation_service import translate_field
 from app.services.image_service_client import image_service_client
@@ -25,9 +25,9 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/companies", tags=["companies"])
 
 @router.get(
-    "/search", 
+    "/search",
     response_model=List[CompanySearchResponse],
-    summary="Search companies"
+    summary="Search companies",
 )
 async def search_companies(
     q: Optional[str] = Query(None, description="Search query"),
@@ -38,17 +38,8 @@ async def search_companies(
     offset: int = Query(0, ge=0, description="Results to skip"),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Search companies with optional filters.
-    
-    - **q**: Search text (uses trigram similarity for 4+ characters)
-    - **commune**: Filter by commune name (exact match, case-insensitive)
-    - **product**: Filter by product name in either language
-    - **lang**: Response language for descriptions/product names
-    - **limit/offset**: Pagination
-    """
     try:
-        results = await DB.search_companies(
+        return await DB.search_companies(
             conn=db,
             query=q or "",
             lang=lang,
@@ -57,60 +48,51 @@ async def search_companies(
             limit=limit,
             offset=offset,
         )
-        return results
     except Exception as e:
         logger.error("search_companies_failed", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Search failed"
+            detail="Search failed",
         )
 
 @router.get(
-    "/user/my-company", 
+    "/user/my-company",
     response_model=CompanyResponse,
-    summary="Get my company"
+    summary="Get my company",
 )
 async def get_my_company(
-    request: Request,
     current_user: dict = Depends(get_current_user),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get the authenticated user's company.
-    Returns 404 if user hasn't published a company yet.
-    """
     user_uuid = UUID(current_user["sub"])
-    
+
     try:
         company = await DB.get_company_by_user_uuid(db, user_uuid)
-        
         if not company:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No company found for this user"
+                detail="No company found for this user",
             )
-        
+
         response_dict = company.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
-            company.image_url, 
-            company.image_extension
+            company.image_url,
+            company.image_extension,
         )
-        
         return CompanyResponse(**response_dict)
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error("get_my_company_failed", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve company"
+            detail="Failed to retrieve company",
         )
 
 
 @router.post("/", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 async def create_company(
-    request: Request,
     name: str = Form(...),
     product_uuid: UUID = Form(...),
     commune_uuid: UUID = Form(...),
@@ -133,25 +115,25 @@ async def create_company(
             if not description_es:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="description_es required when lang=es"
+                    detail="description_es required when lang=es",
                 )
-            description_es, description_en = await translate_field(
-                "company_description", description_es, description_en
-            )
         else:
             if not description_en:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="description_en required when lang=en"
+                    detail="description_en required when lang=en",
                 )
-            description_es, description_en = await translate_field(
-                "company_description", description_es, description_en
-            )
+
+        description_es, description_en = await translate_field(
+            "company_description",
+            description_es,
+            description_en,
+        )
 
         image_ext = image_service_client.get_extension_from_content_type(
-            image.content_type
+            image.content_type,
         )
-        
+
         upload_result = await image_service_client.upload_image_streaming(
             file_obj=image.file,
             company_id=str(company_uuid),
@@ -159,9 +141,6 @@ async def create_company(
             extension=image_ext,
             user_id=str(user_uuid),
         )
-
-        image_id = upload_result["image_id"]
-        image_ext = upload_result["extension"]
 
         company = await DB.create_company(
             conn=db,
@@ -175,47 +154,39 @@ async def create_company(
             address=address,
             phone=phone,
             email=email,
-            image_url=image_id,
-            image_extension=image_ext,
+            image_url=upload_result["image_id"],
+            image_extension=upload_result["extension"],
         )
 
         company_with_relations = await DB.get_company_by_uuid(db, company_uuid)
-        
         if not company_with_relations:
             raise RuntimeError("Failed to fetch created company")
 
         response_dict = company_with_relations.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
-            image_id, image_ext
+            company_with_relations.image_url,
+            company_with_relations.image_extension,
         )
 
         return CompanyResponse(**response_dict)
 
     except HTTPException:
         raise
-    except ValueError as e:
-        await image_service_client.delete_image(f"{company_uuid}{image_ext}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
     except Exception as e:
         logger.error("create_company_failed", error=str(e), exc_info=True)
-        await image_service_client.delete_image(f"{company_uuid}{image_ext}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create company"
+            detail="Failed to create company",
         )
 
 
 @router.put(
-    "/{company_uuid}", 
+    "/{company_uuid}",
     response_model=CompanyResponse,
-    summary="Update company"
+    summary="Update company",
 )
 async def update_company(
     company_uuid: UUID,
-    request: Request,
     name: Optional[str] = Form(None, min_length=1, max_length=100),
     description_es: Optional[str] = Form(None, max_length=500),
     description_en: Optional[str] = Form(None, max_length=500),
@@ -224,26 +195,20 @@ async def update_company(
     email: Optional[str] = Form(None),
     product_uuid: Optional[UUID] = Form(None),
     commune_uuid: Optional[UUID] = Form(None),
-    lang: Optional[str] = Form(None, regex="^(es|en)$"),
     image: Optional[UploadFile] = File(None),
     current_user: dict = Depends(require_verified_email),
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Update an existing company.
-    Only the company owner can update their company.
-    All fields are optional.
-    """
     user_uuid = UUID(current_user["sub"])
-    
+
     image_id = None
     image_ext = None
 
     try:
         if image:
             image_ext = image_service_client.get_extension_from_content_type(
-                image.content_type
+                image.content_type,
             )
             upload_result = await image_service_client.upload_image_streaming(
                 file_obj=image.file,
@@ -252,11 +217,10 @@ async def update_company(
                 extension=image_ext,
                 user_id=str(user_uuid),
             )
-
             image_id = upload_result["image_id"]
             image_ext = upload_result["extension"]
 
-        company = await DB.update_company_by_uuid(
+        await DB.update_company_by_uuid(
             conn=db,
             company_uuid=company_uuid,
             user_uuid=user_uuid,
@@ -273,37 +237,22 @@ async def update_company(
         )
 
         company_with_relations = await DB.get_company_by_uuid(db, company_uuid)
-        
         if not company_with_relations:
             raise RuntimeError("Failed to fetch updated company")
 
-        from app.config import settings
-        
         response_dict = company_with_relations.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
             company_with_relations.image_url,
-            company_with_relations.image_extension
+            company_with_relations.image_extension,
         )
 
         return CompanyResponse(**response_dict)
 
-    except HTTPException:
-        raise
-    except PermissionError as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e)
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
     except Exception as e:
         logger.error("update_company_failed", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update company"
+            detail="Failed to update company",
         )
 
 @router.delete(
