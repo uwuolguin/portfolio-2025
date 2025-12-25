@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Form, Request
 from typing import List, Optional
 from uuid import UUID
 import asyncpg
@@ -23,6 +23,34 @@ from app.services.image_service_client import image_service_client
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/companies", tags=["companies"])
+
+
+async def resolve_commune_uuid(conn: asyncpg.Connection, commune_name: str) -> UUID:
+    """Convert commune name to UUID"""
+    result = await conn.fetchrow(
+        "SELECT uuid FROM proveo.communes WHERE name = $1",
+        commune_name
+    )
+    if not result:
+        raise ValueError(f"Commune '{commune_name}' not found")
+    return result['uuid']
+
+async def resolve_product_uuid(conn: asyncpg.Connection, product_name: str, lang: str) -> UUID:
+    """Convert product name (in current language) to UUID"""
+    if lang == 'es':
+        result = await conn.fetchrow(
+            "SELECT uuid FROM proveo.products WHERE name_es = $1",
+            product_name
+        )
+    else:
+        result = await conn.fetchrow(
+            "SELECT uuid FROM proveo.products WHERE name_en = $1",
+            product_name
+        )
+    
+    if not result:
+        raise ValueError(f"Product '{product_name}' not found")
+    return result['uuid']
 
 @router.get(
     "/search",
@@ -90,12 +118,11 @@ async def get_my_company(
             detail="Failed to retrieve company",
         )
 
-
 @router.post("/", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 async def create_company(
     name: str = Form(...),
-    product_uuid: UUID = Form(...),
-    commune_uuid: UUID = Form(...),
+    product_name: str = Form(...),
+    commune_name: str = Form(...),
     description_es: Optional[str] = Form(None),
     description_en: Optional[str] = Form(None),
     address: str = Form(...),
@@ -123,12 +150,21 @@ async def create_company(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="description_en required when lang=en",
                 )
-
+            
         description_es, description_en = await translate_field(
             "company_description",
             description_es,
             description_en,
         )
+
+        try:
+            product_uuid = await resolve_product_uuid(db, product_name, lang)
+            commune_uuid = await resolve_commune_uuid(db, commune_name)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
 
         image_ext = image_service_client.get_extension_from_content_type(
             image.content_type,
@@ -179,7 +215,6 @@ async def create_company(
             detail="Failed to create company",
         )
 
-
 @router.put(
     "/{company_uuid}",
     response_model=CompanyResponse,
@@ -193,19 +228,40 @@ async def update_company(
     address: Optional[str] = Form(None, max_length=200),
     phone: Optional[str] = Form(None, max_length=20),
     email: Optional[str] = Form(None),
-    product_uuid: Optional[UUID] = Form(None),
-    commune_uuid: Optional[UUID] = Form(None),
+    product_name: Optional[str] = Form(None),
+    commune_name: Optional[str] = Form(None),
+    lang: Optional[str] = Form(None, regex="^(es|en)$"),
     image: Optional[UploadFile] = File(None),
     current_user: dict = Depends(require_verified_email),
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
     user_uuid = UUID(current_user["sub"])
-
     image_id = None
     image_ext = None
 
     try:
+        product_uuid = None
+        commune_uuid = None
+        
+        if product_name and lang:
+            try:
+                product_uuid = await resolve_product_uuid(db, product_name, lang)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e)
+                )
+        
+        if commune_name:
+            try:
+                commune_uuid = await resolve_commune_uuid(db, commune_name)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e)
+                )
+
         if image:
             image_ext = image_service_client.get_extension_from_content_type(
                 image.content_type,
@@ -266,11 +322,6 @@ async def delete_company(
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Delete the authenticated user's company.
-    This is a soft delete - data is moved to companies_deleted table.
-    Associated image is deleted from storage.
-    """
     user_uuid = UUID(current_user["sub"])
 
     try:
@@ -302,12 +353,8 @@ async def admin_list_companies(
     current_user: dict = Depends(require_admin),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Admin endpoint to list all companies with pagination.
-    """
     try:
         companies = await DB.get_all_companies(db, limit, offset)
-        base_url = str(request.base_url)
 
         result = []
         for company in companies:
@@ -339,10 +386,6 @@ async def admin_delete_company(
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Admin endpoint to delete any company.
-    Bypasses ownership check.
-    """
     try:
         result = await DB.admin_delete_company_by_uuid(db, company_uuid)
         return result
