@@ -77,25 +77,20 @@ async def seed_test_data():
     
     try:
         logger.info("seed_start", message="Starting test data seeding")
-        
-        # Create communes using DB.create_commune
         logger.info("creating_communes")
         commune_1 = await DB.create_commune(conn, "Santiago Centro")
         commune_2 = await DB.create_commune(conn, "Providencia")
         logger.info("communes_created", commune_1=commune_1.name, commune_2=commune_2.name)
         
-        # Create products using DB.create_product
         logger.info("creating_products")
         product_1 = await DB.create_product(conn, "Tecnología", "Technology")
         product_2 = await DB.create_product(conn, "Alimentos", "Food")
         logger.info("products_created", product_1_es=product_1.name_es, product_2_es=product_2.name_es)
         
-        # Create users and companies
         for i, user_data in enumerate(TEST_USERS):
             logger.info("processing_user", index=i+1, email=user_data["email"])
             
             try:
-                # Create user using DB.create_user
                 user = await DB.create_user(
                     conn=conn,
                     name=user_data["name"],
@@ -103,7 +98,6 @@ async def seed_test_data():
                     password=user_data["password"]
                 )
                 
-                # Mark email as verified for test users
                 await conn.execute(
                     """
                     UPDATE proveo.users 
@@ -115,8 +109,6 @@ async def seed_test_data():
                     user.uuid
                 )
                 logger.info("user_created_and_verified", user_uuid=str(user.uuid), email=user.email)
-                
-                # Upload image to image service
                 company_template = COMPANY_TEMPLATES[i]
                 image_index = i % len(TEST_IMAGES)
                 test_image_name = TEST_IMAGES[image_index]
@@ -124,11 +116,8 @@ async def seed_test_data():
                 logger.info("uploading_image", image=test_image_name, user_uuid=str(user.uuid))
                 image_stream = await fetch_test_image_bytes(test_image_name)
                 
-                # Generate company UUID
                 import uuid
                 company_uuid = uuid.uuid4()
-                
-                # Upload image using image_service_client
                 upload_result = await image_service_client.upload_image_streaming(
                     file_obj=image_stream,
                     company_id=str(company_uuid),
@@ -141,7 +130,6 @@ async def seed_test_data():
                 image_ext = upload_result["extension"]
                 logger.info("image_uploaded", image_id=image_id, nsfw_checked=upload_result["nsfw_checked"])
                 
-                # Create company using DB.create_company
                 product_uuid = product_1.uuid if i < 8 else product_2.uuid
                 commune_uuid = commune_1.uuid if i < 8 else commune_2.uuid
                 
@@ -167,7 +155,6 @@ async def seed_test_data():
                            user_uuid=str(user.uuid))
                 
             except ValueError as e:
-                # User or company already exists
                 logger.warning("entity_already_exists", error=str(e), user_email=user_data["email"])
                 continue
             except Exception as e:
@@ -178,7 +165,6 @@ async def seed_test_data():
                             exc_info=True)
                 continue
         
-        # Create admin user if doesn't exist
         logger.info("creating_admin_user")
         try:
             admin = await DB.create_user(
@@ -187,8 +173,7 @@ async def seed_test_data():
                 email="admin_test@mail.com",
                 password="password"
             )
-            
-            # Mark admin as verified and set admin role
+
             await conn.execute(
                 """
                 UPDATE proveo.users 
@@ -203,7 +188,7 @@ async def seed_test_data():
             logger.info("admin_user_created", admin_uuid=str(admin.uuid), email=admin.email)
             
         except ValueError as e:
-            # Admin already exists, just update role
+
             await conn.execute(
                 """
                 UPDATE proveo.users 
@@ -216,7 +201,6 @@ async def seed_test_data():
             )
             logger.info("admin_user_already_exists", message="Updated existing admin")
         
-        # Refresh materialized view for search
         logger.info("refreshing_search_index")
         await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search")
         logger.info("search_index_refreshed")
