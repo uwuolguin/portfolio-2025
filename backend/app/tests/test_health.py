@@ -25,18 +25,14 @@ async def test_database_health_endpoint():
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.get("/api/v1/health/database")
         
-        # Should return 200 even if database is unavailable (for monitoring)
         assert response.status_code == 200
         data = response.json()
         
-        # Should have status field
         assert "status" in data
         assert data["status"] in ["healthy", "unhealthy"]
         
-        # Should have timestamp
         assert "timestamp" in data
         
-        # If healthy, should have pool info
         if data["status"] == "healthy":
             assert "pool" in data
             assert "size" in data["pool"]
