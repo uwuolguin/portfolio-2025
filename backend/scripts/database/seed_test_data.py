@@ -7,13 +7,12 @@ Usage:
 import asyncio
 import asyncpg
 import httpx
-from pathlib import Path
 from io import BytesIO
 from app.config import settings
-from app.database.connection import get_db
 from app.database.transactions import DB
 from app.services.image_service_client import image_service_client
 import structlog
+import uuid
 
 logger = structlog.get_logger(__name__)
 
@@ -116,7 +115,6 @@ async def seed_test_data():
                 logger.info("uploading_image", image=test_image_name, user_uuid=str(user.uuid))
                 image_stream = await fetch_test_image_bytes(test_image_name)
                 
-                import uuid
                 company_uuid = uuid.uuid4()
                 upload_result = await image_service_client.upload_image_streaming(
                     file_obj=image_stream,
