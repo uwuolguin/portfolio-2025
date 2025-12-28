@@ -1,121 +1,96 @@
 """
-Cleanup orphan images - removes image files that don't have corresponding user records
-Run this as a scheduled job (e.g., daily via cron)
-
-Usage:
-  python -m app.jobs.cleanup_orphan_images
-  docker compose exec backend python -m app.jobs.cleanup_orphan_images
+python -m app.services.create_admin
+docker compose exec backend python -m app.services.create_admin
 """
 import asyncio
 import asyncpg
 import uuid
-from pathlib import Path
+import sys
+from contextlib import asynccontextmanager
+
 from app.config import settings
-from app.services.file_handler import FileHandler
-import structlog
-
-logger = structlog.get_logger(__name__)
+from app.auth.jwt import get_password_hash
 
 
-async def get_all_active_user_uuids() -> set[str]:
+@asynccontextmanager
+async def get_conn():
     conn = await asyncpg.connect(settings.alembic_database_url)
     try:
-        active_users = await conn.fetch("SELECT uuid FROM proveo.users")
-        return {str(row['uuid']) for row in active_users}
+        yield conn
     finally:
         await conn.close()
 
 
-async def cleanup_orphan_images(dry_run: bool = True):
-    logger.info("starting_orphan_image_cleanup", dry_run=dry_run)
-    active_user_uuids = await get_all_active_user_uuids()
-    logger.info("active_users_found", count=len(active_user_uuids))
+async def create_admin_user():
+    """Create the initial admin user if not exists"""
 
-    upload_dir = FileHandler.UPLOAD_DIR
-    if not upload_dir.exists():
-        logger.error("upload_directory_not_found", path=str(upload_dir))
-        return
+    admin_email = input("Enter admin email: ").strip()
+    admin_password = input("Enter admin password (min 8 chars): ").strip()
 
-    filesystem_files = list(upload_dir.glob("*"))
-    logger.info("filesystem_files_found", count=len(filesystem_files))
+    if len(admin_password) < 8:
+        print("❌ Password must be at least 8 characters")
+        return False
 
-    orphans = []
-    for file_path in filesystem_files:
-        if not file_path.is_file():
-            continue
-        file_uuid = file_path.stem
-        try:
-            uuid.UUID(file_uuid)
-        except ValueError:
-            logger.debug("skipping_non_uuid_file", filename=file_path.name)
-            continue
-        if file_uuid not in active_user_uuids:
-            orphans.append(file_path)
+    admin_name = input("Enter admin name (default: Admin): ").strip() or "Admin"
 
-    logger.info("orphan_images_detected", count=len(orphans))
-    if not orphans:
-        logger.info("no_orphan_images_found")
-        return
+    print("\n📋 Creating admin user:")
+    print(f"   Email: {admin_email}")
+    print(f"   Name: {admin_name}")
+    print("   Role: admin")
 
-    total_size_kb = 0
-    for orphan in orphans:
-        size_kb = orphan.stat().st_size / 1024
-        total_size_kb += size_kb
-        logger.info(
-            "orphan_image",
-            filename=orphan.name,
-            user_uuid=orphan.stem,
-            size_kb=f"{size_kb:.2f}",
-            path=str(orphan)
-        )
+    confirm = input("\nProceed? (yes/no): ").strip().lower()
+    if confirm not in ("yes", "y"):
+        print("❌ Cancelled")
+        return False
 
-    logger.info(
-        "orphan_summary",
-        total_orphans=len(orphans),
-        total_size_kb=f"{total_size_kb:.2f}",
-        total_size_mb=f"{total_size_kb / 1024:.2f}"
-    )
+    try:
+        async with get_conn() as conn:
+            existing = await conn.fetchval(
+                "SELECT uuid FROM proveo.users WHERE email = $1",
+                admin_email,
+            )
 
-    if not dry_run:
-        deleted_count = 0
-        failed_count = 0
-        for orphan in orphans:
-            try:
-                orphan.unlink()
-                deleted_count += 1
-                logger.info("orphan_deleted", filename=orphan.name, user_uuid=orphan.stem)
-            except Exception as e:
-                failed_count += 1
-                logger.error(
-                    "orphan_deletion_failed",
-                    filename=orphan.name,
-                    user_uuid=orphan.stem,
-                    error=str(e)
+            if existing:
+                await conn.execute(
+                    """
+                    UPDATE proveo.users
+                    SET role = 'admin',
+                        email_verified = true,
+                        verification_token = NULL,
+                        verification_token_expires = NULL,
+                        hashed_password = $1
+                    WHERE email = $2
+                    """,
+                    get_password_hash(admin_password),
+                    admin_email,
                 )
-        logger.info(
-            "cleanup_complete",
-            total_orphans=len(orphans),
-            deleted=deleted_count,
-            failed=failed_count,
-            disk_space_freed_mb=f"{total_size_kb / 1024:.2f}"
-        )
-    else:
-        logger.info(
-            "dry_run_complete",
-            message="Run with --execute to actually delete files",
-            potential_disk_space_freed_mb=f"{total_size_kb / 1024:.2f}"
-        )
+                print(f"✅ Updated existing user to admin: {admin_email}")
+            else:
+                user_uuid = str(uuid.uuid4())
+                hashed_password = get_password_hash(admin_password)
+
+                await conn.execute(
+                    """
+                    INSERT INTO proveo.users
+                    (uuid, name, email, hashed_password, role, email_verified,
+                     verification_token, verification_token_expires)
+                    VALUES ($1, $2, $3, $4, 'admin', true, NULL, NULL)
+                    """,
+                    user_uuid,
+                    admin_name,
+                    admin_email,
+                    hashed_password,
+                )
+                print(f"✅ Created new admin user: {admin_email}")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return False
 
 
 if __name__ == "__main__":
-    import sys
-    execute = "--execute" in sys.argv
-
-    if execute:
-        print(" Running in EXECUTE mode - files will be deleted")
-    else:
-        print(" Running in DRY RUN mode - no files will be deleted")
-        print("   Use --execute flag to actually delete orphan images")
-
-    print()
-    asyncio.run(cleanup_orphan_images(dry_run=not execute))
+    print("🔐 Admin User Setup\n")
+    success = asyncio.run(create_admin_user())
+    sys.exit(0 if success else 1)

@@ -5,16 +5,17 @@ Usage:
     docker compose exec backend \
         python -m app.scripts.database.refresh_search_index
 """
-
 import asyncio
 import ssl
+from contextlib import asynccontextmanager
 
 import asyncpg
 
 from app.config import settings
 
 
-async def setup_cron_refresh() -> None:
+@asynccontextmanager
+async def get_conn():
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
@@ -24,8 +25,14 @@ async def setup_cron_refresh() -> None:
         ssl=ssl_context,
         timeout=30,
     )
-
     try:
+        yield conn
+    finally:
+        await conn.close()
+
+
+async def setup_cron_refresh() -> None:
+    async with get_conn() as conn:
         await conn.execute("SET ROLE user")
         await conn.execute("SET search_path = proveo, public")
 
@@ -41,6 +48,7 @@ async def setup_cron_refresh() -> None:
             )
             """
         )
+
         await conn.execute(
             """
             SELECT cron.schedule(
@@ -52,9 +60,6 @@ async def setup_cron_refresh() -> None:
         )
 
         print("✅ Cron job scheduled: refresh every hour")
-
-    finally:
-        await conn.close()
 
 
 if __name__ == "__main__":
