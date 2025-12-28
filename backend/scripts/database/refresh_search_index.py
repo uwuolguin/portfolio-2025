@@ -33,10 +33,9 @@ async def get_conn():
 
 async def setup_cron_refresh() -> None:
     async with get_conn() as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_cron")
         await conn.execute("SET ROLE user")
         await conn.execute("SET search_path = proveo, public")
-
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_cron")
 
         await conn.execute(
             """

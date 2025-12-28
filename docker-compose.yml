@@ -1,34 +1,23 @@
 services:
-  # ===========================
-  # Database
-  # ===========================
   postgres:
     build:
       context: ./postgres
       dockerfile: Dockerfile
     container_name: portfolio-postgres
-    command:
-      - postgres
-      - "-c"
-      - "ssl=on"
-      - "-c"
-      - "shared_preload_libraries=pg_cron"
-      - "-c"
-      - "cron.database_name=portfolio"
-      - "-c"
-      - "password_encryption=scram-sha-256"
-
+    command: >
+      postgres
+      -c ssl=on
+      -c shared_preload_libraries=pg_cron
+      -c cron.database_name=portfolio
+      -c password_encryption=scram-sha-256
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-portfolio}
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
     networks:
       - portfolio-network
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
@@ -49,9 +38,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ===========================
-  # Object Storage (MinIO)
-  # ===========================
   minio:
     image: minio/minio:latest
     container_name: portfolio-minio
@@ -69,20 +55,17 @@ services:
       timeout: 5s
       retries: 5
 
-  # ===========================
-  # Image Storage Service
-  # ===========================
   image-service:
     build:
       context: ./image-service
       dockerfile: Dockerfile
     container_name: portfolio-image-service
     environment:
-        MINIO_ENDPOINT: ${MINIO_ENDPOINT}
-        MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}         
-        MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}  
-        MINIO_BUCKET: ${MINIO_BUCKET}
-        MINIO_SECURE: ${MINIO_SECURE}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_SECURE: ${MINIO_SECURE}
     depends_on:
       minio:
         condition: service_healthy
@@ -94,9 +77,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ===========================
-  # Backend API
-  # ===========================
   backend:
     build:
       context: ./backend
@@ -113,9 +93,6 @@ services:
       - portfolio-network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-  # ===========================
-  # Reverse Proxy (Nginx)
-  # ===========================
   nginx:
     build:
       context: ./nginx
@@ -134,9 +111,6 @@ services:
       timeout: 5s
       retries: 5
 
-# ===========================
-# Volumes (Persistent Data)
-# ===========================
 volumes:
   postgres_data:
     driver: local
@@ -145,9 +119,6 @@ volumes:
   minio_data:
     driver: local
 
-# ===========================
-# Networks
-# ===========================
 networks:
   portfolio-network:
     driver: bridge
