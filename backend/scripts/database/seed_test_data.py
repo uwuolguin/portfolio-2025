@@ -3,6 +3,7 @@ Seed test data: 16 users with companies + 1 admin
 Usage:
   docker compose exec backend python -m scripts.database.seed_test_data
 """
+
 import asyncio
 import asyncpg
 import httpx
@@ -10,6 +11,7 @@ from io import BytesIO
 from contextlib import asynccontextmanager
 import structlog
 import uuid
+
 from app.config import settings
 from app.database.transactions import DB
 from app.services.image_service_client import image_service_client
@@ -17,9 +19,9 @@ from app.services.image_service_client import image_service_client
 logger = structlog.get_logger(__name__)
 
 TEST_IMAGES = [
-    "test_01.jpg",
-    "test_02.jpg",
-    "test_03.jpg",
+    "test1.jpg",
+    "test2.jpg",
+    "test3.jpg",
 ]
 
 COMPANY_TEMPLATES = [
@@ -43,6 +45,7 @@ TEST_USERS = [
     for i in range(16)
 ]
 
+
 @asynccontextmanager
 async def get_conn():
     conn = await asyncpg.connect(settings.alembic_database_url)
@@ -50,6 +53,7 @@ async def get_conn():
         yield conn
     finally:
         await conn.close()
+
 
 async def fetch_test_image_bytes(image_name: str) -> BytesIO:
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -61,16 +65,39 @@ async def fetch_test_image_bytes(image_name: str) -> BytesIO:
         image_bytes.seek(0)
         return image_bytes
 
+
 async def seed_test_data() -> None:
     async with get_conn() as conn:
         try:
             logger.info("seed_start")
 
-            commune_1 = await DB.create_commune(conn, "Santiago Centro")
-            commune_2 = await DB.create_commune(conn, "Providencia")
+            try:
+                commune_1 = await DB.create_commune(conn, "Santiago Centro")
+            except ValueError:
+                commune_1 = await conn.fetchrow(
+                    "SELECT * FROM proveo.communes WHERE name = 'Santiago Centro'"
+                )
 
-            product_1 = await DB.create_product(conn, "Tecnología", "Technology")
-            product_2 = await DB.create_product(conn, "Alimentos", "Food")
+            try:
+                commune_2 = await DB.create_commune(conn, "Providencia")
+            except ValueError:
+                commune_2 = await conn.fetchrow(
+                    "SELECT * FROM proveo.communes WHERE name = 'Providencia'"
+                )
+
+            try:
+                product_1 = await DB.create_product(conn, "Tecnología", "Technology")
+            except ValueError:
+                product_1 = await conn.fetchrow(
+                    "SELECT * FROM proveo.products WHERE name_es = 'Tecnología'"
+                )
+
+            try:
+                product_2 = await DB.create_product(conn, "Alimentos", "Food")
+            except ValueError:
+                product_2 = await conn.fetchrow(
+                    "SELECT * FROM proveo.products WHERE name_es = 'Alimentos'"
+                )
 
             for i, user_data in enumerate(TEST_USERS):
                 try:
@@ -105,8 +132,8 @@ async def seed_test_data() -> None:
                         user_id=str(user.uuid),
                     )
 
-                    product_uuid = product_1.uuid if i < 8 else product_2.uuid
-                    commune_uuid = commune_1.uuid if i < 8 else commune_2.uuid
+                    product_uuid = product_1["uuid"] if i < 8 else product_2["uuid"]
+                    commune_uuid = commune_1["uuid"] if i < 8 else commune_2["uuid"]
                     template = COMPANY_TEMPLATES[i]
 
                     await DB.create_company(

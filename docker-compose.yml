@@ -1,3 +1,12 @@
+#Running all the commented commands below in powershell in windows delete everything for real in docker
+#docker compose down -v --remove-orphans
+#docker ps -aq | % { docker rm -f $_ }
+#docker images -aq | % { docker rmi -f $_ }
+#docker volume ls -q | % { docker volume rm -f $_ }
+#docker network ls -q | % { docker network rm $_ }
+#docker builder prune -a -f
+#docker system prune -a -f --volumes
+
 services:
   postgres:
     build:
