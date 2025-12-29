@@ -6,16 +6,51 @@
 #docker network ls -q | % { docker network rm $_ }
 #docker builder prune -a -f
 #docker system prune -a -f --volumes
-
 services:
+  postgres-certgen:
+    image: alpine:3.20
+    container_name: portfolio-postgres-certgen
+    command:
+      - sh
+      - -ec
+      - |
+        apk add --no-cache openssl
+        mkdir -p /certs
+
+        if [ ! -f /certs/server.crt ]; then
+          echo "Generating PostgreSQL SSL certs"
+          openssl req -new -x509 -nodes -days 3650 \
+            -subj "/C=CL/ST=NA/L=NA/O=portfolio/CN=postgres" \
+            -out /certs/server.crt \
+            -keyout /certs/server.key
+
+          chmod 600 /certs/server.key
+          chmod 644 /certs/server.crt
+
+          # postgres user is UID 999 in official image
+          chown 999:999 /certs/server.key /certs/server.crt
+        else
+          echo "PostgreSQL SSL certs already exist"
+        fi
+    volumes:
+      - postgres_certs:/certs
+    networks:
+      - portfolio-network
+
   postgres:
     build:
       context: ./postgres
       dockerfile: Dockerfile
     container_name: portfolio-postgres
+    depends_on:
+      postgres-certgen:
+        condition: service_completed_successfully
     command: >
       postgres
       -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/certs/server.crt
+      -c ssl_key_file=/var/lib/postgresql/certs/server.key
+      -c ssl_min_protocol_version=TLSv1.2
       -c shared_preload_libraries=pg_cron
       -c cron.database_name=portfolio
       -c password_encryption=scram-sha-256
@@ -25,6 +60,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-portfolio}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_certs:/var/lib/postgresql/certs:ro
     networks:
       - portfolio-network
     healthcheck:
@@ -122,11 +158,9 @@ services:
 
 volumes:
   postgres_data:
-    driver: local
+  postgres_certs:
   redis_data:
-    driver: local
   minio_data:
-    driver: local
 
 networks:
   portfolio-network:
