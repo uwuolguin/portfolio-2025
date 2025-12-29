@@ -1,13 +1,19 @@
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import AsyncClient
 from app.main import app
 
+
+@pytest.fixture(scope="module")
+async def initialized_app():
+    """Initialize app with lifespan context for tests"""
+    async with app.router.lifespan_context(app):
+        yield app
+
+
 @pytest.mark.asyncio
-async def test_basic_health_endpoint():
+async def test_basic_health_endpoint(initialized_app):
     """Test that basic health endpoint returns 200 and correct status"""
-    transport = ASGITransport(app=app)
-    
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with AsyncClient(app=initialized_app, base_url="http://testserver") as client:
         response = await client.get("/api/v1/health/")
         
         assert response.status_code == 200
@@ -18,11 +24,9 @@ async def test_basic_health_endpoint():
 
 
 @pytest.mark.asyncio
-async def test_database_health_endpoint():
+async def test_database_health_endpoint(initialized_app):
     """Test that database health endpoint returns connection info"""
-    transport = ASGITransport(app=app)
-    
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with AsyncClient(app=initialized_app, base_url="http://testserver") as client:
         response = await client.get("/api/v1/health/database")
         
         assert response.status_code == 200

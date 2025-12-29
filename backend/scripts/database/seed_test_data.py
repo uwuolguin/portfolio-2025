@@ -132,8 +132,8 @@ async def seed_test_data() -> None:
                         user_id=str(user.uuid),
                     )
 
-                    product_uuid = product_1["uuid"] if i < 8 else product_2["uuid"]
-                    commune_uuid = commune_1["uuid"] if i < 8 else commune_2["uuid"]
+                    product_uuid = product_1.uuid if i < 8 else product_2.uuid
+                    commune_uuid = commune_1.uuid if i < 8 else commune_2.uuid
                     template = COMPANY_TEMPLATES[i]
 
                     await DB.create_company(
