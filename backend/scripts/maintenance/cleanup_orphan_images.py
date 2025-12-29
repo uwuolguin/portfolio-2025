@@ -1,96 +1,160 @@
 """
-python -m app.services.create_admin
-docker compose exec backend python -m app.services.create_admin
+Cleanup Orphan Images Job
+
+Identifies and deletes images stored in the image service
+that are no longer referenced by any company in the database.
+
+Usage:
+    python -m app.jobs.cleanup_orphan_images
+
+    Docker:
+    docker-compose exec backend python -m app.jobs.cleanup_orphan_images
 """
+
 import asyncio
 import asyncpg
-import uuid
-import sys
+import structlog
 from contextlib import asynccontextmanager
+from typing import Set, List
 
 from app.config import settings
-from app.auth.jwt import get_password_hash
+from app.services.image_service_client import image_service_client
+
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
-async def get_conn():
-    conn = await asyncpg.connect(settings.alembic_database_url)
+async def get_db_connection():
+    conn = None
     try:
+        conn = await asyncpg.connect(
+            dsn=settings.alembic_database_url,
+            timeout=30,
+            command_timeout=60,
+        )
+        logger.info("database_connected")
         yield conn
     finally:
-        await conn.close()
+        if conn:
+            await conn.close()
+            logger.info("database_disconnected")
 
 
-async def create_admin_user():
-    """Create the initial admin user if not exists"""
+async def get_all_image_filenames_from_service() -> Set[str]:
+    import httpx
 
-    admin_email = input("Enter admin email: ").strip()
-    admin_password = input("Enter admin password (min 8 chars): ").strip()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{settings.image_service_url}/images")
+        response.raise_for_status()
+        data = response.json()
 
-    if len(admin_password) < 8:
-        print("❌ Password must be at least 8 characters")
-        return False
+        filenames = {obj["name"] for obj in data.get("objects", [])}
 
-    admin_name = input("Enter admin name (default: Admin): ").strip() or "Admin"
+        logger.info(
+            "images_fetched_from_service",
+            count=len(filenames),
+        )
 
-    print("\n📋 Creating admin user:")
-    print(f"   Email: {admin_email}")
-    print(f"   Name: {admin_name}")
-    print("   Role: admin")
+        return filenames
 
-    confirm = input("\nProceed? (yes/no): ").strip().lower()
-    if confirm not in ("yes", "y"):
-        print("❌ Cancelled")
-        return False
 
-    try:
-        async with get_conn() as conn:
-            existing = await conn.fetchval(
-                "SELECT uuid FROM proveo.users WHERE email = $1",
-                admin_email,
-            )
+async def get_all_referenced_filenames_from_db(
+    conn: asyncpg.Connection,
+) -> Set[str]:
+    rows = await conn.fetch(
+        """
+        SELECT image_url, image_extension
+        FROM proveo.companies
+        WHERE image_url IS NOT NULL
+          AND image_extension IS NOT NULL
+        """
+    )
 
-            if existing:
-                await conn.execute(
-                    """
-                    UPDATE proveo.users
-                    SET role = 'admin',
-                        email_verified = true,
-                        verification_token = NULL,
-                        verification_token_expires = NULL,
-                        hashed_password = $1
-                    WHERE email = $2
-                    """,
-                    get_password_hash(admin_password),
-                    admin_email,
-                )
-                print(f"✅ Updated existing user to admin: {admin_email}")
+    filenames = {
+        f"{row['image_url']}{row['image_extension']}"
+        for row in rows
+    }
+
+    logger.info(
+        "images_fetched_from_database",
+        count=len(filenames),
+    )
+
+    return filenames
+
+
+async def delete_orphan_images(orphan_filenames: List[str]) -> int:
+    if not orphan_filenames:
+        logger.info("no_orphan_images_to_delete")
+        return 0
+
+    deleted_count = 0
+    failed_count = 0
+
+    for filename in orphan_filenames:
+        try:
+            success = await image_service_client.delete_image(filename)
+
+            if success:
+                logger.info("orphan_image_deleted", filename=filename)
+                deleted_count += 1
             else:
-                user_uuid = str(uuid.uuid4())
-                hashed_password = get_password_hash(admin_password)
+                logger.warning("orphan_image_not_found", filename=filename)
+                failed_count += 1
 
-                await conn.execute(
-                    """
-                    INSERT INTO proveo.users
-                    (uuid, name, email, hashed_password, role, email_verified,
-                     verification_token, verification_token_expires)
-                    VALUES ($1, $2, $3, $4, 'admin', true, NULL, NULL)
-                    """,
-                    user_uuid,
-                    admin_name,
-                    admin_email,
-                    hashed_password,
-                )
-                print(f"✅ Created new admin user: {admin_email}")
+        except Exception as e:
+            logger.error(
+                "orphan_image_delete_failed",
+                filename=filename,
+                error=str(e),
+                exc_info=True,
+            )
+            failed_count += 1
 
-        return True
+    logger.info(
+        "orphan_cleanup_completed",
+        deleted=deleted_count,
+        failed=failed_count,
+    )
 
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return False
+    return deleted_count
+
+
+async def cleanup_orphan_images():
+    logger.info("orphan_cleanup_started")
+
+    service_images = await get_all_image_filenames_from_service()
+
+    async with get_db_connection() as conn:
+        db_images = await get_all_referenced_filenames_from_db(conn)
+
+    orphan_images = service_images - db_images
+
+    logger.info(
+        "orphan_analysis",
+        service_count=len(service_images),
+        database_count=len(db_images),
+        orphan_count=len(orphan_images),
+    )
+
+    if not orphan_images:
+        print("\n✅ No orphan images found.")
+        return
+
+    orphan_list = sorted(orphan_images)
+
+    print("\nDeleting orphan images:")
+    for filename in orphan_list:
+        print(f"  - {filename}")
+
+    deleted = await delete_orphan_images(orphan_list)
+
+    print(f"\n✅ Cleanup completed: {deleted} images deleted\n")
+
+
+async def main():
+    await cleanup_orphan_images()
 
 
 if __name__ == "__main__":
-    print("🔐 Admin User Setup\n")
-    success = asyncio.run(create_admin_user())
-    sys.exit(0 if success else 1)
+    asyncio.run(main())
