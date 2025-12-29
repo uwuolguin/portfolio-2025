@@ -17,8 +17,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("CREATE SCHEMA IF NOT EXISTS proveo")
-    op.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
-
     op.create_table(
         'communes',
         sa.Column('uuid', sa.UUID(), nullable=False),
