@@ -34,7 +34,7 @@ pyparsing==3.2.5
 PySocks==1.7.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
-PyJWT==2.10.2
+PyJWT==2.10.1
 python-multipart==0.0.20
 redis==7.0.0
 requests==2.32.5
