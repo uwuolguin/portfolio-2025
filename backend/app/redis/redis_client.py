@@ -53,7 +53,7 @@ class RedisClient:
         """Close Redis connection"""
         if self.redis:
             try:
-                await self.redis.close()
+                await self.redis.aclose()
                 logger.info("redis_disconnected")
             except Exception as e:
                 logger.warning("redis_disconnect_error", error=str(e))
