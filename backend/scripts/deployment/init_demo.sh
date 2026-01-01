@@ -17,9 +17,6 @@ docker compose exec backend python -m scripts.database.refresh_search_index
 echo "👤 Creating testing data... uwu"
 docker compose exec backend python -m scripts.database.seed_test_data
 
-echo "🧹 Running cleanup job... uwu"
-docker compose exec backend python -m scripts.maintenance.cleanup_orphan_images
-
 echo "🩺 Running health test to check functionality... uwu"
 docker compose exec backend pytest app/tests/test_health.py -v
 
