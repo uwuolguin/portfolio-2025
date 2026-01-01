@@ -155,37 +155,28 @@ async def seed_test_data() -> None:
                 except ValueError:
                     continue
 
-            try:
-                admin = await DB.create_user(
+            admin = await conn.fetchrow(
+                "SELECT * FROM proveo.users WHERE email = 'admin_test@mail.com'"
+            )
+
+            if not admin:
+                await DB.create_user(
                     conn=conn,
                     name="Admin User",
                     email="admin_test@mail.com",
                     password="password",
                 )
 
-                await conn.execute(
-                    """
-                    UPDATE proveo.users
-                    SET role = 'admin',
-                        email_verified = TRUE,
-                        verification_token = NULL,
-                        verification_token_expires = NULL
-                    WHERE uuid = $1
-                    """,
-                    admin.uuid,
-                )
-
-            except ValueError:
-                await conn.execute(
-                    """
-                    UPDATE proveo.users
-                    SET role = 'admin',
-                        email_verified = TRUE,
-                        verification_token = NULL,
-                        verification_token_expires = NULL
-                    WHERE email = 'admin_test@mail.com'
-                    """
-                )
+            await conn.execute(
+                """
+                UPDATE proveo.users
+                SET role = 'admin',
+                    email_verified = TRUE,
+                    verification_token = NULL,
+                    verification_token_expires = NULL
+                WHERE email = 'admin_test@mail.com'
+                """
+            )
 
             await conn.execute(
                 "REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search"
