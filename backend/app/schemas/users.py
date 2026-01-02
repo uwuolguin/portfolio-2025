@@ -11,6 +11,7 @@ class UserRecord(BaseModel):
     role: str
     email_verified: bool
     created_at: datetime
+    verification_token: Optional[str] = None
 
     model_config = {
         "json_schema_extra": {
@@ -21,6 +22,7 @@ class UserRecord(BaseModel):
                 "role": "user",
                 "email_verified": False,
                 "created_at": "2025-10-19T15:30:00Z",
+                "verification_token":"sahashasjshhsahsa",
             }
         }
     }
