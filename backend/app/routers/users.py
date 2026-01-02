@@ -213,7 +213,7 @@ async def delete_me(
             "user_account_deleted_with_companies", 
             user_uuid=user_uuid, 
             email=current_user["email"], 
-            company_deleted=result["company_deleted"]
+            company_deleted=result.company_deleted
         )
         
         return {
