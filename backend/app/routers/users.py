@@ -274,15 +274,15 @@ async def admin_delete_user(
         logger.info(
             "admin_deleted_user_successfully", 
             deleted_user_uuid=str(user_uuid), 
-            deleted_user_email=result["email"], 
+            deleted_user_email=result.email, 
             company_deleted=result.company_deleted, 
             admin_email=current_user["email"]
         )
         
         return {
             "message": "User and all associated companies successfully deleted",
-            "user_uuid": result["user_uuid"],
-            "email": result["email"],
+            "user_uuid": result.user_uuid,
+            "email": result.email,
             "company_deleted": result.company_deleted
         }
         

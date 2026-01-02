@@ -612,6 +612,7 @@ class DB:
             return CommuneRecord(
                 uuid=str(commune["uuid"]),
                 name=commune["name"],
+                created_at=commune["created_at"]
             )
 
     @staticmethod
@@ -696,7 +697,7 @@ class DB:
     async def get_company_by_user_uuid(
         conn: asyncpg.Connection, 
         user_uuid: UUID
-    ) -> CompanyWithRelations:
+    ) -> CompanyWithRelations | None:
         """
         Get all companies belonging to a specific user.
         
@@ -725,6 +726,8 @@ class DB:
                 ORDER BY c.created_at DESC
             """
             row = await conn.fetchrow(query, user_uuid)
+            if row is None:
+                return None
             return CompanyWithRelations(**dict(row))
 
     @staticmethod
@@ -1234,7 +1237,6 @@ class DB:
                         user_name, user_email, commune_name,
                         similarity(searchable_text, $1) AS score
                     FROM proveo.company_search
-                    WHERE searchable_text % $1
                 """
                 params.append(search)
                 order_clause = " ORDER BY score DESC, company_name ASC"
