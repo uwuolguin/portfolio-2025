@@ -268,15 +268,14 @@ async def admin_delete_user(
         
         result = await DB.admin_delete_user_by_uuid(
             conn=db, 
-            user_uuid=user_uuid, 
-            admin_email=current_user["email"]
+            user_uuid=user_uuid
         )
         
         logger.info(
             "admin_deleted_user_successfully", 
             deleted_user_uuid=str(user_uuid), 
             deleted_user_email=result["email"], 
-            company_deleted=result["company_deleted"], 
+            company_deleted=result.company_deleted, 
             admin_email=current_user["email"]
         )
         
@@ -284,7 +283,7 @@ async def admin_delete_user(
             "message": "User and all associated companies successfully deleted",
             "user_uuid": result["user_uuid"],
             "email": result["email"],
-            "company_deleted": result["company_deleted"]
+            "company_deleted": result.company_deleted
         }
         
     except HTTPException:
