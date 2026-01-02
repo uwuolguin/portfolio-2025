@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Form, Request
-from typing import List, Optional
+from typing import List, Optional,Union
 from uuid import UUID
 import asyncpg
 import uuid
@@ -230,12 +230,14 @@ async def update_company(
     email: Optional[str] = Form(None),
     product_name: Optional[str] = Form(None),
     commune_name: Optional[str] = Form(None),
-    lang: Optional[str] = Form(None, pattern="^(es|en)$"),
-    image: Optional[UploadFile] = File(None),
+    lang: str = Form(pattern="^(es|en)$"),
+    image: Optional[Union[UploadFile, str]] = File(None),
     current_user: dict = Depends(require_verified_email),
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
+    if not isinstance(image, UploadFile):
+        image = None
     user_uuid = UUID(current_user["sub"])
     image_id = None
     image_ext = None

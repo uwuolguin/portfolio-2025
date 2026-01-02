@@ -854,7 +854,7 @@ class DB:
             CompanyRecord with updated data
             
         Raises:
-            ValueError: If company not found
+            ValueError: If company not found or invalid data
             PermissionError: If user doesn't own the company
         """
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
@@ -871,22 +871,32 @@ class DB:
             params = []
             param_count = 1
 
+            def is_empty(val):
+                return val is None or (isinstance(val, str) and val.strip() == "")
+
             field_mapping = [
                 ("name", name),
                 ("description_es", description_es),
                 ("description_en", description_en),
                 ("address", address),
                 ("phone", phone),
-                ("email", email),
                 ("image_url", image_url),
                 ("image_extension", image_extension)
             ]
 
             for field_name, value in field_mapping:
-                if value is not None:
+                if not is_empty(value):
                     update_fields.append(f"{field_name}=${param_count}")
-                    params.append(value)
+                    params.append(value.strip() if isinstance(value, str) else value)
                     param_count += 1
+
+            if not is_empty(email):
+                email_stripped = email.strip()
+                if "@" not in email_stripped or "." not in email_stripped:
+                    raise ValueError("Invalid email format")
+                update_fields.append(f"email=${param_count}")
+                params.append(email_stripped)
+                param_count += 1
 
             if product_uuid is not None:
                 product_exists = await conn.fetchval(
@@ -936,7 +946,8 @@ class DB:
             logger.info(
                 "company_updated", 
                 company_uuid=str(company_uuid), 
-                user_uuid=str(user_uuid)
+                user_uuid=str(user_uuid),
+                fields_updated=len(update_fields)
             )
             
             return CompanyRecord(**dict(row))
