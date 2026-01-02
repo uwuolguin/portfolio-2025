@@ -1,5 +1,8 @@
-Local integration testing:manually make sure everything is working (endpoint by endpoint in backend), script by script, is an small app for now so unit testing is just for show
-
+Input Sanitization (XSS is exploitable NOW)
+CSRF IP Whitelist (admin bypass is a security hole)
+HTTP Error Handling (improves debugging + security)
+Whitespace Validation (data integrity)
+Frontend State Sync (UX improvement)
 check the ui is properly using all endpoints
 
 Kubernetes deployment: create manifests/helm, test in k8s (move this step earlier if you want to test k8s before deleting comments — see variant below).
