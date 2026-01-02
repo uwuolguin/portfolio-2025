@@ -1,13 +1,15 @@
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from app.main import app
+from app.main import create_app
 
 
 @pytest_asyncio.fixture
 async def initialized_app():
-    async with app.router.lifespan_context(app):
-        yield app
+    """Create a fresh app instance for each test"""
+    fresh_app = create_app()
+    async with fresh_app.router.lifespan_context(fresh_app):
+        yield fresh_app
 
 
 @pytest.mark.asyncio

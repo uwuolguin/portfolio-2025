@@ -22,7 +22,6 @@ setup_logging()
 
 logger = structlog.get_logger(__name__)
 
-scheduler = AsyncIOScheduler()
 
 async def scheduled_cleanup():
     """Run orphan image cleanup job"""
@@ -38,146 +37,152 @@ async def scheduled_cleanup():
             exc_info=True
         )
 
+def create_app() -> FastAPI:
+    """Factory function to create a FastAPI app instance with fresh scheduler"""
+    
+    scheduler = AsyncIOScheduler()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan context with scheduled jobs"""
-    logger.info("application_startup_begin")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Application lifespan context with scheduled jobs"""
+        logger.info("application_startup_begin")
 
-    try:
-        await init_db_pools()
-        logger.info("database_pools_initialized")
+        try:
+            await init_db_pools()
+            logger.info("database_pools_initialized")
 
-        await redis_client.connect()
-        logger.info("redis_connected")
+            await redis_client.connect()
+            logger.info("redis_connected")
 
-        scheduler.add_job(
-            scheduled_cleanup,
-            CronTrigger(hour=2, minute=0),
-            id='cleanup_orphan_images',
-            replace_existing=True,
-            max_instances=1
-        )
-        scheduler.start()
-        logger.info(
-            "scheduler_started",
-            jobs=[
-                {
-                    "id": job.id,
-                    "next_run": job.next_run_time.isoformat() if job.next_run_time else None
-                }
-                for job in scheduler.get_jobs()
-            ]
-        )
+            scheduler.add_job(
+                scheduled_cleanup,
+                CronTrigger(hour=2, minute=0),
+                id='cleanup_orphan_images',
+                replace_existing=True,
+                max_instances=1
+            )
+            scheduler.start()
+            logger.info(
+                "scheduler_started",
+                jobs=[
+                    {
+                        "id": job.id,
+                        "next_run": job.next_run_time.isoformat() if job.next_run_time else None
+                    }
+                    for job in scheduler.get_jobs()
+                ]
+            )
 
-        logger.info("application_startup_complete")
+            logger.info("application_startup_complete")
 
-    except Exception as e:
-        logger.critical("application_startup_failed", error=str(e), exc_info=True)
-        raise
+        except Exception as e:
+            logger.critical("application_startup_failed", error=str(e), exc_info=True)
+            raise
 
-    yield
+        yield
 
-    logger.info("application_shutdown_begin")
+        logger.info("application_shutdown_begin")
 
-    try:
-        scheduler.shutdown(wait=False)
-        logger.info("scheduler_stopped")
+        try:
+            scheduler.shutdown(wait=False)
+            logger.info("scheduler_stopped")
 
-        await close_db_pools()
-        logger.info("database_pools_closed")
+            await close_db_pools()
+            logger.info("database_pools_closed")
 
-        await redis_client.disconnect()
-        logger.info("redis_disconnected")
+            await redis_client.disconnect()
+            logger.info("redis_disconnected")
 
-        logger.info("application_shutdown_complete")
+            logger.info("application_shutdown_complete")
 
-    except Exception as e:
-        logger.error("application_shutdown_error", error=str(e), exc_info=True)
+        except Exception as e:
+            logger.error("application_shutdown_error", error=str(e), exc_info=True)
 
+    app = FastAPI(
+        title=settings.project_name,
+        version="1.0.0",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.debug else None,
+        redoc_url="/redoc" if settings.debug else None,
+    )
 
-app = FastAPI(
-    title=settings.project_name,
-    version="1.0.0",
-    lifespan=lifespan,
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
-)
+    app.add_middleware(HTTPSRedirectMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    setup_cors(app)
+    app.add_middleware(LoggingMiddleware)
 
-app.add_middleware(HTTPSRedirectMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-setup_cors(app)
-app.add_middleware(LoggingMiddleware)
+    @app.middleware("http")
+    async def global_exception_handler(request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as e:
+            logger.error(
+                "unhandled_exception",
+                path=request.url.path,
+                method=request.method,
+                error=str(e),
+                traceback=traceback.format_exc(),
+            )
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Unexpected internal server error"},
+            )
 
+    @app.middleware("http")
+    async def global_rate_limit_middleware(request: Request, call_next):
+        if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
+            return await call_next(request)
 
-@app.middleware("http")
-async def global_exception_handler(request: Request, call_next):
-    try:
+        if request.url.path.startswith("/files/"):
+            return await call_next(request)
+
+        if request.url.path.startswith("/api/"):
+            try:
+                from app.redis.rate_limit import enforce_rate_limit
+
+                await enforce_rate_limit(
+                    request=request,
+                    route_name="global",
+                    ip_limit=2,
+                    global_limit=20,
+                    window_seconds=1,
+                )
+            except Exception as e:
+                logger.warning("rate_limit_check_failed", error=str(e))
+
         return await call_next(request)
-    except Exception as e:
+
+    @app.exception_handler(413)
+    async def request_entity_too_large_handler(request: Request, exc):
+        return JSONResponse(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            content={
+                "detail": f"Request body too large. Maximum size: {settings.max_file_size / 1_000_000}MB"
+            },
+        )
+
+    @app.exception_handler(500)
+    async def internal_server_error_handler(request: Request, exc):
         logger.error(
-            "unhandled_exception",
+            "internal_server_error",
             path=request.url.path,
             method=request.method,
-            error=str(e),
-            traceback=traceback.format_exc(),
+            error=str(exc),
+            exc_info=True,
         )
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Unexpected internal server error"},
+            content={
+                "detail": "Internal server error. Please contact support if the issue persists."
+            },
         )
-@app.middleware("http")
-async def global_rate_limit_middleware(request: Request, call_next):
-    if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
-        return await call_next(request)
 
-    if request.url.path.startswith("/files/"):
-        return await call_next(request)
+    app.include_router(users.router, prefix=settings.api_v1_prefix)
+    app.include_router(products.router, prefix=settings.api_v1_prefix)
+    app.include_router(communes.router, prefix=settings.api_v1_prefix)
+    app.include_router(companies.router, prefix=settings.api_v1_prefix)
+    app.include_router(health.router, prefix=settings.api_v1_prefix)
 
-    if request.url.path.startswith("/api/"):
-        try:
-            from app.redis.rate_limit import enforce_rate_limit
+    return app
 
-            await enforce_rate_limit(
-                request=request,
-                route_name="global",
-                ip_limit=2,
-                global_limit=20,
-                window_seconds=1,
-            )
-        except Exception as e:
-            logger.warning("rate_limit_check_failed", error=str(e))
-
-    return await call_next(request)
-
-@app.exception_handler(413)
-async def request_entity_too_large_handler(request: Request, exc):
-    return JSONResponse(
-        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-        content={
-            "detail": f"Request body too large. Maximum size: {settings.max_file_size / 1_000_000}MB"
-        },
-    )
-
-
-@app.exception_handler(500)
-async def internal_server_error_handler(request: Request, exc):
-    logger.error(
-        "internal_server_error",
-        path=request.url.path,
-        method=request.method,
-        error=str(exc),
-        exc_info=True,
-    )
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": "Internal server error. Please contact support if the issue persists."
-        },
-    )
-
-app.include_router(users.router, prefix=settings.api_v1_prefix)
-app.include_router(products.router, prefix=settings.api_v1_prefix)
-app.include_router(communes.router, prefix=settings.api_v1_prefix)
-app.include_router(companies.router, prefix=settings.api_v1_prefix)
-app.include_router(health.router, prefix=settings.api_v1_prefix)
+app = create_app()
