@@ -218,7 +218,7 @@ async def delete_me(
         
         return {
             "message": "User account and all associated data successfully deleted",
-            "company_deleted": result["company_deleted"]
+            "company_deleted": result.company_deleted
         }
         
     except ValueError as e:
