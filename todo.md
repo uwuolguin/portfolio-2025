@@ -1,6 +1,6 @@
 xss innerhtml mitigation
-Frontend State Sync (UX improvement)
 correlation id
+
 HTTP Error Handling (improves debugging + security)
 Whitespace Validation (data integrity)
 

@@ -14,6 +14,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // STEP 3: Now that we have accurate state, render the navigation bar
     renderNav();
+    
+    // STEP 4: Listen for state changes (from other tabs or same tab)
+    document.addEventListener('stateChange', () => {
+        console.log('[Nav] State changed, re-rendering navigation');
+        renderNav();
+    });
 });
 
 // ============================================
