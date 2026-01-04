@@ -1,12 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
     const imageContainer = document.getElementById('picture-container');
 
-    const imageContent = `
-        <div class="image-container">
-            <img src="/files/pictures/background-picture.jpg" 
-                 alt="Description of the image">
-        </div>
-    `;
+    // Clear container safely
+    imageContainer.textContent = '';
 
-    imageContainer.innerHTML = imageContent;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'image-container';
+
+    const img = document.createElement('img');
+    img.src = '/files/pictures/background-picture.jpg';
+    img.alt = 'Description of the image';
+
+    wrapper.appendChild(img);
+    imageContainer.appendChild(wrapper);
 });

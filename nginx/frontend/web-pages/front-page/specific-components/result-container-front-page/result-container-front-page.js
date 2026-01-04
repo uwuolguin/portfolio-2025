@@ -1,220 +1,205 @@
-import { getLanguage, apiRequest } from '../../../0-shared-components/utils/shared-functions.js';
-import { sanitizeText, sanitizeURL, sanitizeEmail, sanitizePhone } from '../../../0-shared-components/utils/sanitizer.js';
+import {
+    getLanguage,
+    getLoginState,
+    setLoginState,
+    setCSRFToken
+} from '../../../0-shared-components/utils/shared-functions.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-    const resultsContainer = document.getElementById('results-container');
-    const cardsPerPage = 5;
-    const numbersPerPagination = 3;
-    let currentPage = 1;
+    const loginSection = document.getElementById('login-section');
 
-    /**
-     * SECURE RENDERING: Use DOM methods instead of innerHTML
-     */
-    const renderCards = (companies) => {
-        const fragment = document.createDocumentFragment();
-        
-        companies.forEach(company => {
-            // Sanitize ALL user inputs BEFORE rendering
-            const safeName = sanitizeText(company.name);
-            const safeDescription = sanitizeText(company.description);
-            const safeAddress = sanitizeText(company.address);
-            const safePhone = sanitizePhone(company.phone);
-            const safeEmail = sanitizeEmail(company.email);
-            const safeImageURL = sanitizeURL(company.image);
-            
-            // Create card using DOM methods (NO innerHTML)
-            const card = document.createElement('div');
-            card.className = 'business-card';
-            
-            // Image section
-            const pictureDiv = document.createElement('div');
-            pictureDiv.className = 'card-picture';
-            
-            const img = document.createElement('img');
-            img.src = safeImageURL || 'https://via.placeholder.com/400x220?text=No+Image';
-            img.alt = 'Product Image';
-            img.onerror = function() {
-                this.src = 'https://via.placeholder.com/400x220?text=No+Image';
-            };
-            pictureDiv.appendChild(img);
-            
-            // Details section
-            const detailsDiv = document.createElement('div');
-            detailsDiv.className = 'card-details';
-            
-            // Name (textContent is XSS-proof)
-            const nameH3 = document.createElement('h3');
-            nameH3.className = 'business-name';
-            nameH3.textContent = safeName;  // SAFE: textContent doesn't parse HTML
-            
-            // Description
-            const descP = document.createElement('p');
-            descP.className = 'concise-description';
-            descP.textContent = safeDescription;
-            
-            // Address
-            const addrP = document.createElement('p');
-            addrP.className = 'location';
-            addrP.textContent = safeAddress;
-            
-            // Phone
-            const phoneP = document.createElement('p');
-            phoneP.className = 'phone';
-            phoneP.textContent = safePhone;
-            
-            // Email
-            const emailP = document.createElement('p');
-            emailP.className = 'mail';
-            emailP.textContent = safeEmail;
-            
-            // Assemble card
-            detailsDiv.appendChild(nameH3);
-            detailsDiv.appendChild(descP);
-            detailsDiv.appendChild(addrP);
-            detailsDiv.appendChild(phoneP);
-            detailsDiv.appendChild(emailP);
-            
-            card.appendChild(pictureDiv);
-            card.appendChild(detailsDiv);
-            
-            fragment.appendChild(card);
+    const translations = {
+        es: {
+            title: "Inicia sesión",
+            usernamePlaceholder: "Correo",
+            passwordPlaceholder: "Contraseña",
+            loginButton: "Iniciar sesión",
+            alreadyLoggedTitle: "Ya has iniciado sesión",
+            alreadyLoggedMessage: "Ya tienes una sesión activa. ¿Qué te gustaría hacer?",
+            goToMainPage: "Ir a la página principal",
+            logout: "Cerrar sesión",
+            resendVerificationLink: "¿No recibiste el email de verificación?",
+            resendButton: "Reenviar verificación",
+            resendSuccess: "Email de verificación enviado.",
+            resendError: "Error al enviar el email.",
+            emailRequired: "Por favor ingresa tu correo electrónico",
+            resending: "Enviando..."
+        },
+        en: {
+            title: "Log in",
+            usernamePlaceholder: "Email",
+            passwordPlaceholder: "Password",
+            loginButton: "Log in",
+            alreadyLoggedTitle: "You're already logged in",
+            alreadyLoggedMessage: "You have an active session. What would you like to do?",
+            goToMainPage: "Go to main page",
+            logout: "Log out",
+            resendVerificationLink: "Didn't receive the verification email?",
+            resendButton: "Resend verification",
+            resendSuccess: "Verification email sent.",
+            resendError: "Error sending email.",
+            emailRequired: "Please enter your email address",
+            resending: "Sending..."
+        }
+    };
+
+    const clear = () => (loginSection.textContent = '');
+
+    function renderAlreadyLoggedView() {
+        const t = translations[getLanguage()];
+        clear();
+
+        const container = document.createElement('div');
+        container.className = 'login-container';
+
+        const title = document.createElement('h2');
+        title.className = 'login-title';
+        title.textContent = t.alreadyLoggedTitle;
+
+        const msg = document.createElement('p');
+        msg.className = 'already-logged-message';
+        msg.textContent = t.alreadyLoggedMessage;
+
+        const actions = document.createElement('div');
+        actions.className = 'logged-in-actions';
+
+        const goMain = document.createElement('button');
+        goMain.className = 'login-button primary';
+        goMain.textContent = t.goToMainPage;
+        goMain.onclick = () => {
+            window.location.href = '../front-page/front-page.html';
+        };
+
+        const logout = document.createElement('button');
+        logout.className = 'login-button secondary';
+        logout.textContent = t.logout;
+        logout.onclick = () => setLoginState(false);
+
+        actions.append(goMain, logout);
+        container.append(title, msg, actions);
+        loginSection.appendChild(container);
+    }
+
+    function renderLoginForm() {
+        const lang = getLanguage();
+        const t = translations[lang];
+        clear();
+
+        const container = document.createElement('div');
+        container.className = 'login-container';
+
+        const title = document.createElement('h2');
+        title.className = 'login-title';
+        title.textContent = t.title;
+
+        const form = document.createElement('form');
+        form.className = 'login-form';
+
+        const email = document.createElement('input');
+        email.id = 'username';
+        email.type = 'email';
+        email.placeholder = t.usernamePlaceholder;
+        email.required = true;
+
+        const password = document.createElement('input');
+        password.id = 'password';
+        password.type = 'password';
+        password.placeholder = t.passwordPlaceholder;
+        password.required = true;
+
+        const submit = document.createElement('button');
+        submit.type = 'submit';
+        submit.className = 'login-button';
+        submit.textContent = t.loginButton;
+
+        form.append(email, password, submit);
+
+        const resendSection = document.createElement('div');
+        resendSection.className = 'resend-verification-section';
+
+        const resendText = document.createElement('p');
+        resendText.textContent = t.resendVerificationLink;
+
+        const resendBtn = document.createElement('button');
+        resendBtn.type = 'button';
+        resendBtn.textContent = t.resendButton;
+
+        resendSection.append(resendText, resendBtn);
+
+        container.append(title, form, resendSection);
+        loginSection.appendChild(container);
+
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            submit.disabled = true;
+
+            try {
+                const res = await fetch('/api/v1/users/login', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Correlation-ID': `login_${Date.now()}`
+                    },
+                    body: JSON.stringify({
+                        email: email.value,
+                        password: password.value
+                    })
+                });
+
+                if (!res.ok) throw new Error();
+
+                const data = await res.json();
+                setCSRFToken(data.csrf_token);
+                setLoginState(true);
+                window.location.href = '../front-page/front-page.html';
+            } catch {
+                alert(lang === 'es'
+                    ? 'Error al iniciar sesión'
+                    : 'Login error');
+            } finally {
+                submit.disabled = false;
+            }
         });
-        
-        return fragment;
-    };
 
-    const renderPagination = () => {
-        let half = Math.floor(numbersPerPagination / 2);
-        let startPage = Math.max(1, currentPage - half);
-        let endPage = startPage + numbersPerPagination - 1;
-
-        // Create pagination using DOM methods
-        const paginationDiv = document.createElement('div');
-        paginationDiv.className = 'pagination-container';
-        
-        // Previous button
-        const prevLink = document.createElement('a');
-        prevLink.href = '#';
-        prevLink.className = 'page-link prev-link';
-        prevLink.textContent = '«';
-        paginationDiv.appendChild(prevLink);
-        
-        // Page numbers
-        for (let i = startPage; i <= endPage; i++) {
-            const pageLink = document.createElement('a');
-            pageLink.href = '#';
-            pageLink.className = 'page-link' + (i === currentPage ? ' active' : '');
-            pageLink.dataset.page = i;
-            pageLink.textContent = i;
-            paginationDiv.appendChild(pageLink);
-        }
-        
-        // Next button
-        const nextLink = document.createElement('a');
-        nextLink.href = '#';
-        nextLink.className = 'page-link next-link';
-        nextLink.textContent = '»';
-        paginationDiv.appendChild(nextLink);
-        
-        return paginationDiv;
-    };
-
-    const fetchAndRender = async () => {
-        try {
-            const currentLanguage = getLanguage();
-            
-            const searchQuery = document.getElementById('search-query')?.value || '';
-            const communeFilter = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected')?.getAttribute('data-value') || '';
-            const productFilter = document.querySelector('[data-dropdown-id="product"] .dropdown-selected')?.getAttribute('data-value') || '';
-            
-            const params = new URLSearchParams({
-                lang: currentLanguage,
-                limit: cardsPerPage.toString(),
-                offset: ((currentPage - 1) * cardsPerPage).toString()
-            });
-            
-            const allCommunesText = currentLanguage === 'es' ? 'Todas Las Comunas' : 'All Communes';
-            const allProductsText = currentLanguage === 'es' ? 'Todos Los Productos' : 'All Products';
-            
-            if (searchQuery) params.append('q', searchQuery);
-            if (communeFilter && communeFilter !== allCommunesText) params.append('commune', communeFilter);
-            if (productFilter && productFilter !== allProductsText) params.append('product', productFilter);
-            
-            const response = await apiRequest(`/api/v1/companies/search?${params.toString()}`);
-            
-            if (!response.ok) {
-                throw new Error('Failed to fetch companies');
+        resendBtn.addEventListener('click', async () => {
+            if (!email.value) {
+                alert(t.emailRequired);
+                return;
             }
-            
-            const companies = await response.json();
-            
-            const transformedCompanies = companies.map(company => ({
-                id: company.uuid,
-                name: company.name,
-                description: company.description,
-                address: company.address,
-                phone: company.phone,
-                email: company.email,
-                image: company.img_url || 'https://via.placeholder.com/400x220?text=No+Image'
-            }));
 
-            // Clear and render (using DOM methods, NOT innerHTML)
-            resultsContainer.textContent = '';  // Clear safely
-            
-            const resultsGrid = document.createElement('div');
-            resultsGrid.className = 'results-grid';
-            
-            if (transformedCompanies.length > 0) {
-                const cardsFragment = renderCards(transformedCompanies);
-                resultsGrid.appendChild(cardsFragment);
-            } else {
-                const noResults = document.createElement('div');
-                noResults.style.cssText = 'text-align: center; padding: 40px; color: #666;';
-                noResults.textContent = currentLanguage === 'es' ? 'No se encontraron empresas' : 'No companies found';
-                resultsGrid.appendChild(noResults);
+            resendBtn.disabled = true;
+            resendBtn.textContent = t.resending;
+
+            try {
+                await fetch('/api/v1/users/resend-verification', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Correlation-ID': `resend_${Date.now()}`
+                    },
+                    body: JSON.stringify({ email: email.value })
+                });
+
+                alert(t.resendSuccess);
+            } catch {
+                alert(t.resendError);
+            } finally {
+                resendBtn.disabled = false;
+                resendBtn.textContent = t.resendButton;
             }
-            
-            const pagination = renderPagination();
-            
-            resultsContainer.appendChild(resultsGrid);
-            resultsContainer.appendChild(pagination);
+        });
+    }
 
-        } catch (error) {
-            console.error("Error fetching companies:", error);
-            
-            resultsContainer.textContent = '';
-            const errorDiv = document.createElement('div');
-            errorDiv.style.cssText = 'text-align: center; padding: 40px; color: #d32f2f;';
-            errorDiv.textContent = getLanguage() === 'es' ? 'Error al cargar las empresas' : 'Error loading companies';
-            resultsContainer.appendChild(errorDiv);
-        }
-    };
+    function render() {
+        getLoginState()
+            ? renderAlreadyLoggedView()
+            : renderLoginForm();
+    }
 
-    // Event delegation for pagination
-    resultsContainer.addEventListener('click', (e) => {
-        const link = e.target.closest('.page-link');
-        if (!link) return;
-        e.preventDefault();
+    document.addEventListener('languageChange', render);
+    document.addEventListener('userHasLogged', render);
 
-        if (link.classList.contains('prev-link')) {
-            currentPage = Math.max(1, currentPage - 1);
-        } else if (link.classList.contains('next-link')) {
-            currentPage = currentPage + 1;
-        } else {
-            currentPage = parseInt(link.dataset.page);
-        }
-
-        fetchAndRender();
-    });
-
-    document.addEventListener("languageChange", () => {
-        fetchAndRender();
-    });
-
-    document.addEventListener("searchTriggered", () => {
-        currentPage = 1;
-        fetchAndRender();
-    });
-
-    fetchAndRender();
+    render();
 });

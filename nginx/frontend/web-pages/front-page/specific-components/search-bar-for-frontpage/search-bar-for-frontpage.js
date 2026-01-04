@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     /**
-     * Create a filterable dropdown using DOM APIs only (NO innerHTML)
+     * Create a filterable dropdown using DOM APIs only
      */
     function createFilterableDropdown(options, placeholder, className, id) {
         const dropdown = document.createElement('div');

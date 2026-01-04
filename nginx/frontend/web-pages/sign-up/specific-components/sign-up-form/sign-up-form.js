@@ -1,4 +1,9 @@
-import { getLanguage, getLoginState, setLoginState } from '../../../0-shared-components/utils/shared-functions.js';
+import {
+    getLanguage,
+    getLoginState,
+    setLoginState
+} from '../../../0-shared-components/utils/shared-functions.js';
+import { sanitizeText, sanitizeEmail } from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const signupSection = document.getElementById('signup-section');
@@ -14,7 +19,6 @@ document.addEventListener('DOMContentLoaded', () => {
             alreadyLoggedMessage: "Ya has iniciado sesión. ¿Qué te gustaría hacer?",
             goToMainPage: "Ir a la página principal",
             logout: "Cerrar sesión",
-            signupSuccess: "¡Cuenta creada exitosamente! Bienvenido.",
             signupError: "Error al crear la cuenta. Inténtalo de nuevo."
         },
         en: {
@@ -27,136 +31,132 @@ document.addEventListener('DOMContentLoaded', () => {
             alreadyLoggedMessage: "You're already logged in. What would you like to do?",
             goToMainPage: "Go to main page",
             logout: "Log out",
-            signupSuccess: "Account created successfully! Welcome.",
             signupError: "Error creating account. Please try again."
         }
     };
 
+    function clearSection() {
+        signupSection.textContent = '';
+    }
+
     function renderAlreadyLoggedView() {
-        const lang = getLanguage();
-        const t = translations[lang];
+        const t = translations[getLanguage()];
+        clearSection();
 
-        const alreadyLoggedContent = `
-            <div class="signup-container">
-                <h2 class="signup-title">${t.alreadyLoggedTitle}</h2>
-                <p class="already-logged-message">${t.alreadyLoggedMessage}</p>
-                <div class="signup-actions">
-                    <button id="go-to-main" class="signup-button">${t.goToMainPage}</button>
-                    <button id="logout-button" class="signup-button secondary">${t.logout}</button>
-                </div>
-            </div>
-        `;
+        const container = document.createElement('div');
+        container.className = 'signup-container';
 
-        signupSection.innerHTML = alreadyLoggedContent;
+        const title = document.createElement('h2');
+        title.className = 'signup-title';
+        title.textContent = t.alreadyLoggedTitle;
 
-        // Add event listeners
-        document.getElementById('go-to-main').addEventListener('click', () => {
+        const message = document.createElement('p');
+        message.className = 'already-logged-message';
+        message.textContent = t.alreadyLoggedMessage;
+
+        const actions = document.createElement('div');
+        actions.className = 'signup-actions';
+
+        const goMain = document.createElement('button');
+        goMain.className = 'signup-button';
+        goMain.textContent = t.goToMainPage;
+        goMain.addEventListener('click', () => {
             window.location.href = '../front-page/front-page.html';
         });
 
-        document.getElementById('logout-button').addEventListener('click', () => {
+        const logout = document.createElement('button');
+        logout.className = 'signup-button secondary';
+        logout.textContent = t.logout;
+        logout.addEventListener('click', () => {
             setLoginState(false);
-            // Page will reload automatically due to storage listener
         });
+
+        actions.append(goMain, logout);
+        container.append(title, message, actions);
+        signupSection.appendChild(container);
     }
 
     function renderSignupForm() {
         const lang = getLanguage();
         const t = translations[lang];
+        clearSection();
 
-        const signupFormContent = `
-            <div class="signup-container">
-                <h2 class="signup-title">${t.title}</h2>
-                <form id="signup-form" class="signup-form">
-                    <div class="input-group">
-                        <input type="text" id="name" class="signup-input" placeholder="${t.namePlaceholder}" required>
-                    </div>
-                    <div class="input-group">
-                        <input type="email" id="email" class="signup-input" placeholder="${t.emailPlaceholder}" required>
-                    </div>
-                    <div class="input-group">
-                        <input type="password" id="password" class="signup-input" placeholder="${t.passwordPlaceholder}" required>
-                    </div>
-                    <button type="submit" class="signup-button">${t.signupButton}</button>
-                </form>
-            </div>
-        `;
+        const container = document.createElement('div');
+        container.className = 'signup-container';
 
-        signupSection.innerHTML = signupFormContent;
+        const title = document.createElement('h2');
+        title.className = 'signup-title';
+        title.textContent = t.title;
 
-        // Attach event listener to the form
-        const signupForm = document.getElementById('signup-form');
-        if (signupForm) {
-            signupForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                
-                const submitButton = signupForm.querySelector('.signup-button');
-                const originalButtonText = submitButton.textContent;
-                
-                submitButton.disabled = true;
-                submitButton.textContent = lang === 'es' ? 'Registrando...' : 'Signing up...';
-                
-                try {
-                    const name = document.getElementById('name').value;
-                    const email = document.getElementById('email').value;
-                    const password = document.getElementById('password').value;
-                    
-                    const response = await fetch('/api/v1/users/signup', {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'X-Correlation-ID': `signup_${Date.now()}`
-                        },
-                        credentials: 'include',
-                        body: JSON.stringify({ name, email, password }),
-                    });
-                    
-                    if (!response.ok) {
-                        const errorData = await response.json().catch(() => ({}));
-                        throw new Error(errorData.detail || 'Signup failed');
-                    }
-                    
-                    const data = await response.json();
-                    
-                    // Show success message with email verification notice
-                    alert(lang === 'es' ? 
-                        `¡Cuenta creada exitosamente! Se ha enviado un correo de verificación a ${email}. Por favor revisa tu bandeja de entrada.` :
-                        `Account created successfully! A verification email has been sent to ${email}. Please check your inbox.`);
-                    
-                    // Redirect to login
-                    window.location.href = '../log-in/log-in.html';
-                    
-                } catch (error) {
-                    console.error('Signup error:', error);
-                    
-                    let errorMsg = t.signupError;
-                    if (error.message.includes('already registered')) {
-                        errorMsg = lang === 'es' ? 
-                            'Este correo ya está registrado.' : 
-                            'This email is already registered.';
-                    }
-                    
-                    alert(errorMsg);
-                } finally {
-                    submitButton.disabled = false;
-                    submitButton.textContent = originalButtonText;
-                }
-            });
-        }
+        const form = document.createElement('form');
+        form.className = 'signup-form';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.placeholder = t.namePlaceholder;
+        nameInput.required = true;
+        nameInput.maxLength = 100;
+
+        const emailInput = document.createElement('input');
+        emailInput.type = 'email';
+        emailInput.placeholder = t.emailPlaceholder;
+        emailInput.required = true;
+        emailInput.maxLength = 254;
+
+        const passwordInput = document.createElement('input');
+        passwordInput.type = 'password';
+        passwordInput.placeholder = t.passwordPlaceholder;
+        passwordInput.required = true;
+        passwordInput.autocomplete = 'new-password';
+
+        const submit = document.createElement('button');
+        submit.type = 'submit';
+        submit.className = 'signup-button';
+        submit.textContent = t.signupButton;
+
+        form.append(nameInput, emailInput, passwordInput, submit);
+        container.append(title, form);
+        signupSection.appendChild(container);
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            submit.disabled = true;
+
+            try {
+                const response = await fetch('/api/v1/users/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        name: nameInput.value,
+                        email: emailInput.value,
+                        password: passwordInput.value
+                    })
+                });
+
+                if (!response.ok) throw new Error();
+
+                alert(
+                    lang === 'es'
+                        ? `Cuenta creada. Revisa ${sanitizeEmail(emailInput.value)}`
+                        : `Account created. Check ${sanitizeEmail(emailInput.value)}`
+                );
+
+                window.location.href = '../log-in/log-in.html';
+
+            } catch {
+                alert(t.signupError);
+            } finally {
+                submit.disabled = false;
+            }
+        });
     }
 
     function renderContent() {
-        const isLoggedIn = getLoginState();
-        
-        if (isLoggedIn) {
-            renderAlreadyLoggedView();
-        } else {
-            renderSignupForm();
-        }
+        getLoginState() ? renderAlreadyLoggedView() : renderSignupForm();
     }
 
-    document.addEventListener("languageChange", renderContent);
-    document.addEventListener("userHasLogged", renderContent);
-
+    document.addEventListener('languageChange', renderContent);
+    document.addEventListener('userHasLogged', renderContent);
     renderContent();
 });
