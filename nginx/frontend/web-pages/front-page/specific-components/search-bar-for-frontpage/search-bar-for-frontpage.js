@@ -1,4 +1,5 @@
 import { getLanguage, fetchProducts, fetchCommunes } from '../../../0-shared-components/utils/shared-functions.js';
+import { sanitizeText } from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const searchContainer = document.getElementById('search-container');
@@ -19,23 +20,55 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function createFilterableDropdown(options, placeholder, className, id) {
-        const dropdownHTML = `
-            <div class="filterable-dropdown ${className}" data-dropdown-id="${id}">
-                <div class="dropdown-selected" data-value="">
-                    ${options[0]}
-                    <span class="dropdown-arrow">▼</span>
-                </div>
-                <div class="dropdown-options" style="display: none;">
-                    <input type="text" class="dropdown-search" placeholder="${placeholder}" autocomplete="off">
-                    <div class="options-list">
-                        ${options.map(option => `
-                            <div class="dropdown-option" data-value="${option}">${option}</div>
-                        `).join('')}
-                    </div>
-                </div>
-            </div>
-        `;
-        return dropdownHTML;
+        // Create dropdown container
+        const dropdown = document.createElement('div');
+        dropdown.className = `filterable-dropdown ${className}`;
+        dropdown.setAttribute('data-dropdown-id', id);
+        
+        // Selected display
+        const selected = document.createElement('div');
+        selected.className = 'dropdown-selected';
+        selected.setAttribute('data-value', '');
+        selected.textContent = sanitizeText(options[0]); // SAFE: First option (All)
+        
+        const arrow = document.createElement('span');
+        arrow.className = 'dropdown-arrow';
+        arrow.textContent = '▼';
+        selected.appendChild(arrow);
+        
+        // Options container
+        const optionsContainer = document.createElement('div');
+        optionsContainer.className = 'dropdown-options';
+        optionsContainer.style.display = 'none';
+        
+        // Search input
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.className = 'dropdown-search';
+        searchInput.placeholder = placeholder;
+        searchInput.autocomplete = 'off';
+        
+        // Options list
+        const optionsList = document.createElement('div');
+        optionsList.className = 'options-list';
+        
+        // Create option elements (SANITIZED)
+        options.forEach(option => {
+            const optionDiv = document.createElement('div');
+            optionDiv.className = 'dropdown-option';
+            const safeOption = sanitizeText(option); // SAFE: Sanitize admin-controlled data
+            optionDiv.setAttribute('data-value', safeOption);
+            optionDiv.textContent = safeOption;
+            optionsList.appendChild(optionDiv);
+        });
+        
+        optionsContainer.appendChild(searchInput);
+        optionsContainer.appendChild(optionsList);
+        
+        dropdown.appendChild(selected);
+        dropdown.appendChild(optionsContainer);
+        
+        return dropdown;
     }
 
     function initializeDropdownFunctionality() {
@@ -78,19 +111,22 @@ document.addEventListener('DOMContentLoaded', () => {
             // Select option
             allOptions.forEach(option => {
                 option.addEventListener('click', () => {
-                    selected.innerHTML = `${option.textContent} <span class="dropdown-arrow">▼</span>`;
+                    const optionText = option.textContent;
+                    selected.textContent = optionText;
+                    const arrow = document.createElement('span');
+                    arrow.className = 'dropdown-arrow';
+                    arrow.textContent = '▼';
+                    selected.appendChild(arrow);
                     selected.setAttribute('data-value', option.getAttribute('data-value'));
                     options.style.display = 'none';
                 });
             });
             
-            // Prevent dropdown from closing when clicking inside
             options.addEventListener('click', (e) => {
                 e.stopPropagation();
             });
         });
         
-        // Close dropdowns when clicking outside
         function closeAllDropdowns() {
             document.querySelectorAll('.dropdown-options').forEach(options => {
                 options.style.display = 'none';
@@ -104,48 +140,53 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentLang = getLanguage();
         const t = translations[currentLang];
         
-        // Store current values before re-rendering
         const currentQuery = document.getElementById('search-query')?.value || '';
         const currentCommuneValue = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected')?.getAttribute('data-value') || '';
         const currentProductValue = document.querySelector('[data-dropdown-id="product"] .dropdown-selected')?.getAttribute('data-value') || '';
         
-        // Fetch products and communes from API
         const products = await fetchProducts();
         const communes = await fetchCommunes();
         
-        // Add "All" option at the beginning
         const allCommunesText = currentLang === 'es' ? 'Todas Las Comunas' : 'All Communes';
         const allProductsText = currentLang === 'es' ? 'Todos Los Productos' : 'All Products';
         
-        const communeNames = [allCommunesText, ...communes.map(c => c.name)];
-        const productNames = [allProductsText, ...products.map(p => currentLang === 'es' ? p.name_es : p.name_en)];
+        // SAFE: Sanitize all product/commune names
+        const communeNames = [allCommunesText, ...communes.map(c => sanitizeText(c.name))];
+        const productNames = [allProductsText, ...products.map(p => sanitizeText(currentLang === 'es' ? p.name_es : p.name_en))];
 
-        const placesDropdown = createFilterableDropdown(
-            communeNames, 
-            t.searchPlaceholder, 
-            'commune-dropdown', 
-            'commune'
-        );
+        // Create container
+        const searchFlexContainer = document.createElement('div');
+        searchFlexContainer.className = 'search-flex-container';
         
-        const productsDropdown = createFilterableDropdown(
-            productNames, 
-            t.searchProductPlaceholder, 
-            'product-dropdown', 
-            'product'
-        );
-
-        const searchBarContent = `
-            <div class="search-flex-container">
-                ${placesDropdown}
-                ${productsDropdown}
-                <div class="search-input-container">
-                    <input type="text" id="search-query" placeholder="${t.placeholder}" value="${currentQuery}">
-                </div>
-                <button class="search-button" id="search-btn">${t.button}</button>
-            </div>
-        `;
-
-        searchContainer.innerHTML = searchBarContent;
+        // Create dropdowns
+        const placesDropdown = createFilterableDropdown(communeNames, t.searchPlaceholder, 'commune-dropdown', 'commune');
+        const productsDropdown = createFilterableDropdown(productNames, t.searchProductPlaceholder, 'product-dropdown', 'product');
+        
+        // Create search input
+        const searchInputContainer = document.createElement('div');
+        searchInputContainer.className = 'search-input-container';
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.id = 'search-query';
+        searchInput.placeholder = t.placeholder;
+        searchInput.value = currentQuery;
+        searchInputContainer.appendChild(searchInput);
+        
+        // Create search button
+        const searchButton = document.createElement('button');
+        searchButton.className = 'search-button';
+        searchButton.id = 'search-btn';
+        searchButton.textContent = t.button;
+        
+        // Assemble
+        searchFlexContainer.appendChild(placesDropdown);
+        searchFlexContainer.appendChild(productsDropdown);
+        searchFlexContainer.appendChild(searchInputContainer);
+        searchFlexContainer.appendChild(searchButton);
+        
+        searchContainer.textContent = ''; // Clear
+        searchContainer.appendChild(searchFlexContainer);
+        
         initializeDropdownFunctionality();
         
         // Restore previous selections
@@ -153,7 +194,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const communeDropdown = document.querySelector('[data-dropdown-id="commune"]');
             if (communeDropdown && communeNames.includes(currentCommuneValue)) {
                 const selected = communeDropdown.querySelector('.dropdown-selected');
-                selected.innerHTML = `${currentCommuneValue} <span class="dropdown-arrow">▼</span>`;
+                selected.textContent = currentCommuneValue;
+                const arrow = document.createElement('span');
+                arrow.className = 'dropdown-arrow';
+                arrow.textContent = '▼';
+                selected.appendChild(arrow);
                 selected.setAttribute('data-value', currentCommuneValue);
             }
         }
@@ -162,17 +207,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const productDropdown = document.querySelector('[data-dropdown-id="product"]');
             if (productDropdown && productNames.includes(currentProductValue)) {
                 const selected = productDropdown.querySelector('.dropdown-selected');
-                selected.innerHTML = `${currentProductValue} <span class="dropdown-arrow">▼</span>`;
+                selected.textContent = currentProductValue;
+                const arrow = document.createElement('span');
+                arrow.className = 'dropdown-arrow';
+                arrow.textContent = '▼';
+                selected.appendChild(arrow);
                 selected.setAttribute('data-value', currentProductValue);
             }
         }
         
-        // Add search button functionality
+        // Add search functionality
         document.getElementById('search-btn')?.addEventListener('click', () => {
             document.dispatchEvent(new CustomEvent('searchTriggered'));
         });
         
-        // Also trigger search on Enter key
         document.getElementById('search-query')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 document.dispatchEvent(new CustomEvent('searchTriggered'));

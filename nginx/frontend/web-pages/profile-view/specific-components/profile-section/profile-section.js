@@ -2,9 +2,10 @@ import {
     getLanguage, 
     getLoginState, 
     getCompanyPublishState,
-    getUserData,
     apiRequest
 } from '../../../0-shared-components/utils/shared-functions.js';
+import { sanitizeText, sanitizeURL, sanitizeEmail, sanitizePhone } from '../../../0-shared-components/utils/sanitizer.js';
+
 document.addEventListener('DOMContentLoaded', () => {
     const profileSection = document.getElementById('profile-section');
 
@@ -55,7 +56,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Fetch real user data
     async function fetchUserData() {
         try {
             const response = await apiRequest('/api/v1/users/me');
@@ -69,32 +69,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Fetch user's company data
     async function fetchMyCompany() {
         try {
             const response = await apiRequest('/api/v1/companies/user/my-company');
             if (response.ok) {
                 return await response.json();
             } else if (response.status === 404) {
-                return null; // No company found
+                return null;
             }
             return null;
         } catch (error) {
             console.error('Error fetching company:', error);
             return null;
         }
-    }
-
-    // Function to get published company data
-    function getPublishedCompanyData() {
-        const stored = localStorage.getItem('publishedCompanyData');
-        return stored ? JSON.parse(stored) : null;
-    }
-
-    function handleUpdateProfile() {
-        const lang = getLanguage();
-        console.log("Update profile clicked");
-        alert(lang === 'es' ? 'Funcionalidad de actualizar perfil - TODO' : 'Update profile functionality - TODO');
     }
 
     async function handleDeleteProfile() {
@@ -112,14 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     throw new Error(errorData.detail || 'Delete failed');
                 }
 
-                console.log("User account deleted");
-                
-                // Clear all local storage
                 localStorage.clear();
-                
                 alert(t.profileDeleted);
-                
-                // Redirect to main page
                 window.location.href = '../front-page/front-page.html';
                 
             } catch (error) {
@@ -129,155 +110,194 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function createInfoItem(label, value) {
+        const infoItem = document.createElement('div');
+        infoItem.className = 'info-item';
+        
+        const labelEl = document.createElement('label');
+        labelEl.className = 'info-label';
+        labelEl.textContent = label;
+        
+        const valueEl = document.createElement('div');
+        valueEl.className = 'info-value';
+        valueEl.textContent = value;
+        
+        infoItem.appendChild(labelEl);
+        infoItem.appendChild(valueEl);
+        
+        return infoItem;
+    }
+
     async function renderProfileContent() {
         const lang = getLanguage();
         const t = translations[lang];
         const isLoggedIn = getLoginState();
         const hasPublishedCompany = getCompanyPublishState();
 
-        // Case 1: User NOT logged in
+        profileSection.textContent = ''; // Clear
+
+        const container = document.createElement('div');
+        container.className = 'profile-container';
+
+        const title = document.createElement('h2');
+        title.className = 'profile-title';
+        title.textContent = t.title;
+        container.appendChild(title);
+
+        // Case 1: Not logged in
         if (!isLoggedIn) {
-            profileSection.innerHTML = `
-                <div class="profile-container">
-                    <h2 class="profile-title">${t.title}</h2>
-                    <div class="login-message">
-                        ${t.loginRequired}
-                        <br><br>
-                        <a href="../log-in/log-in.html" class="login-link">${t.loginHere}</a>
-                    </div>
-                </div>
-            `;
+            const message = document.createElement('div');
+            message.className = 'login-message';
+            message.textContent = t.loginRequired;
+            
+            const br = document.createElement('br');
+            message.appendChild(br);
+            message.appendChild(document.createElement('br'));
+            
+            const link = document.createElement('a');
+            link.href = '../log-in/log-in.html';
+            link.className = 'login-link';
+            link.textContent = t.loginHere;
+            message.appendChild(link);
+            
+            container.appendChild(message);
+            profileSection.appendChild(container);
             return;
         }
 
-        // Fetch real user data
+        // Fetch user data
         const userData = await fetchUserData();
         
         if (!userData) {
-            profileSection.innerHTML = `
-                <div class="profile-container">
-                    <h2 class="profile-title">${t.title}</h2>
-                    <div class="login-message">Error loading profile data</div>
-                </div>
-            `;
+            const message = document.createElement('div');
+            message.className = 'login-message';
+            message.textContent = 'Error loading profile data';
+            container.appendChild(message);
+            profileSection.appendChild(container);
             return;
         }
 
-        // Case 2: User logged in but hasn't published a company
+        // User details box (SANITIZED)
+        const userDetails = document.createElement('div');
+        userDetails.className = 'user-details';
+        
+        const userName = document.createElement('div');
+        userName.className = 'user-name';
+        userName.textContent = sanitizeText(userData.name); // SAFE
+        
+        const userEmail = document.createElement('div');
+        userEmail.className = 'user-email';
+        userEmail.textContent = sanitizeEmail(userData.email); // SAFE
+        
+        userDetails.appendChild(userName);
+        userDetails.appendChild(userEmail);
+        container.appendChild(userDetails);
+
+        // Case 2: No company published
         if (!hasPublishedCompany) {
-            profileSection.innerHTML = `
-                <div class="profile-container">
-                    <h2 class="profile-title">${t.title}</h2>
-                    <div class="user-details">
-                        <div class="user-name">${userData.name}</div>
-                        <div class="user-email">${userData.email}</div>
-                    </div>
-                    <div class="login-message">
-                        ${t.publishFirst}
-                        <br><br>
-                        <a href="../publish/publish.html" class="login-link">${t.publishCompanyHere}</a>
-                    </div>
-                    <div class="profile-actions">
-                        <button class="profile-button delete-button" id="deleteProfileBtn">${t.deleteProfile}</button>
-                    </div>
-                </div>
-            `;
+            const message = document.createElement('div');
+            message.className = 'login-message';
+            message.textContent = t.publishFirst;
+            message.appendChild(document.createElement('br'));
+            message.appendChild(document.createElement('br'));
             
-            const deleteBtn = document.getElementById('deleteProfileBtn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', handleDeleteProfile);
-            }
+            const link = document.createElement('a');
+            link.href = '../publish/publish.html';
+            link.className = 'login-link';
+            link.textContent = t.publishCompanyHere;
+            message.appendChild(link);
             
+            container.appendChild(message);
+            
+            const actions = document.createElement('div');
+            actions.className = 'profile-actions';
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'profile-button delete-button';
+            deleteBtn.id = 'deleteProfileBtn';
+            deleteBtn.textContent = t.deleteProfile;
+            deleteBtn.addEventListener('click', handleDeleteProfile);
+            
+            actions.appendChild(deleteBtn);
+            container.appendChild(actions);
+            
+            profileSection.appendChild(container);
             return;
         }
         
-        // Case 3: User logged in and has published a company
+        // Case 3: Has company
         const companyData = await fetchMyCompany();
         
         if (!companyData) {
-            // If API says no company but localStorage says yes, sync the state
             setCompanyPublishState(false);
-            renderProfileContent(); // Re-render
+            renderProfileContent();
             return;
         }
         
-        profileSection.innerHTML = `
-            <div class="profile-container">
-                <h2 class="profile-title">${t.title}</h2>
-                <div class="profile-content">
-                    <div class="user-details">
-                        <div class="user-name">${userData.name}</div>
-                        <div class="user-email">${userData.email}</div>
-                    </div>
-                    
-                    <div class="profile-info">
-                        <div class="info-item">
-                            <label class="info-label">${t.companyName}</label>
-                            <div class="info-value">${companyData.name || t.noData}</div>
-                        </div>
-                        
-                        <div class="info-item">
-                            <label class="info-label">${t.productDescription}</label>
-                            <div class="info-value">${lang === 'es' ? companyData.description_es : companyData.description_en || t.noData}</div>
-                        </div>
-                        
-                        <div class="info-item">
-                            <label class="info-label">${t.address}</label>
-                            <div class="info-value">${companyData.address || t.noData}</div>
-                        </div>
-                        
-                        <div class="info-item">
-                            <label class="info-label">${t.phone}</label>
-                            <div class="info-value">${companyData.phone || t.noData}</div>
-                        </div>
-                        
-                        <div class="info-item">
-                            <label class="info-label">${t.companyEmail}</label>
-                            <div class="info-value">${companyData.email || t.noData}</div>
-                        </div>
-                        
-                        <div class="info-item">
-                            <label class="info-label">${t.commune}</label>
-                            <div class="info-value">${companyData.commune_name || t.noData}</div>
-                        </div>
-                        
-                        <div class="info-item">
-                            <label class="info-label">${t.productType}</label>
-                            <div class="info-value">${lang === 'es' ? companyData.product_name_es : companyData.product_name_en || t.noData}</div>
-                        </div>
-                        
-                        <div class="info-item">
-                            <label class="info-label">${t.companyImage}</label>
-                            ${companyData.image_url ? `
-                                <img src="${companyData.image_url}" alt="Company Image" class="company-image-preview">
-                            ` : `
-                                <div class="info-value">${t.noData}</div>
-                            `}
-                        </div>
-                    </div>
-                </div>
-                <div class="profile-actions">
-                    <button class="profile-button update-button" id="updateProfileBtn">${t.updateProfile}</button>
-                    <button class="profile-button delete-button" id="deleteProfileBtn">${t.deleteProfile}</button>
-                </div>
-            </div>
-        `;
-
-        // Add event listeners
-        const updateBtn = document.getElementById('updateProfileBtn');
-        const deleteBtn = document.getElementById('deleteProfileBtn');
+        const profileContent = document.createElement('div');
+        profileContent.className = 'profile-content';
         
-        if (updateBtn) {
-            updateBtn.addEventListener('click', () => {
-                window.location.href = '../profile-edit/profile-edit.html';
-            });
+        const profileInfo = document.createElement('div');
+        profileInfo.className = 'profile-info';
+        
+        // Add all info items (SANITIZED)
+        profileInfo.appendChild(createInfoItem(t.companyName, sanitizeText(companyData.name) || t.noData));
+        profileInfo.appendChild(createInfoItem(t.productDescription, sanitizeText(lang === 'es' ? companyData.description_es : companyData.description_en) || t.noData));
+        profileInfo.appendChild(createInfoItem(t.address, sanitizeText(companyData.address) || t.noData));
+        profileInfo.appendChild(createInfoItem(t.phone, sanitizePhone(companyData.phone) || t.noData));
+        profileInfo.appendChild(createInfoItem(t.companyEmail, sanitizeEmail(companyData.email) || t.noData));
+        profileInfo.appendChild(createInfoItem(t.commune, sanitizeText(companyData.commune_name) || t.noData));
+        profileInfo.appendChild(createInfoItem(t.productType, sanitizeText(lang === 'es' ? companyData.product_name_es : companyData.product_name_en) || t.noData));
+        
+        // Image item
+        const imageItem = document.createElement('div');
+        imageItem.className = 'info-item';
+        
+        const imageLabel = document.createElement('label');
+        imageLabel.className = 'info-label';
+        imageLabel.textContent = t.companyImage;
+        imageItem.appendChild(imageLabel);
+        
+        if (companyData.image_url) {
+            const img = document.createElement('img');
+            img.src = sanitizeURL(companyData.image_url); // SAFE
+            img.alt = 'Company Image';
+            img.className = 'company-image-preview';
+            imageItem.appendChild(img);
+        } else {
+            const noImage = document.createElement('div');
+            noImage.className = 'info-value';
+            noImage.textContent = t.noData;
+            imageItem.appendChild(noImage);
         }
-        if (deleteBtn) {
-            deleteBtn.addEventListener('click', handleDeleteProfile);
-        }
+        
+        profileInfo.appendChild(imageItem);
+        profileContent.appendChild(profileInfo);
+        container.appendChild(profileContent);
+        
+        // Action buttons
+        const actions = document.createElement('div');
+        actions.className = 'profile-actions';
+        
+        const updateBtn = document.createElement('button');
+        updateBtn.className = 'profile-button update-button';
+        updateBtn.textContent = t.updateProfile;
+        updateBtn.addEventListener('click', () => {
+            window.location.href = '../profile-edit/profile-edit.html';
+        });
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'profile-button delete-button';
+        deleteBtn.textContent = t.deleteProfile;
+        deleteBtn.addEventListener('click', handleDeleteProfile);
+        
+        actions.appendChild(updateBtn);
+        actions.appendChild(deleteBtn);
+        container.appendChild(actions);
+        
+        profileSection.appendChild(container);
     }
 
-    // Listen for company data updates
     document.addEventListener('companyDataUpdated', renderProfileContent);
     document.addEventListener("languageChange", renderProfileContent);
     document.addEventListener("userHasLogged", renderProfileContent);
