@@ -1,8 +1,12 @@
+xss innerhtml mitigation
+Frontend State Sync (UX improvement)
+correlation id
 HTTP Error Handling (improves debugging + security)
 Whitespace Validation (data integrity)
-Frontend State Sync (UX improvement)
 
-check the ui is properly using all endpoints
+the steps above will break the app, so debug and everything will be fine
+
+check ui and api/docs(currently is all broken but is easy to debug, very easy)
 
 Kubernetes deployment: create manifests/helm, test in k8s
 
