@@ -2,9 +2,16 @@ import {
     getLanguage, 
     getLoginState, 
     getCompanyPublishState,
+    setCompanyPublishState,
     apiRequest
 } from '../../../0-shared-components/utils/shared-functions.js';
-import { sanitizeText, sanitizeURL, sanitizeEmail, sanitizePhone } from '../../../0-shared-components/utils/sanitizer.js';
+
+import {
+    sanitizeText,
+    sanitizeURL,
+    sanitizeEmail,
+    sanitizePhone
+} from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     const profileSection = document.getElementById('profile-section');
@@ -23,9 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
             loginRequired: "Debes iniciar sesión para ver tu perfil.",
             loginHere: "Inicia sesión aquí",
             noData: "No hay datos disponibles",
-            noCompanyPublished: "Aún no has publicado una empresa.",
-            publishCompanyHere: "Publica tu empresa aquí",
             publishFirst: "Para ver los datos de tu empresa, primero debes publicarla.",
+            publishCompanyHere: "Publica tu empresa aquí",
             updateProfile: "Actualizar Perfil",
             deleteProfile: "Eliminar Perfil",
             confirmDelete: "¿Estás seguro de que quieres eliminar tu perfil? Esta acción no se puede deshacer.",
@@ -45,9 +51,8 @@ document.addEventListener('DOMContentLoaded', () => {
             loginRequired: "You must log in to view your profile.",
             loginHere: "Log in here",
             noData: "No data available",
-            noCompanyPublished: "You haven't published a company yet.",
-            publishCompanyHere: "Publish your company here",
             publishFirst: "To see your company data, you must publish it first.",
+            publishCompanyHere: "Publish your company here",
             updateProfile: "Update Profile",
             deleteProfile: "Delete Profile",
             confirmDelete: "Are you sure you want to delete your profile? This action cannot be undone.",
@@ -58,83 +63,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchUserData() {
         try {
-            const response = await apiRequest('/api/v1/users/me');
-            if (response.ok) {
-                return await response.json();
-            }
-            return null;
-        } catch (error) {
-            console.error('Error fetching user data:', error);
+            const res = await apiRequest('/api/v1/users/me');
+            return res.ok ? await res.json() : null;
+        } catch {
             return null;
         }
     }
 
     async function fetchMyCompany() {
         try {
-            const response = await apiRequest('/api/v1/companies/user/my-company');
-            if (response.ok) {
-                return await response.json();
-            } else if (response.status === 404) {
-                return null;
-            }
+            const res = await apiRequest('/api/v1/companies/user/my-company');
+            if (res.ok) return await res.json();
+            if (res.status === 404) return null;
             return null;
-        } catch (error) {
-            console.error('Error fetching company:', error);
+        } catch {
             return null;
         }
     }
 
     async function handleDeleteProfile() {
-        const lang = getLanguage();
-        const t = translations[lang];
-        
-        if (confirm(t.confirmDelete)) {
-            try {
-                const response = await apiRequest('/api/v1/users/me', {
-                    method: 'DELETE'
-                });
+        const t = translations[getLanguage()];
 
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.detail || 'Delete failed');
-                }
+        if (!confirm(t.confirmDelete)) return;
 
-                localStorage.clear();
-                alert(t.profileDeleted);
-                window.location.href = '../front-page/front-page.html';
-                
-            } catch (error) {
-                console.error('Error deleting profile:', error);
-                alert(t.deleteError + '\n' + error.message);
-            }
+        try {
+            const res = await apiRequest('/api/v1/users/me', { method: 'DELETE' });
+            if (!res.ok) throw new Error();
+
+            localStorage.clear();
+            alert(t.profileDeleted);
+            window.location.href = '../front-page/front-page.html';
+        } catch {
+            alert(t.deleteError);
         }
     }
 
     function createInfoItem(label, value) {
-        const infoItem = document.createElement('div');
-        infoItem.className = 'info-item';
-        
-        const labelEl = document.createElement('label');
-        labelEl.className = 'info-label';
-        labelEl.textContent = label;
-        
-        const valueEl = document.createElement('div');
-        valueEl.className = 'info-value';
-        valueEl.textContent = value;
-        
-        infoItem.appendChild(labelEl);
-        infoItem.appendChild(valueEl);
-        
-        return infoItem;
+        const item = document.createElement('div');
+        item.className = 'info-item';
+
+        const l = document.createElement('label');
+        l.className = 'info-label';
+        l.textContent = label;
+
+        const v = document.createElement('div');
+        v.className = 'info-value';
+        v.textContent = value;
+
+        item.appendChild(l);
+        item.appendChild(v);
+        return item;
     }
 
     async function renderProfileContent() {
         const lang = getLanguage();
         const t = translations[lang];
-        const isLoggedIn = getLoginState();
-        const hasPublishedCompany = getCompanyPublishState();
 
-        profileSection.textContent = ''; // Clear
+        profileSection.textContent = '';
 
         const container = document.createElement('div');
         container.className = 'profile-container';
@@ -144,163 +129,141 @@ document.addEventListener('DOMContentLoaded', () => {
         title.textContent = t.title;
         container.appendChild(title);
 
-        // Case 1: Not logged in
-        if (!isLoggedIn) {
-            const message = document.createElement('div');
-            message.className = 'login-message';
-            message.textContent = t.loginRequired;
-            
-            const br = document.createElement('br');
-            message.appendChild(br);
-            message.appendChild(document.createElement('br'));
-            
+        if (!getLoginState()) {
+            const msg = document.createElement('div');
+            msg.className = 'login-message';
+            msg.textContent = t.loginRequired;
+
+            msg.appendChild(document.createElement('br'));
+            msg.appendChild(document.createElement('br'));
+
             const link = document.createElement('a');
             link.href = '../log-in/log-in.html';
             link.className = 'login-link';
             link.textContent = t.loginHere;
-            message.appendChild(link);
-            
-            container.appendChild(message);
+
+            msg.appendChild(link);
+            container.appendChild(msg);
             profileSection.appendChild(container);
             return;
         }
 
-        // Fetch user data
-        const userData = await fetchUserData();
-        
-        if (!userData) {
-            const message = document.createElement('div');
-            message.className = 'login-message';
-            message.textContent = 'Error loading profile data';
-            container.appendChild(message);
-            profileSection.appendChild(container);
-            return;
-        }
+        const user = await fetchUserData();
+        if (!user) return;
 
-        // User details box (SANITIZED)
         const userDetails = document.createElement('div');
         userDetails.className = 'user-details';
-        
-        const userName = document.createElement('div');
-        userName.className = 'user-name';
-        userName.textContent = sanitizeText(userData.name); // SAFE
-        
-        const userEmail = document.createElement('div');
-        userEmail.className = 'user-email';
-        userEmail.textContent = sanitizeEmail(userData.email); // SAFE
-        
-        userDetails.appendChild(userName);
-        userDetails.appendChild(userEmail);
+
+        const name = document.createElement('div');
+        name.className = 'user-name';
+        name.textContent = sanitizeText(user.name);
+
+        const email = document.createElement('div');
+        email.className = 'user-email';
+        email.textContent = sanitizeEmail(user.email);
+
+        userDetails.appendChild(name);
+        userDetails.appendChild(email);
         container.appendChild(userDetails);
 
-        // Case 2: No company published
-        if (!hasPublishedCompany) {
-            const message = document.createElement('div');
-            message.className = 'login-message';
-            message.textContent = t.publishFirst;
-            message.appendChild(document.createElement('br'));
-            message.appendChild(document.createElement('br'));
-            
+        if (!getCompanyPublishState()) {
+            const msg = document.createElement('div');
+            msg.className = 'login-message';
+            msg.textContent = t.publishFirst;
+
+            msg.appendChild(document.createElement('br'));
+            msg.appendChild(document.createElement('br'));
+
             const link = document.createElement('a');
             link.href = '../publish/publish.html';
             link.className = 'login-link';
             link.textContent = t.publishCompanyHere;
-            message.appendChild(link);
-            
-            container.appendChild(message);
-            
+
+            msg.appendChild(link);
+            container.appendChild(msg);
+
+            const del = document.createElement('button');
+            del.className = 'profile-button delete-button';
+            del.textContent = t.deleteProfile;
+            del.addEventListener('click', handleDeleteProfile);
+
             const actions = document.createElement('div');
             actions.className = 'profile-actions';
-            
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'profile-button delete-button';
-            deleteBtn.id = 'deleteProfileBtn';
-            deleteBtn.textContent = t.deleteProfile;
-            deleteBtn.addEventListener('click', handleDeleteProfile);
-            
-            actions.appendChild(deleteBtn);
+            actions.appendChild(del);
+
             container.appendChild(actions);
-            
             profileSection.appendChild(container);
             return;
         }
-        
-        // Case 3: Has company
-        const companyData = await fetchMyCompany();
-        
-        if (!companyData) {
+
+        const company = await fetchMyCompany();
+        if (!company) {
             setCompanyPublishState(false);
             renderProfileContent();
             return;
         }
-        
-        const profileContent = document.createElement('div');
-        profileContent.className = 'profile-content';
-        
-        const profileInfo = document.createElement('div');
-        profileInfo.className = 'profile-info';
-        
-        // Add all info items (SANITIZED)
-        profileInfo.appendChild(createInfoItem(t.companyName, sanitizeText(companyData.name) || t.noData));
-        profileInfo.appendChild(createInfoItem(t.productDescription, sanitizeText(lang === 'es' ? companyData.description_es : companyData.description_en) || t.noData));
-        profileInfo.appendChild(createInfoItem(t.address, sanitizeText(companyData.address) || t.noData));
-        profileInfo.appendChild(createInfoItem(t.phone, sanitizePhone(companyData.phone) || t.noData));
-        profileInfo.appendChild(createInfoItem(t.companyEmail, sanitizeEmail(companyData.email) || t.noData));
-        profileInfo.appendChild(createInfoItem(t.commune, sanitizeText(companyData.commune_name) || t.noData));
-        profileInfo.appendChild(createInfoItem(t.productType, sanitizeText(lang === 'es' ? companyData.product_name_es : companyData.product_name_en) || t.noData));
-        
-        // Image item
-        const imageItem = document.createElement('div');
-        imageItem.className = 'info-item';
-        
-        const imageLabel = document.createElement('label');
-        imageLabel.className = 'info-label';
-        imageLabel.textContent = t.companyImage;
-        imageItem.appendChild(imageLabel);
-        
-        if (companyData.image_url) {
+
+        const info = document.createElement('div');
+        info.className = 'profile-info';
+
+        info.appendChild(createInfoItem(t.companyName, sanitizeText(company.name) || t.noData));
+        info.appendChild(createInfoItem(t.productDescription, sanitizeText(lang === 'es' ? company.description_es : company.description_en) || t.noData));
+        info.appendChild(createInfoItem(t.address, sanitizeText(company.address) || t.noData));
+        info.appendChild(createInfoItem(t.phone, sanitizePhone(company.phone) || t.noData));
+        info.appendChild(createInfoItem(t.companyEmail, sanitizeEmail(company.email) || t.noData));
+        info.appendChild(createInfoItem(t.commune, sanitizeText(company.commune_name) || t.noData));
+        info.appendChild(createInfoItem(t.productType, sanitizeText(lang === 'es' ? company.product_name_es : company.product_name_en) || t.noData));
+
+        const imgItem = document.createElement('div');
+        imgItem.className = 'info-item';
+
+        const imgLabel = document.createElement('label');
+        imgLabel.className = 'info-label';
+        imgLabel.textContent = t.companyImage;
+        imgItem.appendChild(imgLabel);
+
+        if (company.image_url) {
             const img = document.createElement('img');
-            img.src = sanitizeURL(companyData.image_url); // SAFE
-            img.alt = 'Company Image';
+            img.src = sanitizeURL(company.image_url);
             img.className = 'company-image-preview';
-            imageItem.appendChild(img);
+            img.alt = 'Company image';
+            imgItem.appendChild(img);
         } else {
-            const noImage = document.createElement('div');
-            noImage.className = 'info-value';
-            noImage.textContent = t.noData;
-            imageItem.appendChild(noImage);
+            const no = document.createElement('div');
+            no.className = 'info-value';
+            no.textContent = t.noData;
+            imgItem.appendChild(no);
         }
-        
-        profileInfo.appendChild(imageItem);
-        profileContent.appendChild(profileInfo);
-        container.appendChild(profileContent);
-        
-        // Action buttons
+
+        info.appendChild(imgItem);
+        container.appendChild(info);
+
         const actions = document.createElement('div');
         actions.className = 'profile-actions';
-        
-        const updateBtn = document.createElement('button');
-        updateBtn.className = 'profile-button update-button';
-        updateBtn.textContent = t.updateProfile;
-        updateBtn.addEventListener('click', () => {
+
+        const update = document.createElement('button');
+        update.className = 'profile-button update-button';
+        update.textContent = t.updateProfile;
+        update.addEventListener('click', () => {
             window.location.href = '../profile-edit/profile-edit.html';
         });
-        
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'profile-button delete-button';
-        deleteBtn.textContent = t.deleteProfile;
-        deleteBtn.addEventListener('click', handleDeleteProfile);
-        
-        actions.appendChild(updateBtn);
-        actions.appendChild(deleteBtn);
+
+        const del = document.createElement('button');
+        del.className = 'profile-button delete-button';
+        del.textContent = t.deleteProfile;
+        del.addEventListener('click', handleDeleteProfile);
+
+        actions.appendChild(update);
+        actions.appendChild(del);
         container.appendChild(actions);
-        
+
         profileSection.appendChild(container);
     }
 
     document.addEventListener('companyDataUpdated', renderProfileContent);
-    document.addEventListener("languageChange", renderProfileContent);
-    document.addEventListener("userHasLogged", renderProfileContent);
-    document.addEventListener("companyPublishStateChange", renderProfileContent);
+    document.addEventListener('languageChange', renderProfileContent);
+    document.addEventListener('userHasLogged', renderProfileContent);
+    document.addEventListener('companyPublishStateChange', renderProfileContent);
+
     renderProfileContent();
 });

@@ -6,231 +6,255 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const translations = {
         es: {
-            placeholder: "Introduzca un término de búsqueda.",
-            button: "Buscar",
-            searchPlaceholder: "Buscar comuna...",
-            searchProductPlaceholder: "Buscar producto..."
+            placeholder: 'Introduzca un término de búsqueda.',
+            button: 'Buscar',
+            searchPlaceholder: 'Buscar comuna...',
+            searchProductPlaceholder: 'Buscar producto...',
         },
         en: {
-            placeholder: "Enter a search term.",
-            button: "Search",
-            searchPlaceholder: "Search commune...",
-            searchProductPlaceholder: "Search product..."
-        }
+            placeholder: 'Enter a search term.',
+            button: 'Search',
+            searchPlaceholder: 'Search commune...',
+            searchProductPlaceholder: 'Search product...',
+        },
     };
 
+    /**
+     * Create a filterable dropdown using DOM APIs only (NO innerHTML)
+     */
     function createFilterableDropdown(options, placeholder, className, id) {
-        // Create dropdown container
         const dropdown = document.createElement('div');
         dropdown.className = `filterable-dropdown ${className}`;
-        dropdown.setAttribute('data-dropdown-id', id);
-        
+        dropdown.dataset.dropdownId = id;
+
         // Selected display
         const selected = document.createElement('div');
         selected.className = 'dropdown-selected';
-        selected.setAttribute('data-value', '');
-        selected.textContent = sanitizeText(options[0]); // SAFE: First option (All)
-        
+        selected.dataset.value = '';
+
+        selected.textContent = sanitizeText(options[0]);
         const arrow = document.createElement('span');
         arrow.className = 'dropdown-arrow';
         arrow.textContent = '▼';
         selected.appendChild(arrow);
-        
+
         // Options container
         const optionsContainer = document.createElement('div');
         optionsContainer.className = 'dropdown-options';
         optionsContainer.style.display = 'none';
-        
+
         // Search input
         const searchInput = document.createElement('input');
         searchInput.type = 'text';
         searchInput.className = 'dropdown-search';
         searchInput.placeholder = placeholder;
         searchInput.autocomplete = 'off';
-        
+
         // Options list
         const optionsList = document.createElement('div');
         optionsList.className = 'options-list';
-        
-        // Create option elements (SANITIZED)
+
         options.forEach(option => {
             const optionDiv = document.createElement('div');
             optionDiv.className = 'dropdown-option';
-            const safeOption = sanitizeText(option); // SAFE: Sanitize admin-controlled data
-            optionDiv.setAttribute('data-value', safeOption);
+
+            const safeOption = sanitizeText(option);
+            optionDiv.dataset.value = safeOption;
             optionDiv.textContent = safeOption;
+
             optionsList.appendChild(optionDiv);
         });
-        
+
         optionsContainer.appendChild(searchInput);
         optionsContainer.appendChild(optionsList);
-        
+
         dropdown.appendChild(selected);
         dropdown.appendChild(optionsContainer);
-        
+
         return dropdown;
     }
 
+    /**
+     * Dropdown behavior (event delegation, no inline handlers)
+     */
     function initializeDropdownFunctionality() {
         const dropdowns = document.querySelectorAll('.filterable-dropdown');
-        
+
         dropdowns.forEach(dropdown => {
             const selected = dropdown.querySelector('.dropdown-selected');
             const options = dropdown.querySelector('.dropdown-options');
             const search = dropdown.querySelector('.dropdown-search');
             const allOptions = dropdown.querySelectorAll('.dropdown-option');
-            
-            // Toggle dropdown
-            selected.addEventListener('click', (e) => {
+
+            selected.addEventListener('click', e => {
                 e.stopPropagation();
                 closeAllDropdowns();
                 options.style.display = options.style.display === 'block' ? 'none' : 'block';
+
                 if (options.style.display === 'block') {
-                    search.focus();
                     search.value = '';
+                    search.focus();
                     filterOptions('');
                 }
             });
-            
-            // Filter options
-            function filterOptions(searchTerm) {
+
+            function filterOptions(term) {
+                const lower = term.toLowerCase();
                 allOptions.forEach(option => {
-                    const text = option.textContent.toLowerCase();
-                    if (text.includes(searchTerm.toLowerCase())) {
-                        option.style.display = 'block';
-                    } else {
-                        option.style.display = 'none';
-                    }
+                    option.style.display = option.textContent.toLowerCase().includes(lower)
+                        ? 'block'
+                        : 'none';
                 });
             }
-            
-            search.addEventListener('input', (e) => {
+
+            search.addEventListener('input', e => {
                 filterOptions(e.target.value);
             });
-            
-            // Select option
+
             allOptions.forEach(option => {
                 option.addEventListener('click', () => {
-                    const optionText = option.textContent;
-                    selected.textContent = optionText;
+                    selected.textContent = option.textContent;
+
                     const arrow = document.createElement('span');
                     arrow.className = 'dropdown-arrow';
                     arrow.textContent = '▼';
                     selected.appendChild(arrow);
-                    selected.setAttribute('data-value', option.getAttribute('data-value'));
+
+                    selected.dataset.value = option.dataset.value;
                     options.style.display = 'none';
                 });
             });
-            
-            options.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
+
+            options.addEventListener('click', e => e.stopPropagation());
         });
-        
+
         function closeAllDropdowns() {
-            document.querySelectorAll('.dropdown-options').forEach(options => {
-                options.style.display = 'none';
+            document.querySelectorAll('.dropdown-options').forEach(o => {
+                o.style.display = 'none';
             });
         }
-        
+
         document.addEventListener('click', closeAllDropdowns);
     }
 
+    /**
+     * Render search bar safely
+     */
     async function renderSearchBar() {
         const currentLang = getLanguage();
         const t = translations[currentLang];
-        
-        const currentQuery = document.getElementById('search-query')?.value || '';
-        const currentCommuneValue = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected')?.getAttribute('data-value') || '';
-        const currentProductValue = document.querySelector('[data-dropdown-id="product"] .dropdown-selected')?.getAttribute('data-value') || '';
-        
+
+        // Preserve state
+        const currentQuery =
+            document.getElementById('search-query')?.value || '';
+        const currentCommuneValue =
+            document.querySelector('[data-dropdown-id="commune"] .dropdown-selected')
+                ?.dataset.value || '';
+        const currentProductValue =
+            document.querySelector('[data-dropdown-id="product"] .dropdown-selected')
+                ?.dataset.value || '';
+
         const products = await fetchProducts();
         const communes = await fetchCommunes();
-        
-        const allCommunesText = currentLang === 'es' ? 'Todas Las Comunas' : 'All Communes';
-        const allProductsText = currentLang === 'es' ? 'Todos Los Productos' : 'All Products';
-        
-        // SAFE: Sanitize all product/commune names
-        const communeNames = [allCommunesText, ...communes.map(c => sanitizeText(c.name))];
-        const productNames = [allProductsText, ...products.map(p => sanitizeText(currentLang === 'es' ? p.name_es : p.name_en))];
 
-        // Create container
-        const searchFlexContainer = document.createElement('div');
-        searchFlexContainer.className = 'search-flex-container';
-        
-        // Create dropdowns
-        const placesDropdown = createFilterableDropdown(communeNames, t.searchPlaceholder, 'commune-dropdown', 'commune');
-        const productsDropdown = createFilterableDropdown(productNames, t.searchProductPlaceholder, 'product-dropdown', 'product');
-        
-        // Create search input
+        const allCommunesText =
+            currentLang === 'es' ? 'Todas Las Comunas' : 'All Communes';
+        const allProductsText =
+            currentLang === 'es' ? 'Todos Los Productos' : 'All Products';
+
+        const communeNames = [
+            allCommunesText,
+            ...communes.map(c => sanitizeText(c.name)),
+        ];
+
+        const productNames = [
+            allProductsText,
+            ...products.map(p =>
+                sanitizeText(currentLang === 'es' ? p.name_es : p.name_en)
+            ),
+        ];
+
+        const searchFlex = document.createElement('div');
+        searchFlex.className = 'search-flex-container';
+
+        const placesDropdown = createFilterableDropdown(
+            communeNames,
+            t.searchPlaceholder,
+            'commune-dropdown',
+            'commune'
+        );
+
+        const productsDropdown = createFilterableDropdown(
+            productNames,
+            t.searchProductPlaceholder,
+            'product-dropdown',
+            'product'
+        );
+
         const searchInputContainer = document.createElement('div');
         searchInputContainer.className = 'search-input-container';
+
         const searchInput = document.createElement('input');
         searchInput.type = 'text';
         searchInput.id = 'search-query';
         searchInput.placeholder = t.placeholder;
         searchInput.value = currentQuery;
         searchInputContainer.appendChild(searchInput);
-        
-        // Create search button
+
         const searchButton = document.createElement('button');
         searchButton.className = 'search-button';
         searchButton.id = 'search-btn';
         searchButton.textContent = t.button;
-        
-        // Assemble
-        searchFlexContainer.appendChild(placesDropdown);
-        searchFlexContainer.appendChild(productsDropdown);
-        searchFlexContainer.appendChild(searchInputContainer);
-        searchFlexContainer.appendChild(searchButton);
-        
-        searchContainer.textContent = ''; // Clear
-        searchContainer.appendChild(searchFlexContainer);
-        
+
+        searchFlex.appendChild(placesDropdown);
+        searchFlex.appendChild(productsDropdown);
+        searchFlex.appendChild(searchInputContainer);
+        searchFlex.appendChild(searchButton);
+
+        searchContainer.textContent = '';
+        searchContainer.appendChild(searchFlex);
+
         initializeDropdownFunctionality();
-        
-        // Restore previous selections
-        if (currentCommuneValue && currentCommuneValue !== allCommunesText) {
-            const communeDropdown = document.querySelector('[data-dropdown-id="commune"]');
-            if (communeDropdown && communeNames.includes(currentCommuneValue)) {
-                const selected = communeDropdown.querySelector('.dropdown-selected');
+
+        // Restore selections
+        if (currentCommuneValue && communeNames.includes(currentCommuneValue)) {
+            const selected =
+                document.querySelector('[data-dropdown-id="commune"] .dropdown-selected');
+            if (selected) {
                 selected.textContent = currentCommuneValue;
                 const arrow = document.createElement('span');
                 arrow.className = 'dropdown-arrow';
                 arrow.textContent = '▼';
                 selected.appendChild(arrow);
-                selected.setAttribute('data-value', currentCommuneValue);
+                selected.dataset.value = currentCommuneValue;
             }
         }
-        
-        if (currentProductValue && currentProductValue !== allProductsText) {
-            const productDropdown = document.querySelector('[data-dropdown-id="product"]');
-            if (productDropdown && productNames.includes(currentProductValue)) {
-                const selected = productDropdown.querySelector('.dropdown-selected');
+
+        if (currentProductValue && productNames.includes(currentProductValue)) {
+            const selected =
+                document.querySelector('[data-dropdown-id="product"] .dropdown-selected');
+            if (selected) {
                 selected.textContent = currentProductValue;
                 const arrow = document.createElement('span');
                 arrow.className = 'dropdown-arrow';
                 arrow.textContent = '▼';
                 selected.appendChild(arrow);
-                selected.setAttribute('data-value', currentProductValue);
+                selected.dataset.value = currentProductValue;
             }
         }
-        
-        // Add search functionality
-        document.getElementById('search-btn')?.addEventListener('click', () => {
+
+        searchButton.addEventListener('click', () => {
             document.dispatchEvent(new CustomEvent('searchTriggered'));
         });
-        
-        document.getElementById('search-query')?.addEventListener('keypress', (e) => {
+
+        searchInput.addEventListener('keypress', e => {
             if (e.key === 'Enter') {
                 document.dispatchEvent(new CustomEvent('searchTriggered'));
             }
         });
     }
 
-    document.addEventListener("languageChange", () => {
-        renderSearchBar();
-    });
+    document.addEventListener('languageChange', renderSearchBar);
 
     renderSearchBar();
 });
