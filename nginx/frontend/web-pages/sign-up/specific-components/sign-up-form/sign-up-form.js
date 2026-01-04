@@ -1,15 +1,12 @@
 import {
     getLanguage,
-    setLoginState,
-    setCSRFToken,
-    apiRequest  //  ADDED: Use apiRequest for correlation IDs
+    apiRequest
 } from '../../../0-shared-components/utils/shared-functions.js';
 
-//  ADDED: Import sanitizer
 import {
     sanitizeText,
     sanitizeEmail,
-    validateFormData
+    clearElement
 } from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -28,6 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
             error: 'Error al crear la cuenta',
             passwordMismatch: 'Las contraseñas no coinciden',
             weakPassword: 'La contraseña debe tener al menos 8 caracteres',
+            invalidEmail: 'Por favor ingresa un correo válido',
+            invalidName: 'Por favor ingresa tu nombre',
             loading: 'Creando cuenta...',
             success: 'Cuenta creada. Por favor verifica tu email.'
         },
@@ -43,6 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
             error: 'Error creating account',
             passwordMismatch: 'Passwords do not match',
             weakPassword: 'Password must be at least 8 characters',
+            invalidEmail: 'Please enter a valid email',
+            invalidName: 'Please enter your name',
             loading: 'Creating account...',
             success: 'Account created. Please verify your email.'
         }
@@ -52,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const lang = getLanguage();
         const t = translations[lang];
 
-        signupContainer.innerHTML = '';
+        clearElement(signupContainer);
 
         const container = document.createElement('div');
         container.className = 'signup-container';
@@ -78,6 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
         nameInput.placeholder = t.name;
         nameInput.required = true;
         nameInput.autocomplete = 'name';
+        nameInput.maxLength = 100;
 
         nameGroup.appendChild(nameInput);
         form.appendChild(nameGroup);
@@ -156,13 +158,12 @@ document.addEventListener('DOMContentLoaded', () => {
         form.appendChild(submitButton);
 
         // Login link
-        const loginLink = document.createElement('div');
-        loginLink.className = 'login-link';
-        loginLink.style.marginTop = '1rem';
-        loginLink.style.color = '#ffffff';
+        const loginSection = document.createElement('div');
+        loginSection.style.marginTop = '1rem';
+        loginSection.style.color = '#ffffff';
         
         const haveAccountText = document.createTextNode(t.haveAccount + ' ');
-        loginLink.appendChild(haveAccountText);
+        loginSection.appendChild(haveAccountText);
         
         const loginAnchor = document.createElement('a');
         loginAnchor.href = '/log-in/log-in.html';
@@ -170,10 +171,10 @@ document.addEventListener('DOMContentLoaded', () => {
         loginAnchor.style.color = '#FF9800';
         loginAnchor.style.textDecoration = 'none';
         
-        loginLink.appendChild(loginAnchor);
-        form.appendChild(loginLink);
+        loginSection.appendChild(loginAnchor);
+        form.appendChild(loginSection);
 
-        //  FIXED: Validate, sanitize, and use apiRequest
+        // Form submit handler
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorDiv.style.display = 'none';
@@ -195,25 +196,34 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            // Sanitize and validate name
+            const sanitizedName = sanitizeText(nameInput.value.trim());
+            if (!sanitizedName) {
+                errorDiv.textContent = t.invalidName;
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            // Sanitize and validate email
+            const sanitizedEmail = sanitizeEmail(emailInput.value);
+            if (!sanitizedEmail) {
+                errorDiv.textContent = t.invalidEmail;
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            submitButton.disabled = true;
+            submitButton.textContent = t.loading;
+
             try {
-                //  Validate and sanitize form data
-                const validatedData = validateFormData({
-                    name: nameInput.value,
-                    email: emailInput.value
-                });
-
-                submitButton.disabled = true;
-                submitButton.textContent = t.loading;
-
-                //  CHANGED: Use apiRequest instead of fetch
                 const response = await apiRequest('/api/v1/users/signup', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        name: validatedData.name,
-                        email: validatedData.email,
+                        name: sanitizedName,
+                        email: sanitizedEmail,
                         password: password  // Don't sanitize passwords
                     })
                 });
@@ -221,6 +231,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (response.ok) {
                     successDiv.textContent = t.success;
                     successDiv.style.display = 'block';
+                    
+                    // Disable form
+                    nameInput.disabled = true;
+                    emailInput.disabled = true;
+                    passwordInput.disabled = true;
+                    confirmInput.disabled = true;
                     
                     // Redirect to login after 2 seconds
                     setTimeout(() => {
@@ -233,7 +249,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (error) {
                 console.error('Signup error:', error);
-                //  FIXED: Sanitize error message before display
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
                 errorDiv.style.display = 'block';
                 submitButton.disabled = false;

@@ -2,17 +2,17 @@ import {
     getLanguage,
     apiRequest,
     fetchProducts,
-    fetchCommunes
+    fetchCommunes,
+    getCSRFToken
 } from '../../../0-shared-components/utils/shared-functions.js';
 
-//  ADDED: Import all necessary sanitizer functions
 import {
     sanitizeText,
     sanitizeEmail,
     sanitizePhone,
     sanitizeAPIResponse,
-    validateFormData,
-    buildDropdownOption
+    buildDropdownOption,
+    clearElement
 } from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -42,7 +42,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             viewCompany: 'Ver Mi Empresa',
             loginRequired: 'Debes iniciar sesión para publicar',
             loginHere: 'Iniciar sesión',
-            searchPlaceholder: 'Buscar...'
+            searchPlaceholder: 'Buscar...',
+            requiredField: 'Este campo es requerido',
+            invalidEmail: 'Correo electrónico inválido',
+            selectRequired: 'Por favor selecciona una opción'
         },
         en: {
             title: 'Publish My Company',
@@ -67,26 +70,29 @@ document.addEventListener('DOMContentLoaded', async () => {
             viewCompany: 'View My Company',
             loginRequired: 'You must log in to publish',
             loginHere: 'Log in',
-            searchPlaceholder: 'Search...'
+            searchPlaceholder: 'Search...',
+            requiredField: 'This field is required',
+            invalidEmail: 'Invalid email address',
+            selectRequired: 'Please select an option'
         }
     };
 
     async function checkExistingCompany() {
         try {
             const response = await apiRequest('/api/v1/companies/user/my-company');
-            if (response.ok) {
-                return true;
-            }
-            return false;
+            return response.ok;
         } catch (error) {
             return false;
         }
     }
 
-    function createFilterableDropdown(id, label, options, placeholder) {
+    function createFilterableDropdown(id, options, placeholder, searchPlaceholder) {
         const container = document.createElement('div');
         container.className = 'input-group';
         container.dataset.dropdownId = id;
+
+        const dropdownWrapper = document.createElement('div');
+        dropdownWrapper.className = 'filterable-dropdown';
 
         const selected = document.createElement('div');
         selected.className = 'dropdown-selected';
@@ -108,22 +114,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         const searchInput = document.createElement('input');
         searchInput.type = 'text';
         searchInput.className = 'dropdown-search';
-        searchInput.placeholder = translations[getLanguage()].searchPlaceholder;
+        searchInput.placeholder = searchPlaceholder;
         optionsContainer.appendChild(searchInput);
 
         const optionsList = document.createElement('div');
         optionsList.className = 'options-list';
 
-        //  Data already sanitized from fetchProducts/fetchCommunes
+        // Add options (data already sanitized)
+        const lang = getLanguage();
         options.forEach(option => {
-            const optionElement = buildDropdownOption(
-                option.uuid || option.name,
-                option.name_es || option.name_en || option.name
-            );
+            const displayName = option.name_es || option.name_en || option.name || '';
+            const value = option.name_es || option.name_en || option.name || option.uuid || '';
+            
+            const optionElement = buildDropdownOption(value, displayName);
             
             optionElement.addEventListener('click', () => {
-                selectedText.textContent = option.name_es || option.name_en || option.name;
-                selected.dataset.value = option.uuid || option.name;
+                selectedText.textContent = displayName;
+                selected.dataset.value = value;
                 optionsContainer.style.display = 'none';
                 container.classList.remove('dropdown-open');
             });
@@ -135,13 +142,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Search functionality
         searchInput.addEventListener('input', (e) => {
-            const searchTerm = sanitizeText(e.target.value.toLowerCase());
+            const searchTerm = e.target.value.toLowerCase();
             const allOptions = optionsList.querySelectorAll('.dropdown-option');
             
             allOptions.forEach(opt => {
                 const text = opt.textContent.toLowerCase();
                 opt.style.display = text.includes(searchTerm) ? 'block' : 'none';
             });
+        });
+
+        searchInput.addEventListener('click', (e) => {
+            e.stopPropagation();
         });
 
         // Toggle dropdown
@@ -162,22 +173,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 container.classList.add('dropdown-open');
                 searchInput.value = '';
                 searchInput.focus();
-                
-                // Reset all options visibility
                 optionsList.querySelectorAll('.dropdown-option').forEach(opt => {
                     opt.style.display = 'block';
                 });
             }
         });
 
-        // Close dropdown when clicking outside
-        document.addEventListener('click', () => {
-            optionsContainer.style.display = 'none';
-            container.classList.remove('dropdown-open');
-        });
-
-        container.appendChild(selected);
-        container.appendChild(optionsContainer);
+        dropdownWrapper.appendChild(selected);
+        dropdownWrapper.appendChild(optionsContainer);
+        container.appendChild(dropdownWrapper);
 
         return container;
     }
@@ -186,12 +190,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         const lang = getLanguage();
         const t = translations[lang];
 
-        publishSection.innerHTML = `<div class="loading" style="color: white; text-align: center; padding: 2rem;">${t.loading}</div>`;
+        // Show loading
+        clearElement(publishSection);
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading';
+        loadingDiv.style.color = 'white';
+        loadingDiv.style.textAlign = 'center';
+        loadingDiv.style.padding = '2rem';
+        loadingDiv.textContent = t.loading;
+        publishSection.appendChild(loadingDiv);
 
         // Check if user already has a company
         const hasCompany = await checkExistingCompany();
         if (hasCompany) {
-            publishSection.innerHTML = '';
+            clearElement(publishSection);
             
             const container = document.createElement('div');
             container.className = 'publish-container';
@@ -213,13 +225,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        //  CRITICAL FIX: Sanitize API responses
+        // Fetch and sanitize data
         const rawProducts = await fetchProducts();
         const rawCommunes = await fetchCommunes();
         const products = sanitizeAPIResponse(rawProducts);
         const communes = sanitizeAPIResponse(rawCommunes);
 
-        publishSection.innerHTML = '';
+        clearElement(publishSection);
 
         const container = document.createElement('div');
         container.className = 'publish-container';
@@ -242,6 +254,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         nameInput.className = 'publish-input';
         nameInput.placeholder = t.companyName;
         nameInput.required = true;
+        nameInput.maxLength = 100;
         nameGroup.appendChild(nameInput);
         form.appendChild(nameGroup);
 
@@ -278,24 +291,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         addressInput.className = 'publish-input';
         addressInput.placeholder = t.address;
         addressInput.required = true;
+        addressInput.maxLength = 200;
         addressGroup.appendChild(addressInput);
         form.appendChild(addressGroup);
 
         // Commune dropdown
         const communeDropdown = createFilterableDropdown(
             'commune',
-            t.commune,
             communes,
-            t.selectCommune
+            t.selectCommune,
+            t.searchPlaceholder
         );
         form.appendChild(communeDropdown);
 
         // Product dropdown
         const productDropdown = createFilterableDropdown(
             'product',
-            t.product,
             products,
-            t.selectProduct
+            t.selectProduct,
+            t.searchPlaceholder
         );
         form.appendChild(productDropdown);
 
@@ -307,6 +321,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         descTextarea.className = 'publish-textarea';
         descTextarea.placeholder = t.description;
         descTextarea.rows = 4;
+        descTextarea.maxLength = 500;
         descGroup.appendChild(descTextarea);
         form.appendChild(descGroup);
 
@@ -332,6 +347,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
+                // Sanitize filename for display only
                 fileLabel.textContent = sanitizeText(e.target.files[0].name);
                 fileLabel.classList.add('has-file');
             } else {
@@ -382,19 +398,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         buttonGroup.appendChild(cancelButton);
         form.appendChild(buttonGroup);
 
-        //  CRITICAL FIX: Validate, sanitize, and use apiRequest
+        // Form submit handler
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorDiv.style.display = 'none';
             successDiv.style.display = 'none';
 
             try {
-                // Get selected values
+                // Get selected values from dropdowns
                 const communeSelected = communeDropdown.querySelector('.dropdown-selected');
                 const productSelected = productDropdown.querySelector('.dropdown-selected');
                 
-                const communeValue = communeSelected.dataset.value;
-                const productValue = productSelected.dataset.value;
+                const communeValue = communeSelected ? communeSelected.dataset.value : '';
+                const productValue = productSelected ? productSelected.dataset.value : '';
 
                 if (!communeValue) {
                     throw new Error(t.selectCommune);
@@ -403,36 +419,58 @@ document.addEventListener('DOMContentLoaded', async () => {
                     throw new Error(t.selectProduct);
                 }
 
-                //  Validate and sanitize form data
-                const validatedData = validateFormData({
-                    name: nameInput.value,
-                    email: emailInput.value,
-                    phone: phoneInput.value,
-                    address: addressInput.value,
-                    description: descTextarea.value
-                });
+                // Validate email
+                const sanitizedEmail = sanitizeEmail(emailInput.value);
+                if (!sanitizedEmail) {
+                    throw new Error(t.invalidEmail);
+                }
+
+                // Sanitize other fields
+                const sanitizedName = sanitizeText(nameInput.value.trim());
+                const sanitizedPhone = sanitizePhone(phoneInput.value);
+                const sanitizedAddress = sanitizeText(addressInput.value.trim());
+                const sanitizedDescription = sanitizeText(descTextarea.value.trim());
+
+                if (!sanitizedName) {
+                    throw new Error(t.requiredField);
+                }
+
+                // Check if image is selected
+                if (!fileInput.files || fileInput.files.length === 0) {
+                    throw new Error(t.selectImage);
+                }
 
                 // Create FormData for multipart upload
                 const formData = new FormData();
-                formData.append('name', validatedData.name);
-                formData.append('email', validatedData.email);
-                formData.append('phone', validatedData.phone);
-                formData.append('address', validatedData.address);
-                formData.append('description_es', validatedData.description);
-                formData.append('commune_name', sanitizeText(communeValue));
-                formData.append('product_name', sanitizeText(productValue));
+                formData.append('name', sanitizedName);
+                formData.append('email', sanitizedEmail);
+                formData.append('phone', sanitizedPhone);
+                formData.append('address', sanitizedAddress);
+                formData.append('description_es', sanitizedDescription);
+                formData.append('commune_name', communeValue);
+                formData.append('product_name', productValue);
                 formData.append('lang', lang);
                 formData.append('image', fileInput.files[0]);
 
                 publishButton.disabled = true;
                 publishButton.textContent = t.publishing;
 
-                //  CHANGED: Use apiRequest instead of fetch
-                const response = await apiRequest('/api/v1/companies/', {
+                // Use apiRequest for correlation ID (but don't set Content-Type for FormData)
+                const csrfToken = getCSRFToken();
+                const correlationId = `fe_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
+                
+                const response = await fetch('/api/v1/companies/', {
                     method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'X-Correlation-ID': correlationId,
+                        ...(csrfToken && { 'X-CSRF-Token': csrfToken })
+                    },
                     body: formData
-                    // Note: Don't set Content-Type for FormData, browser handles it
                 });
+
+                console.log(`[${correlationId}] API Request: POST /api/v1/companies/`);
+                console.log(`[${correlationId}] Response: ${response.status} ${response.statusText}`);
 
                 if (response.ok) {
                     successDiv.textContent = t.success;
@@ -448,7 +486,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             } catch (error) {
                 console.error('Publish error:', error);
-                //  FIXED: Sanitize error message before display
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
                 errorDiv.style.display = 'block';
                 publishButton.disabled = false;
@@ -459,6 +496,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         container.appendChild(form);
         publishSection.appendChild(container);
     }
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.filterable-dropdown')) {
+            document.querySelectorAll('.dropdown-options').forEach(opt => {
+                opt.style.display = 'none';
+            });
+            document.querySelectorAll('.input-group').forEach(grp => {
+                grp.classList.remove('dropdown-open');
+            });
+        }
+    });
 
     await renderPublishForm();
 

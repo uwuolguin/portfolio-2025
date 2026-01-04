@@ -4,8 +4,6 @@
  * AND cross-tab state synchronization
  */
 
-import { sanitizeAPIResponse } from './sanitizer.js';
-
 // ============================================
 // STATE SYNCHRONIZATION SYSTEM
 // ============================================
@@ -139,6 +137,57 @@ export function setCSRFToken(token) {
 }
 
 // ============================================
+// CORRELATION ID GENERATION
+// ============================================
+
+function generateCorrelationId() {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 9);
+    return `fe_${timestamp}_${random}`;
+}
+
+// ============================================
+// API REQUEST WRAPPER (with correlation ID)
+// ============================================
+
+/**
+ * API Request wrapper with automatic correlation ID injection
+ * @param {string} url - API endpoint URL
+ * @param {Object} options - Fetch options
+ * @returns {Promise<Response>} Fetch response
+ */
+export async function apiRequest(url, options = {}) {
+    const correlationId = generateCorrelationId();
+    
+    const headers = {
+        ...options.headers,
+        'X-Correlation-ID': correlationId
+    };
+    
+    const csrfToken = getCSRFToken();
+    if (csrfToken && !url.includes('/public/')) {
+        headers['X-CSRF-Token'] = csrfToken;
+    }
+    
+    console.log(`[${correlationId}] API Request: ${options.method || 'GET'} ${url}`);
+    
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers,
+            credentials: 'include'
+        });
+        
+        console.log(`[${correlationId}] Response: ${response.status} ${response.statusText}`);
+        
+        return response;
+    } catch (error) {
+        console.error(`[${correlationId}] Request failed:`, error);
+        throw error;
+    }
+}
+
+// ============================================
 // AUTH STATUS CHECK (with state sync)
 // ============================================
 
@@ -149,9 +198,7 @@ export function setCSRFToken(token) {
  */
 export async function checkAuthStatus() {
     try {
-        const response = await apiRequest('/api/v1/users/me', {
-            credentials: 'include'
-        });
+        const response = await apiRequest('/api/v1/users/me');
         
         const isAuthenticated = response.ok;
         const currentState = getLoginState();
@@ -184,9 +231,7 @@ export async function checkAuthStatus() {
  */
 export async function checkCompanyStatus() {
     try {
-        const response = await apiRequest('/api/v1/companies/user/my-company', {
-            credentials: 'include'
-        });
+        const response = await apiRequest('/api/v1/companies/user/my-company');
         
         const hasCompany = response.ok;
         const currentState = getCompanyPublishState();
@@ -213,61 +258,14 @@ export async function checkCompanyStatus() {
 }
 
 // ============================================
-// API REQUEST WRAPPER (with correlation ID)
-// ============================================
-
-/**
- * API Request wrapper with automatic correlation ID injection
- * @param {string} url - API endpoint URL
- * @param {Object} options - Fetch options
- * @returns {Promise<Response>} Fetch response
- */
-export async function apiRequest(url, options = {}) {
-    const correlationId = generateCorrelationId();
-    
-    const headers = {
-        ...options.headers,
-        'X-Correlation-ID': correlationId
-    };
-    
-    const csrfToken = getCSRFToken();
-    if (csrfToken && !url.includes('/public/')) {
-        headers['X-CSRF-Token'] = csrfToken;
-    }
-    
-    console.log(`[${correlationId}] API Request: ${options.method || 'GET'} ${url}`);
-    
-    try {
-        const response = await fetch(url, {
-            ...options,
-            headers
-        });
-        
-        console.log(`[${correlationId}] Response: ${response.status} ${response.statusText}`);
-        
-        return response;
-    } catch (error) {
-        console.error(`[${correlationId}] Request failed:`, error);
-        throw error;
-    }
-}
-
-function generateCorrelationId() {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 9);
-    return `${timestamp}-${random}`;
-}
-
-// ============================================
-// DATA FETCHING (with sanitization)
+// DATA FETCHING (returns raw data - sanitize at usage point)
 // ============================================
 
 export async function fetchProducts() {
     try {
         const response = await apiRequest('/api/v1/products/');
         if (response.ok) {
-            const data = await response.json();
-            return sanitizeAPIResponse(data);
+            return await response.json();
         }
         return [];
     } catch (error) {
@@ -280,8 +278,7 @@ export async function fetchCommunes() {
     try {
         const response = await apiRequest('/api/v1/communes/');
         if (response.ok) {
-            const data = await response.json();
-            return sanitizeAPIResponse(data);
+            return await response.json();
         }
         return [];
     } catch (error) {
@@ -294,8 +291,7 @@ export async function fetchUserCompany() {
     try {
         const response = await apiRequest('/api/v1/companies/user/my-company');
         if (response.ok) {
-            const data = await response.json();
-            return sanitizeAPIResponse(data);
+            return await response.json();
         }
         return null;
     } catch (error) {
@@ -316,8 +312,7 @@ export async function searchCompanies(filters = {}) {
         const response = await apiRequest(url);
         
         if (response.ok) {
-            const data = await response.json();
-            return sanitizeAPIResponse(data);
+            return await response.json();
         }
         return [];
     } catch (error) {
@@ -365,21 +360,44 @@ export function requireAuth() {
     return true;
 }
 
+/**
+ * Show loading indicator (XSS-safe using DOM methods)
+ * @param {HTMLElement} element - Target element
+ * @param {string} message - Loading message
+ */
 export function showLoading(element, message = 'Cargando...') {
-    element.innerHTML = `
-        <div class="loading-spinner">
-            <div class="spinner"></div>
-            <p>${message}</p>
-        </div>
-    `;
+    element.textContent = '';
+    
+    const container = document.createElement('div');
+    container.className = 'loading-spinner';
+    
+    const spinner = document.createElement('div');
+    spinner.className = 'spinner';
+    
+    const text = document.createElement('p');
+    text.textContent = message;
+    
+    container.appendChild(spinner);
+    container.appendChild(text);
+    element.appendChild(container);
 }
 
+/**
+ * Show error message (XSS-safe using DOM methods)
+ * @param {HTMLElement} element - Target element
+ * @param {string} message - Error message
+ */
 export function showError(element, message = 'Error al cargar los datos') {
-    element.innerHTML = `
-        <div class="error-message">
-            <p>${message}</p>
-        </div>
-    `;
+    element.textContent = '';
+    
+    const container = document.createElement('div');
+    container.className = 'error-message';
+    
+    const text = document.createElement('p');
+    text.textContent = message;
+    
+    container.appendChild(text);
+    element.appendChild(container);
 }
 
 export function isValidEmail(email) {

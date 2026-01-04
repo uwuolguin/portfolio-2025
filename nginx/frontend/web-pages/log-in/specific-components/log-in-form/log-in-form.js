@@ -1,15 +1,14 @@
 import {
     getLanguage,
-    getLoginState,
     setLoginState,
     setCSRFToken,
-    apiRequest  //  ADDED: Use apiRequest for correlation IDs
+    apiRequest
 } from '../../../0-shared-components/utils/shared-functions.js';
 
-//  ADDED: Import sanitizer
 import {
     sanitizeText,
-    sanitizeEmail
+    sanitizeEmail,
+    clearElement
 } from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
             signUp: 'Regístrate aquí',
             error: 'Error al iniciar sesión',
             invalidCredentials: 'Correo o contraseña incorrectos',
+            invalidEmail: 'Por favor ingresa un correo válido',
             loading: 'Ingresando...',
             resendVerification: '¿No recibiste el email de verificación?',
             resendButton: 'Reenviar email',
@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
             signUp: 'Sign up here',
             error: 'Login error',
             invalidCredentials: 'Invalid email or password',
+            invalidEmail: 'Please enter a valid email',
             loading: 'Logging in...',
             resendVerification: 'Didn\'t receive verification email?',
             resendButton: 'Resend email',
@@ -50,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const lang = getLanguage();
         const t = translations[lang];
 
-        loginContainer.innerHTML = '';
+        clearElement(loginContainer);
 
         const container = document.createElement('div');
         container.className = 'login-container';
@@ -129,18 +130,36 @@ document.addEventListener('DOMContentLoaded', () => {
         resendSection.appendChild(resendButton);
         form.appendChild(resendSection);
 
-        //  FIXED: Sanitize email input and error messages
+        // Login link section
+        const signupSection = document.createElement('div');
+        signupSection.style.marginTop = '1rem';
+        signupSection.style.color = '#ffffff';
+        
+        const noAccountText = document.createTextNode(t.noAccount + ' ');
+        signupSection.appendChild(noAccountText);
+        
+        const signupLink = document.createElement('a');
+        signupLink.href = '/sign-up/sign-up.html';
+        signupLink.textContent = t.signUp;
+        signupLink.style.color = '#FF9800';
+        signupLink.style.textDecoration = 'none';
+        signupSection.appendChild(signupLink);
+        
+        form.appendChild(signupSection);
+
+        // Form submit handler
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorDiv.style.display = 'none';
+            errorDiv.style.color = '#ff6b6b';
             resendSection.style.display = 'none';
 
-            //  Sanitize email input
+            // Sanitize and validate email
             const email = sanitizeEmail(emailInput.value);
             const password = passwordInput.value; // Don't sanitize passwords
 
             if (!email) {
-                errorDiv.textContent = t.invalidCredentials;
+                errorDiv.textContent = t.invalidEmail;
                 errorDiv.style.display = 'block';
                 return;
             }
@@ -149,7 +168,6 @@ document.addEventListener('DOMContentLoaded', () => {
             submitButton.textContent = t.loading;
 
             try {
-                //  CHANGED: Use apiRequest instead of fetch
                 const response = await apiRequest('/api/v1/users/login', {
                     method: 'POST',
                     headers: {
@@ -168,10 +186,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     setLoginState(true);
                     window.location.href = '/front-page/front-page.html';
                 } else if (response.status === 403) {
-                    // Email not verified
-                    errorDiv.textContent = t.invalidCredentials;
+                    // Email not verified or forbidden
+                    const error = await response.json();
+                    errorDiv.textContent = sanitizeText(error.detail) || t.invalidCredentials;
                     errorDiv.style.display = 'block';
                     resendSection.style.display = 'block';
+                    submitButton.disabled = false;
+                    submitButton.textContent = t.loginButton;
                 } else {
                     const error = await response.json();
                     throw new Error(error.detail || t.invalidCredentials);
@@ -179,7 +200,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (error) {
                 console.error('Login error:', error);
-                //  FIXED: Sanitize error message before display
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
                 errorDiv.style.display = 'block';
                 submitButton.disabled = false;
@@ -190,19 +210,18 @@ document.addEventListener('DOMContentLoaded', () => {
         // Resend verification email handler
         resendButton.addEventListener('click', async () => {
             const email = sanitizeEmail(emailInput.value);
-            if (!email) return;
+            if (!email) {
+                errorDiv.textContent = t.invalidEmail;
+                errorDiv.style.display = 'block';
+                return;
+            }
 
             resendButton.disabled = true;
             resendButton.textContent = t.loading;
 
             try {
-                //  CHANGED: Use apiRequest instead of fetch
-                const response = await apiRequest('/api/v1/users/resend-verification', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ email })
+                const response = await apiRequest(`/api/v1/users/resend-verification?email=${encodeURIComponent(email)}`, {
+                    method: 'POST'
                 });
 
                 if (response.ok) {
@@ -211,11 +230,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     errorDiv.style.display = 'block';
                     resendSection.style.display = 'none';
                 } else {
-                    throw new Error(t.error);
+                    const error = await response.json();
+                    throw new Error(error.detail || t.error);
                 }
             } catch (error) {
                 console.error('Resend error:', error);
-                //  FIXED: Sanitize error message
                 errorDiv.style.color = '#ff6b6b';
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
                 errorDiv.style.display = 'block';

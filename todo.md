@@ -3,6 +3,7 @@ correlation id (frontend and backend)
 
 HTTP Error Handling (improves debugging + security)
 Whitespace Validation (data integrity)
+csrf admin case
 
 the steps above will break the app, so debug and everything will be fine
 

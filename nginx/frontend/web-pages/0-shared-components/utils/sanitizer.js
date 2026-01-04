@@ -1,7 +1,7 @@
 /**
  * XSS Protection Sanitizer Module
  * Provides comprehensive sanitization functions for user input
- *  Prevents XSS attacks across the application
+ * Prevents XSS attacks across the application
  */
 
 /**
@@ -55,8 +55,8 @@ export function sanitizeEmail(email) {
         return '';
     }
     
-    // Additional sanitization - remove any HTML entities
-    return sanitizeText(cleaned);
+    // Return cleaned email (no HTML escaping needed for valid emails)
+    return cleaned;
 }
 
 /**
@@ -69,11 +69,8 @@ export function sanitizePhone(phone) {
         return '';
     }
     
-    // Remove HTML tags first
-    let sanitized = sanitizeText(phone);
-    
     // Allow only numbers, spaces, parentheses, hyphens, and plus sign
-    sanitized = sanitized.replace(/[^0-9\s\-\(\)\+]/g, '');
+    let sanitized = phone.replace(/[^0-9\s\-\(\)\+]/g, '');
     
     return sanitized.trim();
 }
@@ -93,6 +90,15 @@ export function sanitizeURL(url) {
     
     // Only allow http, https, and mailto protocols
     const allowedProtocols = /^(https?:\/\/|mailto:)/i;
+    
+    // Also allow relative URLs starting with /
+    if (cleaned.startsWith('/')) {
+        // Block javascript: and data: in relative URLs
+        if (/^\/.*?(javascript|data):/i.test(cleaned)) {
+            return '';
+        }
+        return cleaned;
+    }
     
     if (!allowedProtocols.test(cleaned)) {
         return '';
@@ -151,13 +157,13 @@ export function sanitizeAPIResponse(data) {
     if (typeof data === 'object') {
         const sanitized = {};
         for (const key in data) {
-            if (data.hasOwnProperty(key)) {
+            if (Object.prototype.hasOwnProperty.call(data, key)) {
                 // Special handling for specific fields
-                if (key === 'email') {
+                if (key === 'email' || key === 'user_email' || key === 'company_email') {
                     sanitized[key] = sanitizeEmail(data[key]);
                 } else if (key === 'phone') {
                     sanitized[key] = sanitizePhone(data[key]);
-                } else if (key.includes('url') || key.includes('link')) {
+                } else if (key.includes('url') || key.includes('link') || key === 'img_url' || key === 'image_url') {
                     sanitized[key] = sanitizeURL(data[key]);
                 } else {
                     sanitized[key] = sanitizeAPIResponse(data[key]);
@@ -172,7 +178,7 @@ export function sanitizeAPIResponse(data) {
 }
 
 /**
- *  NEW: Validate and sanitize form data comprehensively
+ * Validate and sanitize form data comprehensively
  * @param {Object} formData - Object containing form fields
  * @returns {Object} Validated and sanitized form data
  * @throws {Error} If validation fails
@@ -184,16 +190,13 @@ export function validateFormData(formData) {
         switch (key) {
             case 'email':
                 validated[key] = sanitizeEmail(value);
-                if (!validated[key]) {
+                if (!validated[key] && value) {
                     throw new Error('Invalid email format');
                 }
                 break;
                 
             case 'phone':
                 validated[key] = sanitizePhone(value);
-                if (!validated[key]) {
-                    throw new Error('Invalid phone number');
-                }
                 break;
                 
             case 'name':
@@ -208,7 +211,7 @@ export function validateFormData(formData) {
                 
             default:
                 // Default sanitization for other text fields
-                validated[key] = sanitizeText(value);
+                validated[key] = typeof value === 'string' ? sanitizeText(value) : value;
         }
     }
     
@@ -216,7 +219,7 @@ export function validateFormData(formData) {
 }
 
 /**
- *  NEW: Build safe dropdown option element
+ * Build safe dropdown option element
  * @param {string} value - Option value
  * @param {string} text - Option display text
  * @returns {HTMLElement} Safe dropdown option element
@@ -224,62 +227,105 @@ export function validateFormData(formData) {
 export function buildDropdownOption(value, text) {
     const option = document.createElement('div');
     option.className = 'dropdown-option';
-    option.dataset.value = sanitizeText(value);
-    option.textContent = sanitizeText(text); // textContent is XSS-safe
+    option.dataset.value = sanitizeText(String(value || ''));
+    option.textContent = sanitizeText(String(text || '')); // textContent is XSS-safe
     return option;
 }
 
 /**
- *  NEW: Build safe business card element
- * @param {Object} company - Company data object
+ * Build safe business card element for search results
+ * Matches the API response structure from /api/v1/companies/search
+ * @param {Object} company - Company data object from search API
+ * @param {string} lang - Language ('es' or 'en')
  * @returns {HTMLElement} Safe business card element
  */
-export function buildBusinessCard(company) {
+export function buildBusinessCard(company, lang = 'es') {
     const card = document.createElement('div');
     card.className = 'business-card';
     
-    // Image (if exists)
-    if (company.image_url) {
+    // Image section
+    const pictureDiv = document.createElement('div');
+    pictureDiv.className = 'card-picture';
+    
+    const imgUrl = company.img_url || company.image_url;
+    if (imgUrl) {
         const img = document.createElement('img');
-        img.className = 'business-image';
-        img.src = sanitizeURL(company.image_url);
-        img.alt = sanitizeText(company.name);
+        img.src = sanitizeURL(imgUrl);
+        img.alt = sanitizeText(company.name || 'Company image');
         img.loading = 'lazy';
-        card.appendChild(img);
+        img.onerror = function() {
+            this.style.display = 'none';
+        };
+        pictureDiv.appendChild(img);
     }
+    card.appendChild(pictureDiv);
+    
+    // Details section
+    const detailsDiv = document.createElement('div');
+    detailsDiv.className = 'card-details';
     
     // Company name
     const name = document.createElement('h3');
     name.className = 'business-name';
-    name.textContent = sanitizeText(company.name);
-    card.appendChild(name);
+    name.textContent = sanitizeText(company.name || '');
+    detailsDiv.appendChild(name);
+    
+    // Description
+    const description = document.createElement('p');
+    description.className = 'concise-description';
+    description.textContent = sanitizeText(company.description || '');
+    detailsDiv.appendChild(description);
     
     // Product
-    const product = document.createElement('p');
-    product.className = 'business-product';
-    product.textContent = sanitizeText(company.product);
-    card.appendChild(product);
+    if (company.product_name) {
+        const product = document.createElement('p');
+        product.className = 'product';
+        product.textContent = sanitizeText(company.product_name);
+        detailsDiv.appendChild(product);
+    }
     
-    // Commune
-    const commune = document.createElement('p');
-    commune.className = 'business-commune';
-    commune.textContent = sanitizeText(company.commune);
-    card.appendChild(commune);
+    // Location/Commune
+    if (company.commune_name) {
+        const location = document.createElement('p');
+        location.className = 'location';
+        location.textContent = sanitizeText(company.commune_name);
+        detailsDiv.appendChild(location);
+    }
     
-    // Email
-    const email = document.createElement('p');
-    email.className = 'business-email';
-    const emailLink = document.createElement('a');
-    emailLink.href = `mailto:${sanitizeEmail(company.email)}`;
-    emailLink.textContent = sanitizeEmail(company.email);
-    email.appendChild(emailLink);
-    card.appendChild(email);
+    // Address
+    if (company.address) {
+        const address = document.createElement('p');
+        address.className = 'location';
+        address.textContent = sanitizeText(company.address);
+        detailsDiv.appendChild(address);
+    }
     
     // Phone
-    const phone = document.createElement('p');
-    phone.className = 'business-phone';
-    phone.textContent = sanitizePhone(company.phone);
-    card.appendChild(phone);
+    if (company.phone) {
+        const phone = document.createElement('p');
+        phone.className = 'phone';
+        phone.textContent = sanitizePhone(company.phone);
+        detailsDiv.appendChild(phone);
+    }
+    
+    // Email
+    if (company.email) {
+        const emailP = document.createElement('p');
+        emailP.className = 'mail';
+        
+        const emailLink = document.createElement('a');
+        const sanitizedEmail = sanitizeEmail(company.email);
+        if (sanitizedEmail) {
+            emailLink.href = `mailto:${sanitizedEmail}`;
+            emailLink.textContent = sanitizedEmail;
+        } else {
+            emailLink.textContent = sanitizeText(company.email);
+        }
+        emailP.appendChild(emailLink);
+        detailsDiv.appendChild(emailP);
+    }
+    
+    card.appendChild(detailsDiv);
     
     return card;
 }
@@ -290,7 +336,7 @@ export function buildBusinessCard(company) {
  * @returns {Text} Text node
  */
 export function createSafeTextNode(text) {
-    return document.createTextNode(sanitizeText(text));
+    return document.createTextNode(String(text || ''));
 }
 
 /**
@@ -299,7 +345,7 @@ export function createSafeTextNode(text) {
  * @param {string} text - Text to set
  */
 export function setSafeText(element, text) {
-    element.textContent = sanitizeText(text);
+    element.textContent = String(text || '');
 }
 
 /**
@@ -309,6 +355,14 @@ export function setSafeText(element, text) {
  */
 export function setSafeHTML(element, html) {
     element.innerHTML = sanitizeHTML(html);
+}
+
+/**
+ * Clear element content safely
+ * @param {HTMLElement} element - Target element
+ */
+export function clearElement(element) {
+    element.textContent = '';
 }
 
 // Export all functions as default object as well
@@ -324,5 +378,6 @@ export default {
     buildBusinessCard,
     createSafeTextNode,
     setSafeText,
-    setSafeHTML
+    setSafeHTML,
+    clearElement
 };

@@ -1,14 +1,12 @@
 import {
     getLanguage,
-    getLoginState,
-    setLoginState,
-    setCSRFToken
+    apiRequest
 } from '../../../0-shared-components/utils/shared-functions.js';
 
 import {
     sanitizeAPIResponse,
     buildBusinessCard,
-    sanitizeText
+    clearElement
 } from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -37,7 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultsPerPage = 20;
 
     function clearResults() {
-        resultsContainer.textContent = '';
+        clearElement(resultsContainer);
     }
 
     function showLoading() {
@@ -79,26 +77,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const params = new URLSearchParams({
                 lang: getLanguage(),
-                limit: resultsPerPage,
-                offset: (page - 1) * resultsPerPage
+                limit: resultsPerPage.toString(),
+                offset: ((page - 1) * resultsPerPage).toString()
             });
 
             if (query && query.trim()) {
-                params.append('q', sanitizeText(query));
+                params.append('q', query.trim());
             }
             if (commune && commune !== 'Todas Las Comunas' && commune !== 'All Communes') {
-                params.append('commune', sanitizeText(commune));
+                params.append('commune', commune);
             }
             if (product && product !== 'Todos Los Productos' && product !== 'All Products') {
-                params.append('product', sanitizeText(product));
+                params.append('product', product);
             }
 
-            const response = await fetch(`/api/v1/companies/search?${params}`, {
-                credentials: 'include',
-                headers: {
-                    'X-Correlation-ID': `search_${Date.now()}`
-                }
-            });
+            const response = await apiRequest(`/api/v1/companies/search?${params}`);
 
             if (!response.ok) {
                 throw new Error('Search failed');
@@ -106,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const rawData = await response.json();
             
+            // Sanitize all API response data
             const companies = sanitizeAPIResponse(rawData);
 
             displayResults(companies, page);
@@ -131,6 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
         grid.className = 'results-grid';
 
         companies.forEach(company => {
+            // buildBusinessCard handles all sanitization internally
             const card = buildBusinessCard(company, lang);
             grid.appendChild(card);
         });
@@ -143,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function createPagination(currentPage) {
+    function createPagination(page) {
         const lang = getLanguage();
         const t = translations[lang];
 
@@ -151,14 +146,14 @@ document.addEventListener('DOMContentLoaded', () => {
         paginationContainer.className = 'pagination-container';
 
         // Previous button
-        if (currentPage > 1) {
+        if (page > 1) {
             const prevLink = document.createElement('a');
             prevLink.href = '#';
             prevLink.className = 'page-link';
             prevLink.textContent = t.previous;
             prevLink.addEventListener('click', (e) => {
                 e.preventDefault();
-                performSearch(currentPage - 1);
+                performSearch(page - 1);
             });
             paginationContainer.appendChild(prevLink);
         }
@@ -166,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Current page indicator
         const pageInfo = document.createElement('span');
         pageInfo.className = 'page-info';
-        pageInfo.textContent = `${t.page} ${currentPage}`;
+        pageInfo.textContent = `${t.page} ${page}`;
         paginationContainer.appendChild(pageInfo);
 
         // Next button
@@ -176,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         nextLink.textContent = t.next;
         nextLink.addEventListener('click', (e) => {
             e.preventDefault();
-            performSearch(currentPage + 1);
+            performSearch(page + 1);
         });
         paginationContainer.appendChild(nextLink);
 
@@ -186,13 +181,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function performSearch(page = 1) {
         currentPage = page;
 
-        const query = document.getElementById('search-query')?.value || '';
+        const searchInput = document.getElementById('search-query');
+        const query = searchInput ? searchInput.value : '';
         
         const communeDropdown = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected');
-        const commune = communeDropdown?.dataset.value || '';
+        const commune = communeDropdown ? communeDropdown.dataset.value : '';
         
         const productDropdown = document.querySelector('[data-dropdown-id="product"] .dropdown-selected');
-        const product = productDropdown?.dataset.value || '';
+        const product = productDropdown ? productDropdown.dataset.value : '';
 
         fetchResults(query, commune, product, page);
     }
@@ -202,13 +198,11 @@ document.addEventListener('DOMContentLoaded', () => {
         performSearch(1);
     });
 
-    // Initial load - show all companies
-    document.addEventListener('DOMContentLoaded', () => {
-        performSearch(1);
-    });
-
     // Re-render on language change
     document.addEventListener('languageChange', () => {
         performSearch(currentPage);
     });
+
+    // Initial load - show all companies
+    performSearch(1);
 });
