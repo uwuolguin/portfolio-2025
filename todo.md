@@ -1,8 +1,6 @@
-csrf admin issues
 HTTP Error Handling (improves debugging + security)
 Whitespace Validation (data integrity)
 Frontend State Sync (UX improvement)
-check correlation id is being sent from ui to backend
 
 check the ui is properly using all endpoints
 

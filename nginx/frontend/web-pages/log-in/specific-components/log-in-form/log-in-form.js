@@ -3,12 +3,17 @@ import {
     getLoginState,
     setLoginState,
     setCSRFToken,
-    sanitizeText,      //  ADDED
-    sanitizeEmail      //  ADDED
+    apiRequest  //  ADDED: Use apiRequest for correlation IDs
 } from '../../../0-shared-components/utils/shared-functions.js';
 
+//  ADDED: Import sanitizer
+import {
+    sanitizeText,
+    sanitizeEmail
+} from '../../../0-shared-components/utils/sanitizer.js';
+
 document.addEventListener('DOMContentLoaded', () => {
-    const loginContainer = document.getElementById('login-form-container');
+    const loginContainer = document.getElementById('login-section');
 
     const translations = {
         es: {
@@ -20,7 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
             signUp: 'Regístrate aquí',
             error: 'Error al iniciar sesión',
             invalidCredentials: 'Correo o contraseña incorrectos',
-            loading: 'Ingresando...'
+            loading: 'Ingresando...',
+            resendVerification: '¿No recibiste el email de verificación?',
+            resendButton: 'Reenviar email',
+            verificationSent: 'Email de verificación enviado'
         },
         en: {
             title: 'Log In',
@@ -31,7 +39,10 @@ document.addEventListener('DOMContentLoaded', () => {
             signUp: 'Sign up here',
             error: 'Login error',
             invalidCredentials: 'Invalid email or password',
-            loading: 'Logging in...'
+            loading: 'Logging in...',
+            resendVerification: 'Didn\'t receive verification email?',
+            resendButton: 'Resend email',
+            verificationSent: 'Verification email sent'
         }
     };
 
@@ -41,49 +52,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
         loginContainer.innerHTML = '';
 
+        const container = document.createElement('div');
+        container.className = 'login-container';
+
+        const title = document.createElement('h2');
+        title.className = 'login-title';
+        title.textContent = t.title;
+        container.appendChild(title);
+
         const form = document.createElement('form');
         form.className = 'login-form';
         form.id = 'login-form';
 
-        const title = document.createElement('h2');
-        title.textContent = t.title;
-        form.appendChild(title);
-
         // Email field
         const emailGroup = document.createElement('div');
-        emailGroup.className = 'form-group';
-
-        const emailLabel = document.createElement('label');
-        emailLabel.textContent = t.email;
-        emailLabel.setAttribute('for', 'login-email');
+        emailGroup.className = 'input-group';
 
         const emailInput = document.createElement('input');
         emailInput.type = 'email';
         emailInput.id = 'login-email';
         emailInput.name = 'email';
+        emailInput.className = 'login-input';
+        emailInput.placeholder = t.email;
         emailInput.required = true;
         emailInput.autocomplete = 'email';
 
-        emailGroup.appendChild(emailLabel);
         emailGroup.appendChild(emailInput);
         form.appendChild(emailGroup);
 
         // Password field
         const passwordGroup = document.createElement('div');
-        passwordGroup.className = 'form-group';
-
-        const passwordLabel = document.createElement('label');
-        passwordLabel.textContent = t.password;
-        passwordLabel.setAttribute('for', 'login-password');
+        passwordGroup.className = 'input-group';
 
         const passwordInput = document.createElement('input');
         passwordInput.type = 'password';
         passwordInput.id = 'login-password';
         passwordInput.name = 'password';
+        passwordInput.className = 'login-input';
+        passwordInput.placeholder = t.password;
         passwordInput.required = true;
         passwordInput.autocomplete = 'current-password';
 
-        passwordGroup.appendChild(passwordLabel);
         passwordGroup.appendChild(passwordInput);
         form.appendChild(passwordGroup);
 
@@ -91,49 +100,61 @@ document.addEventListener('DOMContentLoaded', () => {
         const errorDiv = document.createElement('div');
         errorDiv.className = 'error-message';
         errorDiv.style.display = 'none';
+        errorDiv.style.color = '#ff6b6b';
+        errorDiv.style.marginBottom = '1rem';
         form.appendChild(errorDiv);
 
         // Submit button
         const submitButton = document.createElement('button');
         submitButton.type = 'submit';
-        submitButton.className = 'btn-primary';
+        submitButton.className = 'login-button';
         submitButton.textContent = t.loginButton;
         form.appendChild(submitButton);
 
-        // Sign up link
-        const signupLink = document.createElement('div');
-        signupLink.className = 'signup-link';
-        
-        const noAccountText = document.createElement('span');
-        noAccountText.textContent = t.noAccount + ' ';
-        
-        const signupAnchor = document.createElement('a');
-        signupAnchor.href = '/sign-up';
-        signupAnchor.textContent = t.signUp;
-        
-        signupLink.appendChild(noAccountText);
-        signupLink.appendChild(signupAnchor);
-        form.appendChild(signupLink);
+        // Resend verification section
+        const resendSection = document.createElement('div');
+        resendSection.className = 'resend-verification-section';
+        resendSection.style.display = 'none';
 
-        //  CRITICAL FIX: Sanitize inputs before submission
+        const resendText = document.createElement('p');
+        resendText.className = 'resend-verification-text';
+        resendText.textContent = t.resendVerification;
+
+        const resendButton = document.createElement('button');
+        resendButton.type = 'button';
+        resendButton.className = 'resend-verification-button';
+        resendButton.textContent = t.resendButton;
+
+        resendSection.appendChild(resendText);
+        resendSection.appendChild(resendButton);
+        form.appendChild(resendSection);
+
+        //  FIXED: Sanitize email input and error messages
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorDiv.style.display = 'none';
+            resendSection.style.display = 'none';
 
             //  Sanitize email input
             const email = sanitizeEmail(emailInput.value);
-            const password = passwordInput.value; // Don't sanitize passwords - preserve exact input
+            const password = passwordInput.value; // Don't sanitize passwords
+
+            if (!email) {
+                errorDiv.textContent = t.invalidCredentials;
+                errorDiv.style.display = 'block';
+                return;
+            }
 
             submitButton.disabled = true;
             submitButton.textContent = t.loading;
 
             try {
-                const response = await fetch('/api/v1/auth/login', {
+                //  CHANGED: Use apiRequest instead of fetch
+                const response = await apiRequest('/api/v1/users/login', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    credentials: 'include',
                     body: JSON.stringify({ email, password })
                 });
 
@@ -145,22 +166,67 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     
                     setLoginState(true);
-                    window.location.href = '/profile-view';
+                    window.location.href = '/front-page/front-page.html';
+                } else if (response.status === 403) {
+                    // Email not verified
+                    errorDiv.textContent = t.invalidCredentials;
+                    errorDiv.style.display = 'block';
+                    resendSection.style.display = 'block';
                 } else {
                     const error = await response.json();
-                    throw new Error(error.error || t.invalidCredentials);
+                    throw new Error(error.detail || t.invalidCredentials);
                 }
 
             } catch (error) {
                 console.error('Login error:', error);
-                errorDiv.textContent = error.message || t.error;
+                //  FIXED: Sanitize error message before display
+                errorDiv.textContent = sanitizeText(error.message) || t.error;
                 errorDiv.style.display = 'block';
                 submitButton.disabled = false;
                 submitButton.textContent = t.loginButton;
             }
         });
 
-        loginContainer.appendChild(form);
+        // Resend verification email handler
+        resendButton.addEventListener('click', async () => {
+            const email = sanitizeEmail(emailInput.value);
+            if (!email) return;
+
+            resendButton.disabled = true;
+            resendButton.textContent = t.loading;
+
+            try {
+                //  CHANGED: Use apiRequest instead of fetch
+                const response = await apiRequest('/api/v1/users/resend-verification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email })
+                });
+
+                if (response.ok) {
+                    errorDiv.style.color = '#4CAF50';
+                    errorDiv.textContent = t.verificationSent;
+                    errorDiv.style.display = 'block';
+                    resendSection.style.display = 'none';
+                } else {
+                    throw new Error(t.error);
+                }
+            } catch (error) {
+                console.error('Resend error:', error);
+                //  FIXED: Sanitize error message
+                errorDiv.style.color = '#ff6b6b';
+                errorDiv.textContent = sanitizeText(error.message) || t.error;
+                errorDiv.style.display = 'block';
+            } finally {
+                resendButton.disabled = false;
+                resendButton.textContent = t.resendButton;
+            }
+        });
+
+        container.appendChild(form);
+        loginContainer.appendChild(container);
     }
 
     renderLoginForm();

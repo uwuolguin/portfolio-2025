@@ -1,413 +1,328 @@
 /**
- * XSS Protection Utilities - PRODUCTION GRADE
- * 
- * Security Principles:
- * 1. Prefer textContent over innerHTML (no HTML parsing)
- * 2. Use DOMPurify ONLY when HTML is absolutely needed
- * 3. Validate URLs strictly (no javascript:, data:, etc)
- * 4. Default to stripping, not escaping
- * 5. Sanitize ALL external data (API responses, user input, localStorage)
- * 
- * @version 2.0.0
- * @author Proveo Security Team
- */
-
-// Lazy-load DOMPurify (only when needed)
-let DOMPurify = null;
-
-async function ensureDOMPurify() {
-    if (DOMPurify) return DOMPurify;
-    
-    if (typeof window.DOMPurify !== 'undefined') {
-        DOMPurify = window.DOMPurify;
-        return DOMPurify;
-    }
-    
-    throw new Error('DOMPurify not loaded. Include purify.min.js in <head>');
-}
-
-/**
- * ============================================================================
- * CORE SANITIZERS (Use these for 99% of cases)
- * ============================================================================
+ * XSS Protection Sanitizer Module
+ * Provides comprehensive sanitization functions for user input
+ *  Prevents XSS attacks across the application
  */
 
 /**
- * SAFE: Use textContent (no HTML interpretation)
- * This is the DEFAULT for ALL user input
- * 
- * @param {*} input - Any input value
- * @returns {string} - Safe text string
+ * Sanitize plain text by removing HTML tags and dangerous characters
+ * @param {string} text - Input text to sanitize
+ * @returns {string} Sanitized text safe for display
  */
-export function sanitizeText(input) {
-    if (input === null || input === undefined) return '';
-    if (typeof input !== 'string') return String(input);
-    
-    // Remove null bytes (potential bypass)
-    return input.replace(/\x00/g, '').trim();
-}
-
-/**
- * URL Sanitizer - STRICT validation
- * Only allows http/https, blocks javascript:, data:, etc
- * 
- * @param {string} url - URL to sanitize
- * @returns {string} - Safe URL or empty string
- */
-export function sanitizeURL(url) {
-    if (!url || typeof url !== 'string') return '';
-    
-    url = url.replace(/\x00/g, '').trim();
-    
-    // Block dangerous URL protocols immediately
-    if (/^(javascript|data|vbscript|file|about):/i.test(url)) {
-        console.warn('Blocked dangerous URL protocol:', url.substring(0, 50));
+export function sanitizeText(text) {
+    if (typeof text !== 'string') {
         return '';
     }
     
-    // Validate URL structure
-    try {
-        const parsed = new URL(url, window.location.origin);
-        
-        // ONLY allow http/https
-        if (!['http:', 'https:'].includes(parsed.protocol)) {
-            console.warn('Blocked non-HTTP protocol:', parsed.protocol);
-            return '';
-        }
-        
-        return parsed.href;
-    } catch (e) {
-        console.warn('Invalid URL:', url.substring(0, 50));
-        return '';
-    }
+    // Remove HTML tags
+    let sanitized = text.replace(/<[^>]*>/g, '');
+    
+    // Escape special HTML characters
+    const entityMap = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+        '/': '&#x2F;',
+        '`': '&#x60;',
+        '=': '&#x3D;'
+    };
+    
+    sanitized = sanitized.replace(/[&<>"'`=\/]/g, (char) => entityMap[char]);
+    
+    return sanitized;
 }
 
 /**
- * Email Sanitizer - Strict validation
- * 
- * @param {string} email - Email to sanitize
- * @returns {string} - Safe email or empty string
+ * Sanitize and validate email addresses
+ * @param {string} email - Email address to sanitize
+ * @returns {string} Sanitized email or empty string if invalid
  */
 export function sanitizeEmail(email) {
-    if (!email || typeof email !== 'string') return '';
-    
-    email = sanitizeText(email);
-    
-    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-    
-    if (!emailRegex.test(email)) {
-        console.warn('Invalid email format:', email);
+    if (typeof email !== 'string') {
         return '';
     }
     
-    return email;
-}
-
-/**
- * Phone Sanitizer
- * 
- * @param {string} phone - Phone number to sanitize
- * @returns {string} - Sanitized phone
- */
-export function sanitizePhone(phone) {
-    if (!phone || typeof phone !== 'string') return '';
-    return phone.replace(/[^0-9+\s\-()]/g, '').trim();
-}
-
-/**
- * ============================================================================
- * HTML SANITIZER (Use sparingly, only for rich text)
- * ============================================================================
- */
-
-/**
- * UNSAFE BUT SOMETIMES NEEDED: Allow limited HTML
- * Only use when you NEED to preserve formatting (descriptions, rich text)
- * 
- * @param {string} html - HTML to sanitize
- * @returns {string} - Sanitized HTML
- */
-export function sanitizeHTML(html) {
-    if (!html) return '';
+    // Basic email validation regex
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     
-    if (!DOMPurify) {
-        console.error('DOMPurify not loaded - falling back to text only');
-        return sanitizeText(html);
+    // Remove whitespace and convert to lowercase
+    const cleaned = email.trim().toLowerCase();
+    
+    // Validate format
+    if (!emailRegex.test(cleaned)) {
+        return '';
     }
     
-    // STRICT: Only allow minimal formatting tags
-    return DOMPurify.sanitize(html, {
-        ALLOWED_TAGS: ['b', 'i', 'u', 'strong', 'em', 'br', 'p'],
-        ALLOWED_ATTR: [],  // NO attributes allowed
-        KEEP_CONTENT: true,
-        RETURN_DOM: false,
-        RETURN_DOM_FRAGMENT: false,
-    });
+    // Additional sanitization - remove any HTML entities
+    return sanitizeText(cleaned);
 }
 
 /**
- * ============================================================================
- * DOM BUILDERS (PREFERRED: Build elements safely)
- * ============================================================================
+ * Sanitize phone numbers
+ * @param {string} phone - Phone number to sanitize
+ * @returns {string} Sanitized phone number
  */
+export function sanitizePhone(phone) {
+    if (typeof phone !== 'string') {
+        return '';
+    }
+    
+    // Remove HTML tags first
+    let sanitized = sanitizeText(phone);
+    
+    // Allow only numbers, spaces, parentheses, hyphens, and plus sign
+    sanitized = sanitized.replace(/[^0-9\s\-\(\)\+]/g, '');
+    
+    return sanitized.trim();
+}
 
 /**
- * PREFERRED: Create DOM elements safely using textContent
- * NO HTML parsing - completely XSS-proof
- * 
- * @param {string} tag - HTML tag name
- * @param {string} text - Text content
- * @param {Object} attrs - Attributes to set
- * @returns {HTMLElement} - Safe DOM element
+ * Sanitize URLs and validate them
+ * @param {string} url - URL to sanitize
+ * @returns {string} Sanitized URL or empty string if invalid
  */
-export function createSafeElement(tag, text = '', attrs = {}) {
-    const element = document.createElement(tag);
+export function sanitizeURL(url) {
+    if (typeof url !== 'string') {
+        return '';
+    }
     
-    // textContent is XSS-safe (no HTML interpretation)
-    element.textContent = sanitizeText(text);
+    // Remove whitespace
+    const cleaned = url.trim();
     
-    // Set attributes safely
-    for (const [key, value] of Object.entries(attrs)) {
-        if (key === 'href' || key === 'src') {
-            const safeURL = sanitizeURL(value);
-            if (safeURL) {
-                element.setAttribute(key, safeURL);
+    // Only allow http, https, and mailto protocols
+    const allowedProtocols = /^(https?:\/\/|mailto:)/i;
+    
+    if (!allowedProtocols.test(cleaned)) {
+        return '';
+    }
+    
+    // Block javascript: and data: URIs
+    if (/^(javascript|data):/i.test(cleaned)) {
+        return '';
+    }
+    
+    return cleaned;
+}
+
+/**
+ * Sanitize HTML content using DOMPurify
+ * ⚠️ Use only when HTML rendering is absolutely necessary
+ * @param {string} html - HTML content to sanitize
+ * @returns {string} Sanitized HTML
+ */
+export function sanitizeHTML(html) {
+    if (typeof html !== 'string') {
+        return '';
+    }
+    
+    // Check if DOMPurify is available
+    if (typeof DOMPurify !== 'undefined') {
+        return DOMPurify.sanitize(html, {
+            ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li', 'a'],
+            ALLOWED_ATTR: ['href', 'target'],
+            ALLOW_DATA_ATTR: false
+        });
+    }
+    
+    // Fallback: strip all HTML if DOMPurify not available
+    return sanitizeText(html);
+}
+
+/**
+ * Sanitize API response data recursively
+ * @param {any} data - Data from API response
+ * @returns {any} Sanitized data
+ */
+export function sanitizeAPIResponse(data) {
+    if (data === null || data === undefined) {
+        return data;
+    }
+    
+    if (typeof data === 'string') {
+        return sanitizeText(data);
+    }
+    
+    if (Array.isArray(data)) {
+        return data.map(item => sanitizeAPIResponse(item));
+    }
+    
+    if (typeof data === 'object') {
+        const sanitized = {};
+        for (const key in data) {
+            if (data.hasOwnProperty(key)) {
+                // Special handling for specific fields
+                if (key === 'email') {
+                    sanitized[key] = sanitizeEmail(data[key]);
+                } else if (key === 'phone') {
+                    sanitized[key] = sanitizePhone(data[key]);
+                } else if (key.includes('url') || key.includes('link')) {
+                    sanitized[key] = sanitizeURL(data[key]);
+                } else {
+                    sanitized[key] = sanitizeAPIResponse(data[key]);
+                }
             }
-        } else if (key === 'class') {
-            element.className = sanitizeText(value);
-        } else if (key === 'id') {
-            element.id = sanitizeText(value);
-        } else if (!key.startsWith('on')) {  // Block event handlers
-            element.setAttribute(key, sanitizeText(value));
+        }
+        return sanitized;
+    }
+    
+    // Numbers, booleans, etc. pass through
+    return data;
+}
+
+/**
+ *  NEW: Validate and sanitize form data comprehensively
+ * @param {Object} formData - Object containing form fields
+ * @returns {Object} Validated and sanitized form data
+ * @throws {Error} If validation fails
+ */
+export function validateFormData(formData) {
+    const validated = {};
+    
+    for (const [key, value] of Object.entries(formData)) {
+        switch (key) {
+            case 'email':
+                validated[key] = sanitizeEmail(value);
+                if (!validated[key]) {
+                    throw new Error('Invalid email format');
+                }
+                break;
+                
+            case 'phone':
+                validated[key] = sanitizePhone(value);
+                if (!validated[key]) {
+                    throw new Error('Invalid phone number');
+                }
+                break;
+                
+            case 'name':
+            case 'address':
+            case 'description':
+            case 'companyName':
+                validated[key] = sanitizeText(value);
+                if (!validated[key] || validated[key].length === 0) {
+                    throw new Error(`${key} cannot be empty`);
+                }
+                break;
+                
+            default:
+                // Default sanitization for other text fields
+                validated[key] = sanitizeText(value);
         }
     }
     
-    return element;
+    return validated;
 }
 
 /**
- * Build a company/business card safely
- * Use this for search results, listings, etc.
- * 
- * @param {Object} data - Company data from API
- * @param {string} lang - Language ('es' or 'en')
- * @returns {HTMLElement} - Safe business card element
- */
-export function buildBusinessCard(data, lang = 'es') {
-    const card = document.createElement('div');
-    card.className = 'business-card';
-    
-    // Picture container
-    const pictureDiv = document.createElement('div');
-    pictureDiv.className = 'card-picture';
-    
-    const img = document.createElement('img');
-    img.src = sanitizeURL(data.img_url || data.image_url);
-    img.alt = sanitizeText(data.name);
-    img.loading = 'lazy'; // Performance optimization
-    
-    pictureDiv.appendChild(img);
-    
-    // Details container
-    const detailsDiv = document.createElement('div');
-    detailsDiv.className = 'card-details';
-    
-    // Name
-    const name = document.createElement('h3');
-    name.className = 'business-name';
-    name.textContent = sanitizeText(data.name);
-    
-    // Description
-    const desc = document.createElement('p');
-    desc.className = 'concise-description';
-    desc.textContent = sanitizeText(data.description);
-    
-    // Location
-    const location = document.createElement('p');
-    location.className = 'location';
-    location.textContent = `📍 ${sanitizeText(data.address || '')}`;
-    
-    // Phone
-    const phone = document.createElement('p');
-    phone.className = 'phone';
-    phone.textContent = `📞 ${sanitizePhone(data.phone || '')}`;
-    
-    // Email
-    const email = document.createElement('p');
-    email.className = 'mail';
-    email.textContent = `✉️ ${sanitizeEmail(data.email || '')}`;
-    
-    detailsDiv.append(name, desc, location, phone, email);
-    card.append(pictureDiv, detailsDiv);
-    
-    return card;
-}
-
-/**
- * Build a dropdown option safely
- * 
+ *  NEW: Build safe dropdown option element
  * @param {string} value - Option value
  * @param {string} text - Option display text
- * @returns {HTMLElement} - Safe option element
+ * @returns {HTMLElement} Safe dropdown option element
  */
 export function buildDropdownOption(value, text) {
     const option = document.createElement('div');
     option.className = 'dropdown-option';
     option.dataset.value = sanitizeText(value);
-    option.textContent = sanitizeText(text || value);
+    option.textContent = sanitizeText(text); // textContent is XSS-safe
     return option;
 }
 
 /**
- * ============================================================================
- * API RESPONSE SANITIZER (Sanitize all external data)
- * ============================================================================
+ *  NEW: Build safe business card element
+ * @param {Object} company - Company data object
+ * @returns {HTMLElement} Safe business card element
  */
-
-/**
- * Recursively sanitize API response data
- * Handles arrays, objects, strings, URLs
- * 
- * @param {*} data - Data from API
- * @returns {*} - Sanitized data
- */
-export function sanitizeAPIResponse(data) {
-    // Handle arrays
-    if (Array.isArray(data)) {
-        return data.map(sanitizeAPIResponse);
+export function buildBusinessCard(company) {
+    const card = document.createElement('div');
+    card.className = 'business-card';
+    
+    // Image (if exists)
+    if (company.image_url) {
+        const img = document.createElement('img');
+        img.className = 'business-image';
+        img.src = sanitizeURL(company.image_url);
+        img.alt = sanitizeText(company.name);
+        img.loading = 'lazy';
+        card.appendChild(img);
     }
     
-    // Handle objects
-    if (data && typeof data === 'object') {
-        const clean = {};
-        for (const [key, value] of Object.entries(data)) {
-            // Sanitize based on key name patterns
-            if (key.includes('url') || key.includes('image') || key === 'img_url') {
-                clean[key] = sanitizeURL(value);
-            } else if (key.includes('email')) {
-                clean[key] = sanitizeEmail(value);
-            } else if (key.includes('phone')) {
-                clean[key] = sanitizePhone(value);
-            } else if (typeof value === 'string') {
-                clean[key] = sanitizeText(value);
-            } else {
-                // Recurse for nested objects/arrays
-                clean[key] = sanitizeAPIResponse(value);
-            }
-        }
-        return clean;
-    }
+    // Company name
+    const name = document.createElement('h3');
+    name.className = 'business-name';
+    name.textContent = sanitizeText(company.name);
+    card.appendChild(name);
     
-    // Primitive types
-    if (typeof data === 'string') {
-        return sanitizeText(data);
-    }
+    // Product
+    const product = document.createElement('p');
+    product.className = 'business-product';
+    product.textContent = sanitizeText(company.product);
+    card.appendChild(product);
     
-    return data;
+    // Commune
+    const commune = document.createElement('p');
+    commune.className = 'business-commune';
+    commune.textContent = sanitizeText(company.commune);
+    card.appendChild(commune);
+    
+    // Email
+    const email = document.createElement('p');
+    email.className = 'business-email';
+    const emailLink = document.createElement('a');
+    emailLink.href = `mailto:${sanitizeEmail(company.email)}`;
+    emailLink.textContent = sanitizeEmail(company.email);
+    email.appendChild(emailLink);
+    card.appendChild(email);
+    
+    // Phone
+    const phone = document.createElement('p');
+    phone.className = 'business-phone';
+    phone.textContent = sanitizePhone(company.phone);
+    card.appendChild(phone);
+    
+    return card;
 }
 
 /**
- * ============================================================================
- * FORM VALIDATION (Detect tampering)
- * ============================================================================
+ * Create a safe text node (always XSS-safe)
+ * @param {string} text - Text content
+ * @returns {Text} Text node
  */
-
-/**
- * Validate that sanitization didn't strip content
- * Use before form submission to detect malicious input
- * 
- * @param {string} original - Original input value
- * @param {string} sanitized - Sanitized value
- * @param {string} fieldName - Field name for error message
- * @throws {Error} - If sanitization changed the value
- */
-export function validateNoTampering(original, sanitized, fieldName) {
-    if (original !== sanitized) {
-        throw new Error(
-            `${fieldName} contains invalid characters. ` +
-            `Please use only letters, numbers, and basic punctuation.`
-        );
-    }
+export function createSafeTextNode(text) {
+    return document.createTextNode(sanitizeText(text));
 }
 
 /**
- * Validate form data before submission
- * 
- * @param {Object} formData - Form data object
- * @returns {Object} - Sanitized and validated form data
- * @throws {Error} - If validation fails
+ * Set element text content safely
+ * @param {HTMLElement} element - Target element
+ * @param {string} text - Text to set
  */
-export function validateFormData(formData) {
-    const clean = {};
-    
-    for (const [key, value] of Object.entries(formData)) {
-        if (key.includes('email')) {
-            const sanitized = sanitizeEmail(value);
-            validateNoTampering(value, sanitized, key);
-            clean[key] = sanitized;
-        } else if (key.includes('url')) {
-            const sanitized = sanitizeURL(value);
-            if (!sanitized && value) {
-                throw new Error(`${key} contains an invalid URL`);
-            }
-            clean[key] = sanitized;
-        } else if (typeof value === 'string') {
-            const sanitized = sanitizeText(value);
-            validateNoTampering(value, sanitized, key);
-            clean[key] = sanitized;
-        } else {
-            clean[key] = value;
-        }
-    }
-    
-    return clean;
+export function setSafeText(element, text) {
+    element.textContent = sanitizeText(text);
 }
 
 /**
- * ============================================================================
- * INITIALIZATION
- * ============================================================================
+ * Set element HTML safely (uses DOMPurify)
+ * @param {HTMLElement} element - Target element
+ * @param {string} html - HTML to set
  */
-
-// Initialize DOMPurify on module load (if available)
-if (typeof window !== 'undefined') {
-    ensureDOMPurify().catch(err => {
-        console.warn('DOMPurify not available - sanitizeHTML() will fall back to text-only mode');
-    });
+export function setSafeHTML(element, html) {
+    element.innerHTML = sanitizeHTML(html);
 }
 
-/**
- * ============================================================================
- * USAGE EXAMPLES
- * ============================================================================
- * 
- * // 1. SANITIZE TEXT (Default for all user input)
- * const userName = sanitizeText(userInput.value);
- * nameElement.textContent = userName;
- * 
- * // 2. SANITIZE URLs (Images, links)
- * img.src = sanitizeURL(apiResponse.image_url);
- * link.href = sanitizeURL(apiResponse.website);
- * 
- * // 3. BUILD SAFE ELEMENTS (Preferred over innerHTML)
- * const card = buildBusinessCard(companyData, 'es');
- * container.appendChild(card);
- * 
- * // 4. SANITIZE API RESPONSES (Before using data)
- * const response = await fetch('/api/companies');
- * const data = await response.json();
- * const cleanData = sanitizeAPIResponse(data);
- * 
- * // 5. VALIDATE FORMS (Before submission)
- * try {
- *     const cleanFormData = validateFormData({
- *         name: nameInput.value,
- *         email: emailInput.value
- *     });
- *     // Submit cleanFormData
- * } catch (error) {
- *     alert(error.message);
- * }
- * 
- * ============================================================================
- */
+// Export all functions as default object as well
+export default {
+    sanitizeText,
+    sanitizeEmail,
+    sanitizePhone,
+    sanitizeURL,
+    sanitizeHTML,
+    sanitizeAPIResponse,
+    validateFormData,
+    buildDropdownOption,
+    buildBusinessCard,
+    createSafeTextNode,
+    setSafeText,
+    setSafeHTML
+};
