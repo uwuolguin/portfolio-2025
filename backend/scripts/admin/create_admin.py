@@ -55,7 +55,7 @@ async def create_admin_user():
                     admin_email,
                 )
 
-                print(f"✅ Updated existing user to admin: {admin_email}")
+                print(f" Updated existing user to admin: {admin_email}")
             else:
                 user_uuid = str(uuid.uuid4())
                 hashed_password = get_password_hash(admin_password)
@@ -73,7 +73,7 @@ async def create_admin_user():
                     hashed_password,
                 )
 
-                print(f"✅ Created new admin user: {admin_email}")
+                print(f" Created new admin user: {admin_email}")
 
         return True
 

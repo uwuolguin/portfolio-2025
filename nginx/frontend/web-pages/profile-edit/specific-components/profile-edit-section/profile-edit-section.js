@@ -1,256 +1,264 @@
 import {
     getLanguage,
-    getLoginState,
-    getCompanyPublishState,
-    setCompanyData,
+    apiRequest,
     fetchProducts,
-    fetchCommunes,
-    apiRequest
+    fetchCommunes
 } from '../../../0-shared-components/utils/shared-functions.js';
 
 import {
     sanitizeText,
     sanitizeURL,
     sanitizeEmail,
-    sanitizePhone
+    sanitizePhone,
+    sanitizeAPIResponse,
+    validateFormData  //  ADDED
 } from '../../../0-shared-components/utils/sanitizer.js';
 
-document.addEventListener('DOMContentLoaded', () => {
-    const profileEditSection = document.getElementById('profile-edit-section');
+document.addEventListener('DOMContentLoaded', async () => {
+    const editContainer = document.getElementById('profile-edit-container');
 
     const translations = {
         es: {
-            title: 'Editar perfil de empresa',
-            companyName: 'Nombre de la empresa',
-            productDescription: 'Descripción del producto',
+            editProfile: 'Editar Perfil',
+            editCompany: 'Editar Empresa',
+            name: 'Nombre',
+            email: 'Correo',
+            phone: 'Teléfono',
             address: 'Dirección',
-            phone: 'Teléfono de la empresa',
-            companyEmail: 'Correo de la empresa',
             commune: 'Comuna',
-            productType: 'Tipo de producto',
-            updateButton: 'Actualizar',
-            cancelButton: 'Cancelar',
-            deleteButton: 'Eliminar empresa',
-            selectImage: '📷 Cambiar imagen de la empresa',
-            currentImage: 'Imagen actual:',
-            noImage: 'No hay imagen seleccionada',
-            updateSuccess: '¡Perfil actualizado exitosamente!',
-            updateError: 'Error al actualizar el perfil.',
-            deleteSuccess: '¡Empresa eliminada exitosamente!',
-            deleteError: 'Error al eliminar la empresa.',
-            deleteConfirm: '¿Estás seguro? Esta acción no se puede deshacer.',
-            loginRequired: 'Debes iniciar sesión para editar tu perfil.',
-            loginHere: 'Inicia sesión aquí',
-            noCompany: 'No tienes una empresa publicada.',
-            publishCompany: 'Publicar empresa',
-            noCompanyMessage: 'Primero debes publicar una empresa.',
-            updating: 'Actualizando...',
-            deleting: 'Eliminando...',
-            searchCommunePlaceholder: 'Buscar comuna...',
-            searchProductPlaceholder: 'Buscar producto...',
-            loading: 'Cargando...'
+            product: 'Producto',
+            description: 'Descripción',
+            website: 'Sitio Web',
+            save: 'Guardar',
+            cancel: 'Cancelar',
+            loading: 'Cargando...',
+            saving: 'Guardando...',
+            success: 'Cambios guardados exitosamente',
+            error: 'Error al guardar los cambios',
+            selectCommune: 'Seleccionar Comuna',
+            selectProduct: 'Seleccionar Producto'
         },
         en: {
-            title: 'Edit company profile',
-            companyName: 'Company name',
-            productDescription: 'Product description',
+            editProfile: 'Edit Profile',
+            editCompany: 'Edit Company',
+            name: 'Name',
+            email: 'Email',
+            phone: 'Phone',
             address: 'Address',
-            phone: 'Company phone',
-            companyEmail: 'Company email',
             commune: 'Commune',
-            productType: 'Product type',
-            updateButton: 'Update',
-            cancelButton: 'Cancel',
-            deleteButton: 'Delete company',
-            selectImage: '📷 Change company image',
-            currentImage: 'Current image:',
-            noImage: 'No image selected',
-            updateSuccess: 'Profile updated successfully!',
-            updateError: 'Error updating profile.',
-            deleteSuccess: 'Company deleted successfully!',
-            deleteError: 'Error deleting company.',
-            deleteConfirm: 'Are you sure? This cannot be undone.',
-            loginRequired: 'You must log in to edit your profile.',
-            loginHere: 'Log in here',
-            noCompany: 'No published company found.',
-            publishCompany: 'Publish company',
-            noCompanyMessage: 'You must publish a company first.',
-            updating: 'Updating...',
-            deleting: 'Deleting...',
-            searchCommunePlaceholder: 'Search commune...',
-            searchProductPlaceholder: 'Search product...',
-            loading: 'Loading...'
+            product: 'Product',
+            description: 'Description',
+            website: 'Website',
+            save: 'Save',
+            cancel: 'Cancel',
+            loading: 'Loading...',
+            saving: 'Saving...',
+            success: 'Changes saved successfully',
+            error: 'Error saving changes',
+            selectCommune: 'Select Commune',
+            selectProduct: 'Select Product'
         }
     };
 
+    //  CRITICAL FIX: Sanitize API response
     async function fetchMyCompany() {
         try {
-            const res = await apiRequest('/api/v1/companies/user/my-company');
-            if (res.ok) return await res.json();
-            if (res.status === 404) return null;
-            throw new Error();
-        } catch {
+            const response = await apiRequest('/api/v1/companies/user/my-company');
+            const rawData = await response.json();
+            return sanitizeAPIResponse(rawData);
+        } catch (error) {
+            console.error('Error fetching company:', error);
             return null;
         }
-    }
-
-    function createDropdown(options, placeholder, id, defaultText, currentValue) {
-        const dropdown = document.createElement('div');
-        dropdown.className = 'filterable-dropdown';
-        dropdown.dataset.dropdownId = id;
-
-        const selected = document.createElement('div');
-        selected.className = 'dropdown-selected';
-        selected.dataset.value = sanitizeText(currentValue || '');
-        selected.textContent = sanitizeText(currentValue || defaultText);
-
-        const arrow = document.createElement('span');
-        arrow.className = 'dropdown-arrow';
-        arrow.textContent = '▼';
-        selected.appendChild(arrow);
-
-        const optionsBox = document.createElement('div');
-        optionsBox.className = 'dropdown-options';
-        optionsBox.style.display = 'none';
-
-        const search = document.createElement('input');
-        search.className = 'dropdown-search';
-        search.placeholder = placeholder;
-
-        const list = document.createElement('div');
-        list.className = 'options-list';
-
-        options.forEach(opt => {
-            const o = document.createElement('div');
-            o.className = 'dropdown-option';
-            o.dataset.value = sanitizeText(opt);
-            o.textContent = sanitizeText(opt);
-            list.appendChild(o);
-        });
-
-        optionsBox.appendChild(search);
-        optionsBox.appendChild(list);
-        dropdown.appendChild(selected);
-        dropdown.appendChild(optionsBox);
-
-        return dropdown;
     }
 
     async function renderEditForm() {
         const lang = getLanguage();
         const t = translations[lang];
 
-        profileEditSection.textContent = '';
+        editContainer.innerHTML = `<div class="loading">${t.loading}</div>`;
 
-        const company = await fetchMyCompany();
-        if (!company) return renderNoCompany();
+        const companyData = await fetchMyCompany();
+        
+        //  CRITICAL FIX: Sanitize dropdown data
+        const rawProducts = await fetchProducts();
+        const rawCommunes = await fetchCommunes();
+        const products = sanitizeAPIResponse(rawProducts);
+        const communes = sanitizeAPIResponse(rawCommunes);
 
-        const products = await fetchProducts();
-        const communes = await fetchCommunes();
-
-        const productNames = products.map(p =>
-            sanitizeText(lang === 'es' ? p.name_es : p.name_en)
-        );
-        const communeNames = communes.map(c => sanitizeText(c.name));
-
-        const container = document.createElement('div');
-        container.className = 'profile-edit-container';
-
-        const title = document.createElement('h2');
-        title.textContent = t.title;
-        container.appendChild(title);
+        editContainer.innerHTML = '';
 
         const form = document.createElement('form');
-        form.id = 'profile-edit-form';
+        form.className = 'edit-form';
+        form.id = 'company-edit-form';
 
-        function input(id, value, placeholder, type = 'text') {
-            const g = document.createElement('div');
-            g.className = 'input-group';
-            const i = document.createElement('input');
-            i.id = id;
-            i.type = type;
-            i.value = sanitizeText(value || '');
-            i.placeholder = placeholder;
-            i.required = true;
-            g.appendChild(i);
-            return g;
-        }
+        const title = document.createElement('h2');
+        title.textContent = t.editCompany;
+        form.appendChild(title);
 
-        form.appendChild(input('companyName', company.name, t.companyName));
-        form.appendChild(input('address', company.address, t.address));
-        form.appendChild(input('phone', sanitizePhone(company.phone), t.phone));
-        form.appendChild(input('companyEmail', sanitizeEmail(company.email), t.companyEmail, 'email'));
+        //  FIXED: Data already sanitized
+        const fields = [
+            { name: 'name', label: t.name, type: 'text', value: companyData?.name || '', required: true },
+            { name: 'email', label: t.email, type: 'email', value: companyData?.contact_email || '', required: true },
+            { name: 'phone', label: t.phone, type: 'tel', value: companyData?.contact_phone || '', required: true },
+            { name: 'address', label: t.address, type: 'text', value: companyData?.address || '', required: true },
+            { name: 'description', label: t.description, type: 'textarea', value: companyData?.description || '', required: false },
+            { name: 'website', label: t.website, type: 'url', value: companyData?.website || '', required: false }
+        ];
 
-        const communeDrop = createDropdown(
-            communeNames,
-            t.searchCommunePlaceholder,
-            'commune',
-            t.commune,
-            communes.find(c => c.uuid === company.commune_uuid)?.name
-        );
+        fields.forEach(field => {
+            const fieldGroup = document.createElement('div');
+            fieldGroup.className = 'form-group';
 
-        const productDrop = createDropdown(
-            productNames,
-            t.searchProductPlaceholder,
-            'product',
-            t.productType,
-            products.find(p => p.uuid === company.product_uuid)?.[lang === 'es' ? 'name_es' : 'name_en']
-        );
+            const label = document.createElement('label');
+            label.textContent = field.label;
+            if (field.required) label.textContent += ' *';
 
-        const cg = document.createElement('div');
-        cg.className = 'input-group';
-        cg.appendChild(communeDrop);
+            let input;
+            if (field.type === 'textarea') {
+                input = document.createElement('textarea');
+                input.rows = 4;
+            } else {
+                input = document.createElement('input');
+                input.type = field.type;
+            }
 
-        const pg = document.createElement('div');
-        pg.className = 'input-group';
-        pg.appendChild(productDrop);
+            input.name = field.name;
+            input.value = field.value;
+            input.required = field.required;
 
-        form.appendChild(cg);
-        form.appendChild(pg);
-
-        const imgGroup = document.createElement('div');
-        imgGroup.className = 'input-group';
-
-        if (company.image_url) {
-            const img = document.createElement('img');
-            img.src = sanitizeURL(company.image_url);
-            img.className = 'current-image';
-            imgGroup.appendChild(img);
-        }
-
-        form.appendChild(imgGroup);
-
-        const actions = document.createElement('div');
-        actions.className = 'profile-edit-actions';
-
-        ['updateButton', 'cancelButton', 'deleteButton'].forEach(key => {
-            const b = document.createElement('button');
-            b.type = key === 'updateButton' ? 'submit' : 'button';
-            b.textContent = t[key];
-            actions.appendChild(b);
+            fieldGroup.appendChild(label);
+            fieldGroup.appendChild(input);
+            form.appendChild(fieldGroup);
         });
 
-        form.appendChild(actions);
-        container.appendChild(form);
-        profileEditSection.appendChild(container);
+        // Commune dropdown
+        const communeGroup = document.createElement('div');
+        communeGroup.className = 'form-group';
+        const communeLabel = document.createElement('label');
+        communeLabel.textContent = t.commune + ' *';
+        const communeSelect = document.createElement('select');
+        communeSelect.name = 'commune_id';
+        communeSelect.required = true;
+
+        const communeDefault = document.createElement('option');
+        communeDefault.value = '';
+        communeDefault.textContent = t.selectCommune;
+        communeSelect.appendChild(communeDefault);
+
+        communes.forEach(commune => {
+            const option = document.createElement('option');
+            option.value = commune.id;
+            option.textContent = commune.name;
+            if (companyData?.commune_id === commune.id) {
+                option.selected = true;
+            }
+            communeSelect.appendChild(option);
+        });
+
+        communeGroup.appendChild(communeLabel);
+        communeGroup.appendChild(communeSelect);
+        form.appendChild(communeGroup);
+
+        // Product dropdown
+        const productGroup = document.createElement('div');
+        productGroup.className = 'form-group';
+        const productLabel = document.createElement('label');
+        productLabel.textContent = t.product + ' *';
+        const productSelect = document.createElement('select');
+        productSelect.name = 'product_id';
+        productSelect.required = true;
+
+        const productDefault = document.createElement('option');
+        productDefault.value = '';
+        productDefault.textContent = t.selectProduct;
+        productSelect.appendChild(productDefault);
+
+        products.forEach(product => {
+            const option = document.createElement('option');
+            option.value = product.id;
+            option.textContent = product.name;
+            if (companyData?.product_id === product.id) {
+                option.selected = true;
+            }
+            productSelect.appendChild(option);
+        });
+
+        productGroup.appendChild(productLabel);
+        productGroup.appendChild(productSelect);
+        form.appendChild(productGroup);
+
+        // Buttons
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'form-buttons';
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'submit';
+        saveButton.className = 'btn-primary';
+        saveButton.textContent = t.save;
+
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'btn-secondary';
+        cancelButton.textContent = t.cancel;
+        cancelButton.addEventListener('click', () => {
+            window.location.href = '/profile-view';
+        });
+
+        buttonGroup.appendChild(saveButton);
+        buttonGroup.appendChild(cancelButton);
+        form.appendChild(buttonGroup);
+
+        //  CRITICAL FIX: Validate form data before submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData);
+
+            try {
+                //  Validate and sanitize all form data
+                const validatedData = validateFormData({
+                    name: data.name,
+                    contact_email: data.email,
+                    contact_phone: data.phone,
+                    address: data.address,
+                    description: data.description,
+                    website: data.website,
+                    commune_id: parseInt(data.commune_id),
+                    product_id: parseInt(data.product_id)
+                });
+
+                saveButton.disabled = true;
+                saveButton.textContent = t.saving;
+
+                const response = await apiRequest(`/api/v1/companies/${companyData.id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(validatedData)
+                });
+
+                if (response.ok) {
+                    alert(t.success);
+                    window.location.href = '/profile-view';
+                } else {
+                    throw new Error('Update failed');
+                }
+
+            } catch (error) {
+                console.error('Save error:', error);
+                alert(error.message || t.error);
+                saveButton.disabled = false;
+                saveButton.textContent = t.save;
+            }
+        });
+
+        editContainer.appendChild(form);
     }
 
-    function renderNoCompany() {
-        const t = translations[getLanguage()];
-        profileEditSection.textContent = '';
-        const d = document.createElement('div');
-        d.textContent = t.noCompanyMessage;
-        profileEditSection.appendChild(d);
-    }
+    await renderEditForm();
 
-    async function renderContent() {
-        if (!getLoginState()) return;
-        if (!getCompanyPublishState()) return renderNoCompany();
-        await renderEditForm();
-    }
-
-    document.addEventListener('languageChange', renderContent);
-    document.addEventListener('companyDataChange', renderContent);
-
-    renderContent();
+    document.addEventListener('languageChange', renderEditForm);
 });

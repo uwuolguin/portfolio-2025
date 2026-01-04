@@ -5,201 +5,210 @@ import {
     setCSRFToken
 } from '../../../0-shared-components/utils/shared-functions.js';
 
+import {
+    sanitizeAPIResponse,
+    buildBusinessCard,
+    sanitizeText
+} from '../../../0-shared-components/utils/sanitizer.js';
+
 document.addEventListener('DOMContentLoaded', () => {
-    const loginSection = document.getElementById('login-section');
+    const resultsContainer = document.getElementById('results-container');
 
     const translations = {
         es: {
-            title: "Inicia sesión",
-            usernamePlaceholder: "Correo",
-            passwordPlaceholder: "Contraseña",
-            loginButton: "Iniciar sesión",
-            alreadyLoggedTitle: "Ya has iniciado sesión",
-            alreadyLoggedMessage: "Ya tienes una sesión activa. ¿Qué te gustaría hacer?",
-            goToMainPage: "Ir a la página principal",
-            logout: "Cerrar sesión",
-            resendVerificationLink: "¿No recibiste el email de verificación?",
-            resendButton: "Reenviar verificación",
-            resendSuccess: "Email de verificación enviado.",
-            resendError: "Error al enviar el email.",
-            emailRequired: "Por favor ingresa tu correo electrónico",
-            resending: "Enviando..."
+            noResults: 'No se encontraron resultados',
+            loading: 'Cargando...',
+            error: 'Error al cargar los resultados',
+            page: 'Página',
+            previous: 'Anterior',
+            next: 'Siguiente'
         },
         en: {
-            title: "Log in",
-            usernamePlaceholder: "Email",
-            passwordPlaceholder: "Password",
-            loginButton: "Log in",
-            alreadyLoggedTitle: "You're already logged in",
-            alreadyLoggedMessage: "You have an active session. What would you like to do?",
-            goToMainPage: "Go to main page",
-            logout: "Log out",
-            resendVerificationLink: "Didn't receive the verification email?",
-            resendButton: "Resend verification",
-            resendSuccess: "Verification email sent.",
-            resendError: "Error sending email.",
-            emailRequired: "Please enter your email address",
-            resending: "Sending..."
+            noResults: 'No results found',
+            loading: 'Loading...',
+            error: 'Error loading results',
+            page: 'Page',
+            previous: 'Previous',
+            next: 'Next'
         }
     };
 
-    const clear = () => (loginSection.textContent = '');
+    let currentPage = 1;
+    const resultsPerPage = 20;
 
-    function renderAlreadyLoggedView() {
-        const t = translations[getLanguage()];
-        clear();
-
-        const container = document.createElement('div');
-        container.className = 'login-container';
-
-        const title = document.createElement('h2');
-        title.className = 'login-title';
-        title.textContent = t.alreadyLoggedTitle;
-
-        const msg = document.createElement('p');
-        msg.className = 'already-logged-message';
-        msg.textContent = t.alreadyLoggedMessage;
-
-        const actions = document.createElement('div');
-        actions.className = 'logged-in-actions';
-
-        const goMain = document.createElement('button');
-        goMain.className = 'login-button primary';
-        goMain.textContent = t.goToMainPage;
-        goMain.onclick = () => {
-            window.location.href = '../front-page/front-page.html';
-        };
-
-        const logout = document.createElement('button');
-        logout.className = 'login-button secondary';
-        logout.textContent = t.logout;
-        logout.onclick = () => setLoginState(false);
-
-        actions.append(goMain, logout);
-        container.append(title, msg, actions);
-        loginSection.appendChild(container);
+    function clearResults() {
+        resultsContainer.textContent = '';
     }
 
-    function renderLoginForm() {
+    function showLoading() {
         const lang = getLanguage();
         const t = translations[lang];
-        clear();
+        clearResults();
+        
+        const loading = document.createElement('div');
+        loading.className = 'loading-message';
+        loading.textContent = t.loading;
+        resultsContainer.appendChild(loading);
+    }
 
-        const container = document.createElement('div');
-        container.className = 'login-container';
+    function showError() {
+        const lang = getLanguage();
+        const t = translations[lang];
+        clearResults();
+        
+        const error = document.createElement('div');
+        error.className = 'error-message';
+        error.textContent = t.error;
+        resultsContainer.appendChild(error);
+    }
 
-        const title = document.createElement('h2');
-        title.className = 'login-title';
-        title.textContent = t.title;
+    function showNoResults() {
+        const lang = getLanguage();
+        const t = translations[lang];
+        clearResults();
+        
+        const noResults = document.createElement('div');
+        noResults.className = 'no-results-message';
+        noResults.textContent = t.noResults;
+        resultsContainer.appendChild(noResults);
+    }
 
-        const form = document.createElement('form');
-        form.className = 'login-form';
+    async function fetchResults(query, commune, product, page = 1) {
+        try {
+            showLoading();
 
-        const email = document.createElement('input');
-        email.id = 'username';
-        email.type = 'email';
-        email.placeholder = t.usernamePlaceholder;
-        email.required = true;
+            const params = new URLSearchParams({
+                lang: getLanguage(),
+                limit: resultsPerPage,
+                offset: (page - 1) * resultsPerPage
+            });
 
-        const password = document.createElement('input');
-        password.id = 'password';
-        password.type = 'password';
-        password.placeholder = t.passwordPlaceholder;
-        password.required = true;
+            if (query && query.trim()) {
+                params.append('q', sanitizeText(query));
+            }
+            if (commune && commune !== 'Todas Las Comunas' && commune !== 'All Communes') {
+                params.append('commune', sanitizeText(commune));
+            }
+            if (product && product !== 'Todos Los Productos' && product !== 'All Products') {
+                params.append('product', sanitizeText(product));
+            }
 
-        const submit = document.createElement('button');
-        submit.type = 'submit';
-        submit.className = 'login-button';
-        submit.textContent = t.loginButton;
+            const response = await fetch(`/api/v1/companies/search?${params}`, {
+                credentials: 'include',
+                headers: {
+                    'X-Correlation-ID': `search_${Date.now()}`
+                }
+            });
 
-        form.append(email, password, submit);
+            if (!response.ok) {
+                throw new Error('Search failed');
+            }
 
-        const resendSection = document.createElement('div');
-        resendSection.className = 'resend-verification-section';
+            const rawData = await response.json();
+            
+            const companies = sanitizeAPIResponse(rawData);
 
-        const resendText = document.createElement('p');
-        resendText.textContent = t.resendVerificationLink;
+            displayResults(companies, page);
 
-        const resendBtn = document.createElement('button');
-        resendBtn.type = 'button';
-        resendBtn.textContent = t.resendButton;
+        } catch (error) {
+            console.error('Search error:', error);
+            showError();
+        }
+    }
 
-        resendSection.append(resendText, resendBtn);
+    function displayResults(companies, page) {
+        const lang = getLanguage();
 
-        container.append(title, form, resendSection);
-        loginSection.appendChild(container);
+        clearResults();
 
-        form.addEventListener('submit', async e => {
+        if (!companies || companies.length === 0) {
+            showNoResults();
+            return;
+        }
+
+        // Create grid container
+        const grid = document.createElement('div');
+        grid.className = 'results-grid';
+
+        companies.forEach(company => {
+            const card = buildBusinessCard(company, lang);
+            grid.appendChild(card);
+        });
+
+        resultsContainer.appendChild(grid);
+
+        // Add pagination
+        if (companies.length === resultsPerPage) {
+            createPagination(page);
+        }
+    }
+
+    function createPagination(currentPage) {
+        const lang = getLanguage();
+        const t = translations[lang];
+
+        const paginationContainer = document.createElement('div');
+        paginationContainer.className = 'pagination-container';
+
+        // Previous button
+        if (currentPage > 1) {
+            const prevLink = document.createElement('a');
+            prevLink.href = '#';
+            prevLink.className = 'page-link';
+            prevLink.textContent = t.previous;
+            prevLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                performSearch(currentPage - 1);
+            });
+            paginationContainer.appendChild(prevLink);
+        }
+
+        // Current page indicator
+        const pageInfo = document.createElement('span');
+        pageInfo.className = 'page-info';
+        pageInfo.textContent = `${t.page} ${currentPage}`;
+        paginationContainer.appendChild(pageInfo);
+
+        // Next button
+        const nextLink = document.createElement('a');
+        nextLink.href = '#';
+        nextLink.className = 'page-link';
+        nextLink.textContent = t.next;
+        nextLink.addEventListener('click', (e) => {
             e.preventDefault();
-            submit.disabled = true;
-
-            try {
-                const res = await fetch('/api/v1/users/login', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Correlation-ID': `login_${Date.now()}`
-                    },
-                    body: JSON.stringify({
-                        email: email.value,
-                        password: password.value
-                    })
-                });
-
-                if (!res.ok) throw new Error();
-
-                const data = await res.json();
-                setCSRFToken(data.csrf_token);
-                setLoginState(true);
-                window.location.href = '../front-page/front-page.html';
-            } catch {
-                alert(lang === 'es'
-                    ? 'Error al iniciar sesión'
-                    : 'Login error');
-            } finally {
-                submit.disabled = false;
-            }
+            performSearch(currentPage + 1);
         });
+        paginationContainer.appendChild(nextLink);
 
-        resendBtn.addEventListener('click', async () => {
-            if (!email.value) {
-                alert(t.emailRequired);
-                return;
-            }
-
-            resendBtn.disabled = true;
-            resendBtn.textContent = t.resending;
-
-            try {
-                await fetch('/api/v1/users/resend-verification', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Correlation-ID': `resend_${Date.now()}`
-                    },
-                    body: JSON.stringify({ email: email.value })
-                });
-
-                alert(t.resendSuccess);
-            } catch {
-                alert(t.resendError);
-            } finally {
-                resendBtn.disabled = false;
-                resendBtn.textContent = t.resendButton;
-            }
-        });
+        resultsContainer.appendChild(paginationContainer);
     }
 
-    function render() {
-        getLoginState()
-            ? renderAlreadyLoggedView()
-            : renderLoginForm();
+    function performSearch(page = 1) {
+        currentPage = page;
+
+        const query = document.getElementById('search-query')?.value || '';
+        
+        const communeDropdown = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected');
+        const commune = communeDropdown?.dataset.value || '';
+        
+        const productDropdown = document.querySelector('[data-dropdown-id="product"] .dropdown-selected');
+        const product = productDropdown?.dataset.value || '';
+
+        fetchResults(query, commune, product, page);
     }
 
-    document.addEventListener('languageChange', render);
-    document.addEventListener('userHasLogged', render);
+    // Listen for search trigger
+    document.addEventListener('searchTriggered', () => {
+        performSearch(1);
+    });
 
-    render();
+    // Initial load - show all companies
+    document.addEventListener('DOMContentLoaded', () => {
+        performSearch(1);
+    });
+
+    // Re-render on language change
+    document.addEventListener('languageChange', () => {
+        performSearch(currentPage);
+    });
 });

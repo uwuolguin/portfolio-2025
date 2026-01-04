@@ -1,269 +1,256 @@
-import { 
-    getLanguage, 
-    getLoginState, 
-    getCompanyPublishState,
-    setCompanyPublishState,
-    apiRequest
+import {
+    getLanguage,
+    apiRequest,
+    getLoginState,
+    setLoginState
 } from '../../../0-shared-components/utils/shared-functions.js';
 
 import {
     sanitizeText,
     sanitizeURL,
     sanitizeEmail,
-    sanitizePhone
+    sanitizePhone,
+    sanitizeAPIResponse  //  ADDED
 } from '../../../0-shared-components/utils/sanitizer.js';
 
-document.addEventListener('DOMContentLoaded', () => {
-    const profileSection = document.getElementById('profile-section');
+document.addEventListener('DOMContentLoaded', async () => {
+    const profileContainer = document.getElementById('profile-section-container');
 
     const translations = {
         es: {
-            title: "Mi Perfil",
-            companyName: "Nombre de la empresa",
-            productDescription: "Descripción del producto",
-            address: "Dirección",
-            phone: "Teléfono de la empresa",
-            companyEmail: "Correo de la empresa",
-            commune: "Comuna",
-            productType: "Tipo de producto",
-            companyImage: "Imagen de la empresa",
-            loginRequired: "Debes iniciar sesión para ver tu perfil.",
-            loginHere: "Inicia sesión aquí",
-            noData: "No hay datos disponibles",
-            publishFirst: "Para ver los datos de tu empresa, primero debes publicarla.",
-            publishCompanyHere: "Publica tu empresa aquí",
-            updateProfile: "Actualizar Perfil",
-            deleteProfile: "Eliminar Perfil",
-            confirmDelete: "¿Estás seguro de que quieres eliminar tu perfil? Esta acción no se puede deshacer.",
-            profileDeleted: "Perfil eliminado exitosamente.",
-            deleteError: "Error al eliminar el perfil. Inténtalo de nuevo."
+            welcome: 'Bienvenido',
+            myProfile: 'Mi Perfil',
+            myCompany: 'Mi Empresa',
+            name: 'Nombre',
+            email: 'Correo',
+            phone: 'Teléfono',
+            address: 'Dirección',
+            commune: 'Comuna',
+            product: 'Producto',
+            description: 'Descripción',
+            website: 'Sitio Web',
+            noCompany: 'No tienes una empresa registrada',
+            editProfile: 'Editar Perfil',
+            editCompany: 'Editar Empresa',
+            logout: 'Cerrar Sesión',
+            loading: 'Cargando...',
+            error: 'Error al cargar los datos'
         },
         en: {
-            title: "My Profile",
-            companyName: "Company name",
-            productDescription: "Product description",
-            address: "Address",
-            phone: "Company phone",
-            companyEmail: "Company email",
-            commune: "Commune",
-            productType: "Product type",
-            companyImage: "Company image",
-            loginRequired: "You must log in to view your profile.",
-            loginHere: "Log in here",
-            noData: "No data available",
-            publishFirst: "To see your company data, you must publish it first.",
-            publishCompanyHere: "Publish your company here",
-            updateProfile: "Update Profile",
-            deleteProfile: "Delete Profile",
-            confirmDelete: "Are you sure you want to delete your profile? This action cannot be undone.",
-            profileDeleted: "Profile deleted successfully.",
-            deleteError: "Error deleting profile. Please try again."
+            welcome: 'Welcome',
+            myProfile: 'My Profile',
+            myCompany: 'My Company',
+            name: 'Name',
+            email: 'Email',
+            phone: 'Phone',
+            address: 'Address',
+            commune: 'Commune',
+            product: 'Product',
+            description: 'Description',
+            website: 'Website',
+            noCompany: 'You don\'t have a registered company',
+            editProfile: 'Edit Profile',
+            editCompany: 'Edit Company',
+            logout: 'Logout',
+            loading: 'Loading...',
+            error: 'Error loading data'
         }
     };
 
+    //  CRITICAL FIX: Sanitize fetched user data
     async function fetchUserData() {
         try {
-            const res = await apiRequest('/api/v1/users/me');
-            return res.ok ? await res.json() : null;
-        } catch {
+            const response = await apiRequest('/api/v1/users/me');
+            const rawData = await response.json();
+            return sanitizeAPIResponse(rawData);
+        } catch (error) {
+            console.error('Error fetching user data:', error);
             return null;
         }
     }
 
+    //  CRITICAL FIX: Sanitize fetched company data
     async function fetchMyCompany() {
         try {
-            const res = await apiRequest('/api/v1/companies/user/my-company');
-            if (res.ok) return await res.json();
-            if (res.status === 404) return null;
-            return null;
-        } catch {
+            const response = await apiRequest('/api/v1/companies/user/my-company');
+            const rawData = await response.json();
+            return sanitizeAPIResponse(rawData);
+        } catch (error) {
+            console.error('Error fetching company data:', error);
             return null;
         }
     }
 
-    async function handleDeleteProfile() {
-        const t = translations[getLanguage()];
-
-        if (!confirm(t.confirmDelete)) return;
-
-        try {
-            const res = await apiRequest('/api/v1/users/me', { method: 'DELETE' });
-            if (!res.ok) throw new Error();
-
-            localStorage.clear();
-            alert(t.profileDeleted);
-            window.location.href = '../front-page/front-page.html';
-        } catch {
-            alert(t.deleteError);
-        }
-    }
-
-    function createInfoItem(label, value) {
-        const item = document.createElement('div');
-        item.className = 'info-item';
-
-        const l = document.createElement('label');
-        l.className = 'info-label';
-        l.textContent = label;
-
-        const v = document.createElement('div');
-        v.className = 'info-value';
-        v.textContent = value;
-
-        item.appendChild(l);
-        item.appendChild(v);
-        return item;
-    }
-
-    async function renderProfileContent() {
+    async function renderProfile() {
         const lang = getLanguage();
         const t = translations[lang];
 
-        profileSection.textContent = '';
+        profileContainer.innerHTML = `<div class="loading">${t.loading}</div>`;
 
-        const container = document.createElement('div');
-        container.className = 'profile-container';
+        const userData = await fetchUserData();
+        const companyData = await fetchMyCompany();
 
-        const title = document.createElement('h2');
-        title.className = 'profile-title';
-        title.textContent = t.title;
-        container.appendChild(title);
-
-        if (!getLoginState()) {
-            const msg = document.createElement('div');
-            msg.className = 'login-message';
-            msg.textContent = t.loginRequired;
-
-            msg.appendChild(document.createElement('br'));
-            msg.appendChild(document.createElement('br'));
-
-            const link = document.createElement('a');
-            link.href = '../log-in/log-in.html';
-            link.className = 'login-link';
-            link.textContent = t.loginHere;
-
-            msg.appendChild(link);
-            container.appendChild(msg);
-            profileSection.appendChild(container);
+        if (!userData) {
+            profileContainer.innerHTML = `<div class="error">${t.error}</div>`;
             return;
         }
 
-        const user = await fetchUserData();
-        if (!user) return;
+        profileContainer.innerHTML = '';
 
-        const userDetails = document.createElement('div');
-        userDetails.className = 'user-details';
+        const profileSection = document.createElement('div');
+        profileSection.className = 'profile-section';
 
-        const name = document.createElement('div');
-        name.className = 'user-name';
-        name.textContent = sanitizeText(user.name);
+        // Welcome header
+        const welcomeHeader = document.createElement('h2');
+        welcomeHeader.className = 'welcome-header';
+        //  FIXED: Data already sanitized from fetchUserData
+        welcomeHeader.textContent = `${t.welcome}, ${userData.name}`;
+        profileSection.appendChild(welcomeHeader);
 
-        const email = document.createElement('div');
-        email.className = 'user-email';
-        email.textContent = sanitizeEmail(user.email);
+        // User profile card
+        const userCard = createUserCard(userData, t);
+        profileSection.appendChild(userCard);
 
-        userDetails.appendChild(name);
-        userDetails.appendChild(email);
-        container.appendChild(userDetails);
-
-        if (!getCompanyPublishState()) {
-            const msg = document.createElement('div');
-            msg.className = 'login-message';
-            msg.textContent = t.publishFirst;
-
-            msg.appendChild(document.createElement('br'));
-            msg.appendChild(document.createElement('br'));
-
-            const link = document.createElement('a');
-            link.href = '../publish/publish.html';
-            link.className = 'login-link';
-            link.textContent = t.publishCompanyHere;
-
-            msg.appendChild(link);
-            container.appendChild(msg);
-
-            const del = document.createElement('button');
-            del.className = 'profile-button delete-button';
-            del.textContent = t.deleteProfile;
-            del.addEventListener('click', handleDeleteProfile);
-
-            const actions = document.createElement('div');
-            actions.className = 'profile-actions';
-            actions.appendChild(del);
-
-            container.appendChild(actions);
-            profileSection.appendChild(container);
-            return;
-        }
-
-        const company = await fetchMyCompany();
-        if (!company) {
-            setCompanyPublishState(false);
-            renderProfileContent();
-            return;
-        }
-
-        const info = document.createElement('div');
-        info.className = 'profile-info';
-
-        info.appendChild(createInfoItem(t.companyName, sanitizeText(company.name) || t.noData));
-        info.appendChild(createInfoItem(t.productDescription, sanitizeText(lang === 'es' ? company.description_es : company.description_en) || t.noData));
-        info.appendChild(createInfoItem(t.address, sanitizeText(company.address) || t.noData));
-        info.appendChild(createInfoItem(t.phone, sanitizePhone(company.phone) || t.noData));
-        info.appendChild(createInfoItem(t.companyEmail, sanitizeEmail(company.email) || t.noData));
-        info.appendChild(createInfoItem(t.commune, sanitizeText(company.commune_name) || t.noData));
-        info.appendChild(createInfoItem(t.productType, sanitizeText(lang === 'es' ? company.product_name_es : company.product_name_en) || t.noData));
-
-        const imgItem = document.createElement('div');
-        imgItem.className = 'info-item';
-
-        const imgLabel = document.createElement('label');
-        imgLabel.className = 'info-label';
-        imgLabel.textContent = t.companyImage;
-        imgItem.appendChild(imgLabel);
-
-        if (company.image_url) {
-            const img = document.createElement('img');
-            img.src = sanitizeURL(company.image_url);
-            img.className = 'company-image-preview';
-            img.alt = 'Company image';
-            imgItem.appendChild(img);
+        // Company card
+        if (companyData) {
+            const companyCard = createCompanyCard(companyData, t);
+            profileSection.appendChild(companyCard);
         } else {
-            const no = document.createElement('div');
-            no.className = 'info-value';
-            no.textContent = t.noData;
-            imgItem.appendChild(no);
+            const noCompanyMessage = document.createElement('div');
+            noCompanyMessage.className = 'no-company-message';
+            noCompanyMessage.textContent = t.noCompany;
+            profileSection.appendChild(noCompanyMessage);
         }
 
-        info.appendChild(imgItem);
-        container.appendChild(info);
+        // Action buttons
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'profile-actions';
 
-        const actions = document.createElement('div');
-        actions.className = 'profile-actions';
-
-        const update = document.createElement('button');
-        update.className = 'profile-button update-button';
-        update.textContent = t.updateProfile;
-        update.addEventListener('click', () => {
-            window.location.href = '../profile-edit/profile-edit.html';
+        const editProfileButton = document.createElement('button');
+        editProfileButton.className = 'btn-primary';
+        editProfileButton.textContent = t.editProfile;
+        editProfileButton.addEventListener('click', () => {
+            window.location.href = '/profile-edit';
         });
 
-        const del = document.createElement('button');
-        del.className = 'profile-button delete-button';
-        del.textContent = t.deleteProfile;
-        del.addEventListener('click', handleDeleteProfile);
+        const logoutButton = document.createElement('button');
+        logoutButton.className = 'btn-secondary';
+        logoutButton.textContent = t.logout;
+        logoutButton.addEventListener('click', handleLogout);
 
-        actions.appendChild(update);
-        actions.appendChild(del);
-        container.appendChild(actions);
+        actionsContainer.appendChild(editProfileButton);
+        actionsContainer.appendChild(logoutButton);
+        profileSection.appendChild(actionsContainer);
 
-        profileSection.appendChild(container);
+        profileContainer.appendChild(profileSection);
     }
 
-    document.addEventListener('companyDataUpdated', renderProfileContent);
-    document.addEventListener('languageChange', renderProfileContent);
-    document.addEventListener('userHasLogged', renderProfileContent);
-    document.addEventListener('companyPublishStateChange', renderProfileContent);
+    function createUserCard(user, t) {
+        const card = document.createElement('div');
+        card.className = 'user-card';
 
-    renderProfileContent();
+        const title = document.createElement('h3');
+        title.textContent = t.myProfile;
+        card.appendChild(title);
+
+        // FIXED: Data already sanitized
+        const fields = [
+            { label: t.name, value: user.name },
+            { label: t.email, value: user.email }
+        ];
+
+        fields.forEach(field => {
+            const fieldDiv = document.createElement('div');
+            fieldDiv.className = 'profile-field';
+
+            const label = document.createElement('span');
+            label.className = 'field-label';
+            label.textContent = field.label + ':';
+
+            const value = document.createElement('span');
+            value.className = 'field-value';
+            value.textContent = field.value;
+
+            fieldDiv.appendChild(label);
+            fieldDiv.appendChild(value);
+            card.appendChild(fieldDiv);
+        });
+
+        return card;
+    }
+
+    function createCompanyCard(company, t) {
+        const card = document.createElement('div');
+        card.className = 'company-card';
+
+        const title = document.createElement('h3');
+        title.textContent = t.myCompany;
+        card.appendChild(title);
+
+        //  FIXED: Data already sanitized
+        const fields = [
+            { label: t.name, value: company.name },
+            { label: t.email, value: company.contact_email },
+            { label: t.phone, value: company.contact_phone },
+            { label: t.address, value: company.address },
+            { label: t.commune, value: company.commune_name },
+            { label: t.product, value: company.product_name },
+            { label: t.description, value: company.description }
+        ];
+
+        fields.forEach(field => {
+            if (field.value) {
+                const fieldDiv = document.createElement('div');
+                fieldDiv.className = 'profile-field';
+
+                const label = document.createElement('span');
+                label.className = 'field-label';
+                label.textContent = field.label + ':';
+
+                const value = document.createElement('span');
+                value.className = 'field-value';
+                value.textContent = field.value;
+
+                fieldDiv.appendChild(label);
+                fieldDiv.appendChild(value);
+                card.appendChild(fieldDiv);
+            }
+        });
+
+        if (company.website) {
+            const websiteDiv = document.createElement('div');
+            websiteDiv.className = 'profile-field';
+
+            const label = document.createElement('span');
+            label.className = 'field-label';
+            label.textContent = t.website + ':';
+
+            const link = document.createElement('a');
+            link.href = company.website;
+            link.textContent = company.website;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+
+            websiteDiv.appendChild(label);
+            websiteDiv.appendChild(link);
+            card.appendChild(websiteDiv);
+        }
+
+        return card;
+    }
+
+    async function handleLogout() {
+        try {
+            await apiRequest('/api/v1/auth/logout', { method: 'POST' });
+            setLoginState(false);
+            window.location.href = '/';
+        } catch (error) {
+            console.error('Logout error:', error);
+            alert('Error logging out');
+        }
+    }
+
+    await renderProfile();
+
+    document.addEventListener('languageChange', renderProfile);
 });

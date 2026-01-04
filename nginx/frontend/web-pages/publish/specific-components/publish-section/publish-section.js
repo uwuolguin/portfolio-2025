@@ -1,170 +1,327 @@
 import {
     getLanguage,
-    getLoginState,
-    getCompanyPublishState,
-    setCompanyPublishState,
-    setCompanyData,
+    apiRequest,
     fetchProducts,
-    fetchCommunes,
-    apiRequest
+    fetchCommunes
 } from '../../../0-shared-components/utils/shared-functions.js';
 
-document.addEventListener('DOMContentLoaded', () => {
-    const publishSection = document.getElementById('publish-section');
+//  ADDED: Import all necessary sanitizer functions
+import {
+    sanitizeText,
+    sanitizeEmail,
+    sanitizePhone,
+    sanitizeURL,
+    sanitizeAPIResponse,
+    validateFormData
+} from '../../../0-shared-components/utils/sanitizer.js';
 
-    const translations = { /* SAME TRANSLATIONS OBJECT – UNCHANGED */ };
+document.addEventListener('DOMContentLoaded', async () => {
+    const publishContainer = document.getElementById('publish-section-container');
 
-    const clear = () => (publishSection.textContent = '');
+    const translations = {
+        es: {
+            title: 'Publicar Mi Empresa',
+            companyName: 'Nombre de la Empresa',
+            email: 'Correo de Contacto',
+            phone: 'Teléfono',
+            address: 'Dirección',
+            commune: 'Comuna',
+            product: 'Producto/Servicio',
+            description: 'Descripción',
+            website: 'Sitio Web (opcional)',
+            publish: 'Publicar',
+            cancel: 'Cancelar',
+            selectCommune: 'Seleccionar Comuna',
+            selectProduct: 'Seleccionar Producto',
+            loading: 'Cargando...',
+            publishing: 'Publicando...',
+            success: '¡Empresa publicada exitosamente!',
+            error: 'Error al publicar la empresa',
+            alreadyPublished: 'Ya tienes una empresa publicada'
+        },
+        en: {
+            title: 'Publish My Company',
+            companyName: 'Company Name',
+            email: 'Contact Email',
+            phone: 'Phone',
+            address: 'Address',
+            commune: 'Commune',
+            product: 'Product/Service',
+            description: 'Description',
+            website: 'Website (optional)',
+            publish: 'Publish',
+            cancel: 'Cancel',
+            selectCommune: 'Select Commune',
+            selectProduct: 'Select Product',
+            loading: 'Loading...',
+            publishing: 'Publishing...',
+            success: 'Company published successfully!',
+            error: 'Error publishing company',
+            alreadyPublished: 'You already have a published company'
+        }
+    };
 
-    function el(tag, props = {}, ...children) {
-        const e = document.createElement(tag);
-        Object.assign(e, props);
-        children.forEach(c =>
-            e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c)
-        );
-        return e;
-    }
-
-    function createDropdown(options, placeholder, id) {
-        const root = el('div', { className: 'filterable-dropdown', dataset: { dropdownId: id } });
-
-        const selected = el('div', { className: 'dropdown-selected', dataset: { value: '' } }, placeholder, ' ▼');
-        const panel = el('div', { className: 'dropdown-options', style: 'display:none' });
-        const search = el('input', { type: 'text', className: 'dropdown-search', placeholder });
-
-        const list = el('div', { className: 'options-list' });
-
-        options.forEach(opt => {
-            const item = el('div', { className: 'dropdown-option' }, opt);
-            item.dataset.value = opt;
-            item.onclick = () => {
-                selected.textContent = `${opt} ▼`;
-                selected.dataset.value = opt;
-                panel.style.display = 'none';
-            };
-            list.appendChild(item);
-        });
-
-        search.oninput = () => {
-            const q = search.value.toLowerCase();
-            [...list.children].forEach(c =>
-                c.style.display = c.textContent.toLowerCase().includes(q) ? 'block' : 'none'
-            );
-        };
-
-        selected.onclick = e => {
-            e.stopPropagation();
-            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-            search.focus();
-        };
-
-        panel.append(search, list);
-        root.append(selected, panel);
-        return root;
-    }
-
-    function renderLoginRequired(t) {
-        clear();
-        publishSection.append(
-            el('div', { className: 'publish-container' },
-                el('h2', {}, t.title),
-                el('p', {}, t.loginRequired),
-                el('a', { href: '../log-in/log-in.html' }, t.loginHere)
-            )
-        );
-    }
-
-    function renderAlreadyPublished(t) {
-        clear();
-        const btn = el('button', { className: 'publish-button' }, t.viewProfile);
-        btn.onclick = () => location.href = '../profile-view/profile-view.html';
-
-        publishSection.append(
-            el('div', { className: 'publish-container' },
-                el('h2', {}, t.alreadyPublished),
-                el('p', {}, t.alreadyPublishedMessage),
-                btn
-            )
-        );
-    }
-
-    async function renderPublishForm(t, lang) {
-        clear();
-        publishSection.append(el('p', {}, t.loading));
-
-        const [products, communes] = await Promise.all([fetchProducts(), fetchCommunes()]);
-
-        clear();
-
-        const form = el('form', { className: 'publish-form' });
-
-        const name = el('input', { placeholder: t.companyName, required: true });
-        const desc = el('textarea', { placeholder: t.productDescription, required: true });
-        const addr = el('input', { placeholder: t.address, required: true });
-        const phone = el('input', { placeholder: t.phone, required: true });
-        const email = el('input', { type: 'email', placeholder: t.companyEmail, required: true });
-        const img = el('input', { type: 'file', accept: 'image/*', required: true });
-
-        const productNames = products.map(p => lang === 'es' ? p.name_es : p.name_en);
-        const communeNames = communes.map(c => c.name);
-
-        const productDD = createDropdown(productNames, t.productType, 'product');
-        const communeDD = createDropdown(communeNames, t.commune, 'commune');
-
-        const submit = el('button', { type: 'submit' }, t.publishButton);
-
-        form.append(name, desc, addr, phone, email, img, communeDD, productDD, submit);
-
-        form.onsubmit = async e => {
-            e.preventDefault();
-
-            const prodVal = productDD.querySelector('.dropdown-selected').dataset.value;
-            const comVal = communeDD.querySelector('.dropdown-selected').dataset.value;
-
-            if (!prodVal || !comVal || !img.files[0]) {
-                alert(t.imageRequired);
-                return;
+    async function checkExistingCompany() {
+        try {
+            const response = await apiRequest('/api/v1/companies/user/my-company');
+            if (response.ok) {
+                return true; // Company exists
             }
-
-            const prod = products.find(p => (lang === 'es' ? p.name_es : p.name_en) === prodVal);
-            const com = communes.find(c => c.name === comVal);
-
-            const fd = new FormData();
-            fd.append('name', name.value);
-            fd.append('product_uuid', prod.uuid);
-            fd.append('commune_uuid', com.uuid);
-            fd.append('address', addr.value);
-            fd.append('phone', phone.value);
-            fd.append('email', email.value);
-            fd.append('image', img.files[0]);
-            fd.append(lang === 'es' ? 'description_es' : 'description_en', desc.value);
-
-            const res = await apiRequest('/api/v1/companies/', { method: 'POST', body: fd });
-            if (!res.ok) throw new Error();
-
-            const company = await res.json();
-            setCompanyData(company);
-            setCompanyPublishState(true);
-            location.href = '../profile-view/profile-view.html';
-        };
-
-        publishSection.append(el('div', { className: 'publish-container' },
-            el('h2', {}, t.title),
-            form
-        ));
+            return false;
+        } catch (error) {
+            return false;
+        }
     }
 
-    async function render() {
+    async function renderPublishForm() {
         const lang = getLanguage();
         const t = translations[lang];
 
-        if (!getLoginState()) return renderLoginRequired(t);
-        if (getCompanyPublishState()) return renderAlreadyPublished(t);
-        await renderPublishForm(t, lang);
+        publishContainer.innerHTML = `<div class="loading">${t.loading}</div>`;
+
+        // Check if user already has a company
+        const hasCompany = await checkExistingCompany();
+        if (hasCompany) {
+            publishContainer.innerHTML = `
+                <div class="info-message">
+                    <p>${t.alreadyPublished}</p>
+                    <a href="/profile-view" class="btn-primary">Ver Mi Empresa</a>
+                </div>
+            `;
+            return;
+        }
+
+        //  CRITICAL FIX: Sanitize API responses
+        const rawProducts = await fetchProducts();
+        const rawCommunes = await fetchCommunes();
+        const products = sanitizeAPIResponse(rawProducts);
+        const communes = sanitizeAPIResponse(rawCommunes);
+
+        publishContainer.innerHTML = '';
+
+        const form = document.createElement('form');
+        form.className = 'publish-form';
+        form.id = 'publish-form';
+
+        const title = document.createElement('h2');
+        title.textContent = t.title;
+        form.appendChild(title);
+
+        // Company name
+        const nameGroup = document.createElement('div');
+        nameGroup.className = 'form-group';
+        const nameLabel = document.createElement('label');
+        nameLabel.textContent = t.companyName + ' *';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.name = 'name';
+        nameInput.required = true;
+        nameGroup.appendChild(nameLabel);
+        nameGroup.appendChild(nameInput);
+        form.appendChild(nameGroup);
+
+        // Email
+        const emailGroup = document.createElement('div');
+        emailGroup.className = 'form-group';
+        const emailLabel = document.createElement('label');
+        emailLabel.textContent = t.email + ' *';
+        const emailInput = document.createElement('input');
+        emailInput.type = 'email';
+        emailInput.name = 'email';
+        emailInput.required = true;
+        emailGroup.appendChild(emailLabel);
+        emailGroup.appendChild(emailInput);
+        form.appendChild(emailGroup);
+
+        // Phone
+        const phoneGroup = document.createElement('div');
+        phoneGroup.className = 'form-group';
+        const phoneLabel = document.createElement('label');
+        phoneLabel.textContent = t.phone + ' *';
+        const phoneInput = document.createElement('input');
+        phoneInput.type = 'tel';
+        phoneInput.name = 'phone';
+        phoneInput.required = true;
+        phoneGroup.appendChild(phoneLabel);
+        phoneGroup.appendChild(phoneInput);
+        form.appendChild(phoneGroup);
+
+        // Address
+        const addressGroup = document.createElement('div');
+        addressGroup.className = 'form-group';
+        const addressLabel = document.createElement('label');
+        addressLabel.textContent = t.address + ' *';
+        const addressInput = document.createElement('input');
+        addressInput.type = 'text';
+        addressInput.name = 'address';
+        addressInput.required = true;
+        addressGroup.appendChild(addressLabel);
+        addressGroup.appendChild(addressInput);
+        form.appendChild(addressGroup);
+
+        // Commune dropdown
+        const communeGroup = document.createElement('div');
+        communeGroup.className = 'form-group';
+        const communeLabel = document.createElement('label');
+        communeLabel.textContent = t.commune + ' *';
+        const communeSelect = document.createElement('select');
+        communeSelect.name = 'commune_id';
+        communeSelect.required = true;
+
+        const communeDefault = document.createElement('option');
+        communeDefault.value = '';
+        communeDefault.textContent = t.selectCommune;
+        communeSelect.appendChild(communeDefault);
+
+        //  FIXED: Data already sanitized
+        communes.forEach(commune => {
+            const option = document.createElement('option');
+            option.value = commune.id;
+            option.textContent = commune.name;
+            communeSelect.appendChild(option);
+        });
+
+        communeGroup.appendChild(communeLabel);
+        communeGroup.appendChild(communeSelect);
+        form.appendChild(communeGroup);
+
+        // Product dropdown
+        const productGroup = document.createElement('div');
+        productGroup.className = 'form-group';
+        const productLabel = document.createElement('label');
+        productLabel.textContent = t.product + ' *';
+        const productSelect = document.createElement('select');
+        productSelect.name = 'product_id';
+        productSelect.required = true;
+
+        const productDefault = document.createElement('option');
+        productDefault.value = '';
+        productDefault.textContent = t.selectProduct;
+        productSelect.appendChild(productDefault);
+
+        //  FIXED: Data already sanitized
+        products.forEach(product => {
+            const option = document.createElement('option');
+            option.value = product.id;
+            option.textContent = product.name;
+            productSelect.appendChild(option);
+        });
+
+        productGroup.appendChild(productLabel);
+        productGroup.appendChild(productSelect);
+        form.appendChild(productGroup);
+
+        // Description
+        const descGroup = document.createElement('div');
+        descGroup.className = 'form-group';
+        const descLabel = document.createElement('label');
+        descLabel.textContent = t.description;
+        const descTextarea = document.createElement('textarea');
+        descTextarea.name = 'description';
+        descTextarea.rows = 4;
+        descGroup.appendChild(descLabel);
+        descGroup.appendChild(descTextarea);
+        form.appendChild(descGroup);
+
+        // Website
+        const websiteGroup = document.createElement('div');
+        websiteGroup.className = 'form-group';
+        const websiteLabel = document.createElement('label');
+        websiteLabel.textContent = t.website;
+        const websiteInput = document.createElement('input');
+        websiteInput.type = 'url';
+        websiteInput.name = 'website';
+        websiteGroup.appendChild(websiteLabel);
+        websiteGroup.appendChild(websiteInput);
+        form.appendChild(websiteGroup);
+
+        // Error message container
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-message';
+        errorDiv.style.display = 'none';
+        form.appendChild(errorDiv);
+
+        // Buttons
+        const buttonGroup = document.createElement('div');
+        buttonGroup.className = 'form-buttons';
+
+        const publishButton = document.createElement('button');
+        publishButton.type = 'submit';
+        publishButton.className = 'btn-primary';
+        publishButton.textContent = t.publish;
+
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'btn-secondary';
+        cancelButton.textContent = t.cancel;
+        cancelButton.addEventListener('click', () => {
+            window.location.href = '/';
+        });
+
+        buttonGroup.appendChild(publishButton);
+        buttonGroup.appendChild(cancelButton);
+        form.appendChild(buttonGroup);
+
+        //  CRITICAL FIX: Validate and sanitize all form data
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorDiv.style.display = 'none';
+
+            try {
+                const formData = new FormData(form);
+                
+                //  Validate and sanitize all inputs
+                const validatedData = validateFormData({
+                    name: formData.get('name'),
+                    contact_email: formData.get('email'),
+                    contact_phone: formData.get('phone'),
+                    address: formData.get('address'),
+                    description: formData.get('description') || '',
+                    website: formData.get('website') || '',
+                    commune_id: parseInt(formData.get('commune_id')),
+                    product_id: parseInt(formData.get('product_id'))
+                });
+
+                // Additional validation
+                if (!validatedData.commune_id || validatedData.commune_id === 0) {
+                    throw new Error(t.selectCommune);
+                }
+                if (!validatedData.product_id || validatedData.product_id === 0) {
+                    throw new Error(t.selectProduct);
+                }
+
+                publishButton.disabled = true;
+                publishButton.textContent = t.publishing;
+
+                const response = await apiRequest('/api/v1/companies', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(validatedData)
+                });
+
+                if (response.ok) {
+                    alert(t.success);
+                    window.location.href = '/profile-view';
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || t.error);
+                }
+
+            } catch (error) {
+                console.error('Publish error:', error);
+                errorDiv.textContent = error.message || t.error;
+                errorDiv.style.display = 'block';
+                publishButton.disabled = false;
+                publishButton.textContent = t.publish;
+            }
+        });
+
+        publishContainer.appendChild(form);
     }
 
-    document.addEventListener('languageChange', render);
-    document.addEventListener('userHasLogged', render);
-    document.addEventListener('companyPublishStateChange', render);
-    render();
+    await renderPublishForm();
+
+    document.addEventListener('languageChange', renderPublishForm);
 });

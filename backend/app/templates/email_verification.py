@@ -110,7 +110,7 @@ def verification_success_page(email: str) -> str:
                 </svg>
             </div>
             
-            <h1>✅ Email Verified!</h1>
+            <h1> Email Verified!</h1>
             
             <p>
                 Your email <span class="email">{email}</span> has been successfully verified.

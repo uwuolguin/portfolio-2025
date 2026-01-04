@@ -1,3 +1,4 @@
+csrf admin issues
 HTTP Error Handling (improves debugging + security)
 Whitespace Validation (data integrity)
 Frontend State Sync (UX improvement)

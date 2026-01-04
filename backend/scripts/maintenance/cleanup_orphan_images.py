@@ -138,7 +138,7 @@ async def cleanup_orphan_images():
     )
 
     if not orphan_images:
-        print("\n✅ No orphan images found.")
+        print("\n No orphan images found.")
         return
 
     orphan_list = sorted(orphan_images)
@@ -149,7 +149,7 @@ async def cleanup_orphan_images():
 
     deleted = await delete_orphan_images(orphan_list)
 
-    print(f"\n✅ Cleanup completed: {deleted} images deleted\n")
+    print(f"\n Cleanup completed: {deleted} images deleted\n")
 
 
 async def main():

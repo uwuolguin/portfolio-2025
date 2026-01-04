@@ -58,7 +58,7 @@ async def setup_cron_refresh() -> None:
             """
         )
 
-        print("✅ Cron job scheduled: refresh every hour")
+        print(" Cron job scheduled: refresh every hour")
 
 
 if __name__ == "__main__":

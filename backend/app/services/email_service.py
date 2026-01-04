@@ -68,7 +68,7 @@ class EmailService:
             response = resend.Emails.send({
                 "from":settings.email_from,
                 "to": to_email,
-                "subject": "✅ Verify Your Proveo Account",
+                "subject": " Verify Your Proveo Account",
                 "html": html_content
             })
             

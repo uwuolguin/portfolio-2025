@@ -182,7 +182,7 @@ async def seed_test_data() -> None:
                 "REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search"
             )
 
-            print("✅ Seeding completed successfully")
+            print(" Seeding completed successfully")
 
         except Exception:
             logger.error("seed_failed", exc_info=True)

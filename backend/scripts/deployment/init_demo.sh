@@ -1,3 +1,4 @@
+#docker-compose exec backend bash /app/scripts/deployment/init_demo.sh
 #!/bin/bash
 set -e
 
@@ -20,6 +21,6 @@ docker compose exec backend python -m scripts.database.seed_test_data
 echo "🩺 Running health test to check functionality... uwu"
 docker compose exec backend pytest app/tests/test_health.py -v
 
-echo "✅ Backend initialization complete uwu"
+echo " Backend initialization complete uwu"
 echo
 read -p "Press Enter to exit..."
