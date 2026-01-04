@@ -1,7 +1,16 @@
-from pydantic import BaseModel, Field, model_validator
+"""
+Product Schemas
+
+Pydantic models for product-related API requests and responses.
+"""
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
 from datetime import datetime
 from typing import Optional
+
+from app.utils.validators import validate_name, normalize_whitespace, ValidationError
+
 
 class ProductRecord(BaseModel):
     """
@@ -26,6 +35,7 @@ class ProductRecord(BaseModel):
 
 
 class ProductCreate(BaseModel):
+    """Schema for creating a new product"""
     name_es: Optional[str] = Field(
         None,
         min_length=1,
@@ -38,6 +48,18 @@ class ProductCreate(BaseModel):
         max_length=100,
         description="English product name (optional if name_es provided)",
     )
+
+    @field_validator("name_es", "name_en", mode="before")
+    @classmethod
+    def validate_name_fields(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError("Name must be a string")
+        try:
+            return validate_name(v, "name", min_length=1, max_length=100)
+        except ValidationError as e:
+            raise ValueError(e.message)
 
     @model_validator(mode="after")
     def check_at_least_one_name(self):
@@ -58,6 +80,7 @@ class ProductCreate(BaseModel):
 
 
 class ProductUpdate(BaseModel):
+    """Schema for updating a product"""
     name_es: Optional[str] = Field(
         None,
         min_length=1,
@@ -70,6 +93,18 @@ class ProductUpdate(BaseModel):
         max_length=100,
         description="English product name",
     )
+
+    @field_validator("name_es", "name_en", mode="before")
+    @classmethod
+    def validate_name_fields(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError("Name must be a string")
+        try:
+            return validate_name(v, "name", min_length=1, max_length=100)
+        except ValidationError as e:
+            raise ValueError(e.message)
 
     @model_validator(mode="after")
     def check_at_least_one_name(self):
@@ -90,6 +125,7 @@ class ProductUpdate(BaseModel):
 
 
 class ProductResponse(BaseModel):
+    """Public API response for product data"""
     uuid: UUID
     name_es: str
     name_en: str

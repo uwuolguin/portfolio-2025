@@ -1,6 +1,15 @@
-from typing import Optional, List, Dict
+"""
+Application Configuration
 
-from pydantic import Field
+Centralized settings management using pydantic-settings.
+All sensitive values should be loaded from environment variables.
+
+SECURITY NOTE: Never commit .env files with real credentials!
+"""
+
+from typing import Optional, List, Dict, Set
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +53,29 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 120
 
     # ------------------------------------------------------------------------
+    # Admin Bypass Security
+    # ------------------------------------------------------------------------
+    admin_api_key: str
+    admin_bypass_ips: Set[str] = Field(
+        default_factory=set,
+        description="Comma-separated list of IPs/CIDRs allowed for admin bypass"
+    )
+    
+    @field_validator("admin_bypass_ips", mode="before")
+    @classmethod
+    def parse_admin_bypass_ips(cls, v):
+        """Parse comma-separated IP list into a set"""
+        if isinstance(v, set):
+            return v
+        if isinstance(v, str):
+            if not v.strip():
+                return set()
+            return {ip.strip() for ip in v.split(",") if ip.strip()}
+        if isinstance(v, (list, tuple)):
+            return set(v)
+        return set()
+
+    # ------------------------------------------------------------------------
     # File uploads / Image processing
     # ------------------------------------------------------------------------
     content_type_map: Dict[str, str] = Field(
@@ -52,6 +84,7 @@ class Settings(BaseSettings):
             "image/png": ".png",
         }
     )
+    max_file_size: int = 10_000_000  # 10MB
 
     # ------------------------------------------------------------------------
     # Image Service / HTTP client
@@ -74,6 +107,17 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------------
+    # Input Validation
+    # ------------------------------------------------------------------------
+    max_name_length: int = 100
+    max_email_length: int = 100
+    max_description_length: int = 500
+    max_address_length: int = 200
+    max_phone_length: int = 20
+    min_password_length: int = 8
+    max_password_length: int = 100
+
+    # ------------------------------------------------------------------------
     # Database monitoring / Retry
     # ------------------------------------------------------------------------
     db_health_check_interval: int = 30
@@ -87,7 +131,6 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     verification_token_email_time: int = 30
     admin_email: str
-    admin_api_key: str
     resend_api_key: str
     email_from: str = "noreply@proveo.com"
     api_base_url: str = "http://localhost"

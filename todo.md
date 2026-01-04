@@ -1,13 +1,6 @@
-xss innerhtml mitigation(frontend and backen)
-correlation id (frontend and backend)
-
-HTTP Error Handling (improves debugging + security)
-Whitespace Validation (data integrity)
-csrf admin case
-
-the steps above will break the app, so debug and everything will be fine
-
-check ui and api/docs(currently is all broken but is easy to debug, very easy)
+#APP IS COMPLETLY BROKEN
+#USING POSTMAN TEST EVERY SINGLE ENDPOINT AND REPAIR
+#CHECK EVERY STATIC WEB PAGE AND TRIGGER ALL FUNCTIONALITIES TO SEE WHAT IS BROKEN AND FIX IT
 
 Kubernetes deployment: create manifests/helm, test in k8s
 

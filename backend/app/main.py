@@ -1,5 +1,16 @@
+"""
+Proveo API - Main Application Entry Point
+
+FastAPI application with:
+- Database connection pooling
+- Redis caching with graceful degradation
+- Structured logging with correlation IDs
+- Comprehensive error handling
+- Security middleware
+- Scheduled maintenance jobs
+"""
+
 from contextlib import asynccontextmanager
-import traceback
 
 import structlog
 from fastapi import FastAPI, Request, status
@@ -17,6 +28,7 @@ from app.middleware.security import (
     HTTPSRedirectMiddleware,
 )
 from app.routers import users, products, communes, companies, health
+from app.utils.exceptions import register_exception_handlers
 
 setup_logging()
 
@@ -36,6 +48,7 @@ async def scheduled_cleanup():
             error=str(e),
             exc_info=True
         )
+
 
 def create_app() -> FastAPI:
     """Factory function to create a FastAPI app instance with fresh scheduler"""
@@ -106,30 +119,18 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.debug else None,
     )
 
+    # Register custom exception handlers
+    register_exception_handlers(app)
+
+    # Add middleware (order matters - first added = last executed)
     app.add_middleware(HTTPSRedirectMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     setup_cors(app)
     app.add_middleware(LoggingMiddleware)
 
     @app.middleware("http")
-    async def global_exception_handler(request: Request, call_next):
-        try:
-            return await call_next(request)
-        except Exception as e:
-            logger.error(
-                "unhandled_exception",
-                path=request.url.path,
-                method=request.method,
-                error=str(e),
-                traceback=traceback.format_exc(),
-            )
-            return JSONResponse(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={"detail": "Unexpected internal server error"},
-            )
-
-    @app.middleware("http")
     async def global_rate_limit_middleware(request: Request, call_next):
+        """Apply global rate limiting to API endpoints"""
         if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
 
@@ -152,31 +153,7 @@ def create_app() -> FastAPI:
 
         return await call_next(request)
 
-    @app.exception_handler(413)
-    async def request_entity_too_large_handler(request: Request, exc):
-        return JSONResponse(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            content={
-                "detail": f"Request body too large. Maximum size: {settings.max_file_size / 1_000_000}MB"
-            },
-        )
-
-    @app.exception_handler(500)
-    async def internal_server_error_handler(request: Request, exc):
-        logger.error(
-            "internal_server_error",
-            path=request.url.path,
-            method=request.method,
-            error=str(exc),
-            exc_info=True,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "detail": "Internal server error. Please contact support if the issue persists."
-            },
-        )
-
+    # Include routers
     app.include_router(users.router, prefix=settings.api_v1_prefix)
     app.include_router(products.router, prefix=settings.api_v1_prefix)
     app.include_router(communes.router, prefix=settings.api_v1_prefix)
@@ -184,5 +161,6 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix=settings.api_v1_prefix)
 
     return app
+
 
 app = create_app()
