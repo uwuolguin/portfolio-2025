@@ -1,5 +1,5 @@
-xss innerhtml mitigation
-correlation id
+xss innerhtml mitigation(frontend and backen)
+correlation id (frontend and backend)
 
 HTTP Error Handling (improves debugging + security)
 Whitespace Validation (data integrity)
