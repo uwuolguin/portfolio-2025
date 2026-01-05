@@ -13,8 +13,7 @@ FastAPI application with:
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 

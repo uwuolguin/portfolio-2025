@@ -12,7 +12,7 @@ IMPORTANT: Configure ADMIN_BYPASS_IPS in production!
 
 import secrets
 import time
-from typing import Optional, Set
+from typing import Optional
 from fastapi import Request, HTTPException, status
 import structlog
 

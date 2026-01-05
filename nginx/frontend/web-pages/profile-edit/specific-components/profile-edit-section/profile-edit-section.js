@@ -8,8 +8,6 @@ import {
 //  ADDED: Import all necessary sanitizer functions
 import {
     sanitizeText,
-    sanitizeEmail,
-    sanitizePhone,
     sanitizeAPIResponse,
     validateFormData,
     buildDropdownOption
@@ -482,7 +480,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 //  CHANGED: Use apiRequest instead of fetch
                 const response = await apiRequest(`/api/v1/companies/${company.uuid}`, {
-                    method: 'PUT',
+                    method: 'PATCH',
                     body: formData
                 });
 
