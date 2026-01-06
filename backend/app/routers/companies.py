@@ -9,9 +9,9 @@ API endpoints for company management including:
 
 from fastapi import (
     APIRouter, Depends, HTTPException, status, 
-    UploadFile, File, Query, Form, Request
+    UploadFile, File, Query, Form
 )
-from typing import List, Optional, Union
+from typing import List, Optional
 from uuid import UUID
 import asyncpg
 import uuid
@@ -35,7 +35,6 @@ from app.services.image_service_client import image_service_client
 from app.utils.exceptions import (
     NotFoundError,
     ConflictError,
-    ForbiddenError,
     ValidationErrorResponse,
     ServiceUnavailableError
 )
@@ -227,6 +226,7 @@ async def create_company(
     product_name: str = Form(..., description="Product name"),
     address: str = Form(..., description="Company address"),
     phone: str = Form(..., description="Phone number"),
+    email: str = Form(..., description="Company email"),
     description_es: str = Form(..., description="Description in Spanish"),
     description_en: Optional[str] = Form(None, description="Description in English (auto-translated if empty)"),
     image: Optional[UploadFile] = File(None, description="Company logo"),
@@ -248,6 +248,7 @@ async def create_company(
         validated_name = validate_name(name)
         validated_address = validate_address(address)
         validated_phone = validate_phone(phone)
+        validated_email = validate_email(email)
         validated_desc_es = validate_description(description_es)
         validated_lang = validate_language(lang)
     except ValidationError as e:
@@ -302,20 +303,24 @@ async def create_company(
                     message="Failed to upload company image"
                 )
         
-        # Create company
+        # Generate company UUID
+        company_uuid = uuid.uuid4()
+        
+        # Create company (note: transactions.py requires company_uuid and email)
         company = await DB.create_company(
             conn=db,
+            company_uuid=company_uuid,
             user_uuid=user_uuid,
-            name=validated_name,
-            commune_uuid=commune_uuid,
             product_uuid=product_uuid,
-            address=validated_address,
-            phone=validated_phone,
+            commune_uuid=commune_uuid,
+            name=validated_name,
             description_es=validated_desc_es,
             description_en=validated_desc_en,
+            address=validated_address,
+            phone=validated_phone,
+            email=validated_email,
             image_url=image_url,
             image_extension=image_extension,
-            lang=validated_lang,
         )
         
         logger.info(
@@ -357,6 +362,7 @@ async def update_my_company(
     product_name: Optional[str] = Form(None, description="Product name"),
     address: Optional[str] = Form(None, description="Company address"),
     phone: Optional[str] = Form(None, description="Phone number"),
+    email: Optional[str] = Form(None, description="Company email"),
     description_es: Optional[str] = Form(None, description="Description in Spanish"),
     description_en: Optional[str] = Form(None, description="Description in English"),
     image: Optional[UploadFile] = File(None, description="Company logo"),
@@ -399,6 +405,12 @@ async def update_my_company(
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="phone")
         
+        if email is not None:
+            try:
+                update_data["email"] = validate_email(email)
+            except ValidationError as e:
+                raise ValidationErrorResponse(message=e.message, field="email")
+        
         if description_es is not None:
             try:
                 update_data["description_es"] = validate_description(description_es)
@@ -411,11 +423,7 @@ async def update_my_company(
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="description_en")
         
-        if lang is not None:
-            try:
-                update_data["lang"] = validate_language(lang)
-            except ValidationError as e:
-                raise ValidationErrorResponse(message=e.message, field="lang")
+        # Note: lang parameter removed from update_company_by_uuid signature
         
         # Resolve commune UUID if provided
         if commune_name is not None:
@@ -423,7 +431,8 @@ async def update_my_company(
         
         # Resolve product UUID if provided
         if product_name is not None:
-            current_lang = update_data.get("lang", company.lang)
+            # Use company's existing lang if not being updated
+            current_lang = lang if lang else "es"  # Default to 'es' since lang is removed
             update_data["product_uuid"] = await resolve_product_uuid(
                 db, product_name, current_lang
             )
@@ -461,10 +470,11 @@ async def update_my_company(
             )
             return CompanyResponse(**response_dict)
         
-        # Update company
-        updated_company = await DB.update_company(
+        # Update company (use update_company_by_uuid from transactions.py)
+        updated_company = await DB.update_company_by_uuid(
             conn=db,
             company_uuid=company.uuid,
+            user_uuid=user_uuid,
             **update_data
         )
         
@@ -520,22 +530,12 @@ async def delete_my_company(
         if not company:
             raise NotFoundError(resource="company", identifier=f"user:{user_uuid}")
         
-        # Delete image if exists
-        if company.image_url:
-            try:
-                await image_service_client.delete_image(
-                    company.image_url,
-                    company.image_extension
-                )
-            except Exception as img_error:
-                logger.warning(
-                    "image_delete_failed_continuing",
-                    error=str(img_error),
-                    company_uuid=str(company.uuid)
-                )
-        
-        # Delete company
-        await DB.delete_company(conn=db, company_uuid=company.uuid)
+        # Delete company (use delete_company_by_uuid from transactions.py)
+        result = await DB.delete_company_by_uuid(
+            conn=db,
+            company_uuid=company.uuid,
+            user_uuid=user_uuid
+        )
         
         logger.info(
             "company_deleted",
@@ -545,7 +545,7 @@ async def delete_my_company(
         
         return CompanyDeleteResponse(
             message="Company successfully deleted",
-            company_uuid=company.uuid
+            company_uuid=result.uuid
         )
         
     except NotFoundError:
@@ -580,7 +580,8 @@ async def admin_list_companies(
     List all companies (Admin only).
     """
     try:
-        companies = await DB.get_all_companies_admin(
+        # Use get_all_companies from transactions.py
+        companies = await DB.get_all_companies(
             conn=db, limit=limit, offset=offset
         )
         
@@ -631,22 +632,8 @@ async def admin_delete_company(
         if not company:
             raise NotFoundError(resource="company", identifier=str(company_uuid))
         
-        # Delete image if exists
-        if company.image_url:
-            try:
-                await image_service_client.delete_image(
-                    company.image_url,
-                    company.image_extension
-                )
-            except Exception as img_error:
-                logger.warning(
-                    "admin_image_delete_failed_continuing",
-                    error=str(img_error),
-                    company_uuid=str(company_uuid)
-                )
-        
-        # Delete company
-        await DB.delete_company(conn=db, company_uuid=company_uuid)
+        # Delete company using admin_delete_company_by_uuid
+        result = await DB.admin_delete_company_by_uuid(conn=db, company_uuid=company_uuid)
         
         logger.info(
             "admin_deleted_company",
@@ -657,7 +644,7 @@ async def admin_delete_company(
         
         return CompanyDeleteResponse(
             message="Company successfully deleted by admin",
-            company_uuid=company_uuid
+            company_uuid=result.uuid
         )
         
     except NotFoundError:
