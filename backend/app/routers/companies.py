@@ -16,6 +16,7 @@ from uuid import UUID
 import asyncpg
 import uuid
 import structlog
+from io import BytesIO
 
 from app.database.connection import get_db
 from app.database.transactions import DB
@@ -32,6 +33,7 @@ from app.schemas.companies import (
 )
 from app.services.translation_service import translate_field
 from app.services.image_service_client import image_service_client
+from app.config import settings
 from app.utils.exceptions import (
     NotFoundError,
     ConflictError,
@@ -90,6 +92,53 @@ async def resolve_product_uuid(conn: asyncpg.Connection, product_name: str, lang
     return result['uuid']
 
 
+async def upload_company_image(
+    image: UploadFile,
+    company_uuid: UUID,
+    user_uuid: UUID
+) -> dict:
+    """
+    Helper function to upload company image using the image service.
+    """
+    content_type = image.content_type
+    if content_type not in settings.content_type_map:
+        raise ValidationErrorResponse(
+            message=f"Unsupported image type: {content_type}. Allowed: {', '.join(settings.content_type_map.keys())}",
+            field="image"
+        )
+    
+    extension = settings.content_type_map[content_type]
+    file_content = await image.read()
+    file_stream = BytesIO(file_content)
+    
+    try:
+        upload_result = await image_service_client.upload_image_streaming(
+            file_obj=file_stream,
+            company_id=str(company_uuid),
+            content_type=content_type,
+            extension=extension,
+            user_id=str(user_uuid),
+        )
+        
+        return {
+            "image_id": upload_result["image_id"],
+            "extension": upload_result["extension"]
+        }
+        
+    except Exception as e:
+        logger.error(
+            "image_upload_failed",
+            error=str(e),
+            company_uuid=str(company_uuid),
+            user_uuid=str(user_uuid),
+            exc_info=True
+        )
+        raise ServiceUnavailableError(
+            service="image",
+            message="Failed to upload company image"
+        )
+
+
 @router.get(
     "/search",
     response_model=List[CompanySearchResponse],
@@ -104,15 +153,8 @@ async def search_companies(
     offset: int = Query(0, ge=0, description="Results to skip"),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Search companies with optional filters.
-    
-    - Full-text search on company data
-    - Filter by commune or product
-    - Paginated results
-    """
+    """Search companies with optional filters."""
     try:
-        # Normalize search parameters
         search_query = normalize_whitespace(q) if q else ""
         commune_filter = normalize_whitespace(commune) if commune else None
         product_filter = normalize_whitespace(product) if product else None
@@ -143,9 +185,7 @@ async def get_my_company(
     current_user: dict = Depends(get_current_user),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get the current user's company.
-    """
+    """Get the current user's company."""
     user_uuid = UUID(current_user["sub"])
 
     try:
@@ -184,9 +224,7 @@ async def get_company(
     company_uuid: UUID,
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    Get a company by its UUID (public endpoint).
-    """
+    """Get a company by its UUID (public endpoint)."""
     try:
         company = await DB.get_company_by_uuid(db, company_uuid)
         if not company:
@@ -229,18 +267,13 @@ async def create_company(
     email: str = Form(..., description="Company email"),
     description_es: str = Form(..., description="Description in Spanish"),
     description_en: Optional[str] = Form(None, description="Description in English (auto-translated if empty)"),
-    image: Optional[UploadFile] = File(None, description="Company logo"),
+    image: UploadFile = File(..., description="Company logo (required)"),
     lang: str = Form("es", description="Primary language"),
     current_user: dict = Depends(require_verified_email),
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Create a new company for the current user.
-    
-    Requires verified email.
-    User can only have one company.
-    """
+    """Create a new company for the current user."""
     user_uuid = UUID(current_user["sub"])
     
     # Validate inputs
@@ -254,7 +287,7 @@ async def create_company(
     except ValidationError as e:
         raise ValidationErrorResponse(message=e.message, field=e.field)
     
-    # Auto-translate description if not provided
+    # Handle description translation
     if description_en:
         try:
             validated_desc_en = validate_description(description_en)
@@ -262,51 +295,32 @@ async def create_company(
             raise ValidationErrorResponse(message=e.message, field="description_en")
     else:
         try:
-            validated_desc_en = await translate_field(validated_desc_es, "es", "en")
-        except Exception as e:
-            logger.warning(
-                "translation_failed",
-                error=str(e),
-                field="description_en"
+            _, validated_desc_en = await translate_field(
+                field_name="description",
+                text_es=validated_desc_es,
+                text_en=None
             )
-            validated_desc_en = validated_desc_es  # Fallback to Spanish
+        except Exception as e:
+            logger.warning("translation_failed", error=str(e), field="description_en")
+            validated_desc_en = validated_desc_es
     
     try:
-        # Check if user already has a company
         existing = await DB.get_company_by_user_uuid(db, user_uuid)
         if existing:
-            raise ConflictError(
-                message="User already has a company",
-                resource="company"
-            )
+            raise ConflictError(message="User already has a company", resource="company")
         
-        # Resolve commune and product UUIDs
         commune_uuid = await resolve_commune_uuid(db, commune_name)
         product_uuid = await resolve_product_uuid(db, product_name, validated_lang)
         
-        # Handle image upload
-        image_url = None
-        image_extension = None
-        if image and image.filename:
-            try:
-                upload_result = await image_service_client.upload_image(image)
-                image_url = upload_result.get("image_id")
-                image_extension = upload_result.get("extension")
-            except Exception as img_error:
-                logger.error(
-                    "image_upload_failed",
-                    error=str(img_error),
-                    user_uuid=str(user_uuid)
-                )
-                raise ServiceUnavailableError(
-                    service="image",
-                    message="Failed to upload company image"
-                )
-        
-        # Generate company UUID
         company_uuid = uuid.uuid4()
         
-        # Create company (note: transactions.py requires company_uuid and email)
+        if not image or not image.filename:
+            raise ValidationErrorResponse(message="Company image is required", field="image")
+        
+        upload_result = await upload_company_image(image, company_uuid, user_uuid)
+        image_url = upload_result["image_id"]
+        image_extension = upload_result["extension"]
+        
         company = await DB.create_company(
             conn=db,
             company_uuid=company_uuid,
@@ -323,28 +337,26 @@ async def create_company(
             image_extension=image_extension,
         )
         
-        logger.info(
-            "company_created",
-            company_uuid=str(company.uuid),
-            user_uuid=str(user_uuid)
-        )
+        logger.info("company_created", company_uuid=str(company.uuid), user_uuid=str(user_uuid))
         
-        response_dict = company.model_dump()
-        response_dict["image_url"] = image_service_client.build_image_url(
-            company.image_url,
-            company.image_extension,
+        company_with_relations = await DB.get_company_by_uuid(db, company.uuid)
+        if company_with_relations:
+            response_dict = company_with_relations.model_dump()
+            response_dict["image_url"] = image_service_client.build_image_url(
+                company_with_relations.image_url,
+                company_with_relations.image_extension,
+            )
+            return CompanyResponse(**response_dict)
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Company created but failed to retrieve"
         )
-        return CompanyResponse(**response_dict)
         
     except (ConflictError, ValidationErrorResponse, ServiceUnavailableError):
         raise
     except Exception as e:
-        logger.error(
-            "create_company_error",
-            user_uuid=str(user_uuid),
-            error=str(e),
-            exc_info=True
-        )
+        logger.error("create_company_error", user_uuid=str(user_uuid), error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create company"
@@ -371,11 +383,7 @@ async def update_my_company(
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Update the current user's company.
-    
-    Only provided fields are updated.
-    """
+    """Update the current user's company. Only provided fields are updated."""
     user_uuid = UUID(current_user["sub"])
     
     try:
@@ -384,84 +392,90 @@ async def update_my_company(
         if not company:
             raise NotFoundError(resource="company", identifier=f"user:{user_uuid}")
         
-        # Build update dict with validated values
-        update_data = {}
+        # Validate and prepare each field - these match the DB function parameter names exactly
+        validated_name: Optional[str] = None
+        validated_address: Optional[str] = None
+        validated_phone: Optional[str] = None
+        validated_email: Optional[str] = None
+        validated_desc_es: Optional[str] = None
+        validated_desc_en: Optional[str] = None
+        validated_image_url: Optional[str] = None
+        validated_image_ext: Optional[str] = None
+        validated_product_uuid: Optional[UUID] = None
+        validated_commune_uuid: Optional[UUID] = None
         
         if name is not None:
             try:
-                update_data["name"] = validate_name(name)
+                validated_name = validate_name(name)
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="name")
         
         if address is not None:
             try:
-                update_data["address"] = validate_address(address)
+                validated_address = validate_address(address)
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="address")
         
         if phone is not None:
             try:
-                update_data["phone"] = validate_phone(phone)
+                validated_phone = validate_phone(phone)
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="phone")
         
         if email is not None:
             try:
-                update_data["email"] = validate_email(email)
+                validated_email = validate_email(email)
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="email")
         
         if description_es is not None:
             try:
-                update_data["description_es"] = validate_description(description_es)
+                validated_desc_es = validate_description(description_es)
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="description_es")
         
         if description_en is not None:
             try:
-                update_data["description_en"] = validate_description(description_en)
+                validated_desc_en = validate_description(description_en)
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="description_en")
         
-        # Note: lang parameter removed from update_company_by_uuid signature
-        
-        # Resolve commune UUID if provided
         if commune_name is not None:
-            update_data["commune_uuid"] = await resolve_commune_uuid(db, commune_name)
+            validated_commune_uuid = await resolve_commune_uuid(db, commune_name)
         
-        # Resolve product UUID if provided
         if product_name is not None:
-            # Use company's existing lang if not being updated
-            current_lang = lang if lang else "es"  # Default to 'es' since lang is removed
-            update_data["product_uuid"] = await resolve_product_uuid(
-                db, product_name, current_lang
-            )
+            current_lang = lang if lang else "es"
+            validated_product_uuid = await resolve_product_uuid(db, product_name, current_lang)
         
         # Handle image upload if provided
         if image and image.filename:
-            try:
-                # Delete old image if exists
-                if company.image_url:
-                    await image_service_client.delete_image(
-                        company.image_url,
-                        company.image_extension
-                    )
-                
-                upload_result = await image_service_client.upload_image(image)
-                update_data["image_url"] = upload_result.get("image_id")
-                update_data["image_extension"] = upload_result.get("extension")
-            except Exception as img_error:
-                logger.error(
-                    "image_update_failed",
-                    error=str(img_error),
-                    company_uuid=str(company.uuid)
-                )
-                raise ServiceUnavailableError(
-                    service="image",
-                    message="Failed to update company image"
-                )
+            # Delete old image
+            if company.image_url and company.image_extension:
+                try:
+                    old_filename = f"{company.image_url}{company.image_extension}"
+                    await image_service_client.delete_image(old_filename)
+                    logger.info("old_company_image_deleted", company_uuid=str(company.uuid), old_image=old_filename)
+                except Exception as del_error:
+                    logger.warning("old_image_delete_failed", error=str(del_error), company_uuid=str(company.uuid))
+            
+            upload_result = await upload_company_image(image, company.uuid, user_uuid)
+            validated_image_url = upload_result["image_id"]
+            validated_image_ext = upload_result["extension"]
         
-        if not update_data:
+        # Check if any field was provided
+        has_updates = any([
+            validated_name is not None,
+            validated_address is not None,
+            validated_phone is not None,
+            validated_email is not None,
+            validated_desc_es is not None,
+            validated_desc_en is not None,
+            validated_image_url is not None,
+            validated_product_uuid is not None,
+            validated_commune_uuid is not None,
+        ])
+        
+        if not has_updates:
             # No updates provided, return current company
             response_dict = company.model_dump()
             response_dict["image_url"] = image_service_client.build_image_url(
@@ -470,21 +484,40 @@ async def update_my_company(
             )
             return CompanyResponse(**response_dict)
         
-        # Update company (use update_company_by_uuid from transactions.py)
+        # Call DB update with explicit parameter names matching the function signature
         updated_company = await DB.update_company_by_uuid(
             conn=db,
             company_uuid=company.uuid,
             user_uuid=user_uuid,
-            **update_data
+            name=validated_name,
+            description_es=validated_desc_es,
+            description_en=validated_desc_en,
+            address=validated_address,
+            phone=validated_phone,
+            email=validated_email,
+            image_url=validated_image_url,
+            image_extension=validated_image_ext,
+            product_uuid=validated_product_uuid,
+            commune_uuid=validated_commune_uuid,
         )
         
         logger.info(
             "company_updated",
             company_uuid=str(company.uuid),
             user_uuid=str(user_uuid),
-            updated_fields=list(update_data.keys())
         )
         
+        # Fetch updated company with relations for response
+        company_with_relations = await DB.get_company_by_uuid(db, updated_company.uuid)
+        if company_with_relations:
+            response_dict = company_with_relations.model_dump()
+            response_dict["image_url"] = image_service_client.build_image_url(
+                company_with_relations.image_url,
+                company_with_relations.image_extension,
+            )
+            return CompanyResponse(**response_dict)
+        
+        # Fallback
         response_dict = updated_company.model_dump()
         response_dict["image_url"] = image_service_client.build_image_url(
             updated_company.image_url,
@@ -495,12 +528,7 @@ async def update_my_company(
     except (NotFoundError, ValidationErrorResponse, ServiceUnavailableError):
         raise
     except Exception as e:
-        logger.error(
-            "update_company_error",
-            user_uuid=str(user_uuid),
-            error=str(e),
-            exc_info=True
-        )
+        logger.error("update_company_error", user_uuid=str(user_uuid), error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update company"
@@ -517,46 +545,32 @@ async def delete_my_company(
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Delete the current user's company.
-    
-    Also deletes associated image.
-    """
+    """Delete the current user's company."""
     user_uuid = UUID(current_user["sub"])
     
     try:
-        # Get company to delete
         company = await DB.get_company_by_user_uuid(db, user_uuid)
         if not company:
             raise NotFoundError(resource="company", identifier=f"user:{user_uuid}")
         
-        # Delete company (use delete_company_by_uuid from transactions.py)
         result = await DB.delete_company_by_uuid(
             conn=db,
             company_uuid=company.uuid,
             user_uuid=user_uuid
         )
         
-        logger.info(
-            "company_deleted",
-            company_uuid=str(company.uuid),
-            user_uuid=str(user_uuid)
-        )
+        logger.info("company_deleted", company_uuid=str(company.uuid), user_uuid=str(user_uuid))
         
         return CompanyDeleteResponse(
-            message="Company successfully deleted",
-            company_uuid=result.uuid
+            uuid=result.uuid,
+            name=result.name,
+            message="Company successfully deleted"
         )
         
     except NotFoundError:
         raise
     except Exception as e:
-        logger.error(
-            "delete_company_error",
-            user_uuid=str(user_uuid),
-            error=str(e),
-            exc_info=True
-        )
+        logger.error("delete_company_error", user_uuid=str(user_uuid), error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete company"
@@ -576,14 +590,9 @@ async def admin_list_companies(
     current_user: dict = Depends(require_admin),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """
-    List all companies (Admin only).
-    """
+    """List all companies (Admin only)."""
     try:
-        # Use get_all_companies from transactions.py
-        companies = await DB.get_all_companies(
-            conn=db, limit=limit, offset=offset
-        )
+        companies = await DB.get_all_companies(conn=db, limit=limit, offset=offset)
         
         result = []
         for company in companies:
@@ -594,12 +603,7 @@ async def admin_list_companies(
             )
             result.append(CompanyResponse(**response_dict))
         
-        logger.info(
-            "admin_list_companies",
-            admin_email=current_user["email"],
-            companies_count=len(result)
-        )
-        
+        logger.info("admin_list_companies", admin_email=current_user["email"], companies_count=len(result))
         return result
         
     except Exception as e:
@@ -621,18 +625,12 @@ async def admin_delete_company(
     db: asyncpg.Connection = Depends(get_db),
     _: None = Depends(verify_csrf),
 ):
-    """
-    Delete any company by UUID (Admin only).
-    
-    Also deletes associated image.
-    """
+    """Delete any company by UUID (Admin only)."""
     try:
-        # Get company to delete
         company = await DB.get_company_by_uuid(db, company_uuid)
         if not company:
             raise NotFoundError(resource="company", identifier=str(company_uuid))
         
-        # Delete company using admin_delete_company_by_uuid
         result = await DB.admin_delete_company_by_uuid(conn=db, company_uuid=company_uuid)
         
         logger.info(
@@ -643,19 +641,15 @@ async def admin_delete_company(
         )
         
         return CompanyDeleteResponse(
-            message="Company successfully deleted by admin",
-            company_uuid=result.uuid
+            uuid=result.uuid,
+            name=result.name,
+            message="Company successfully deleted by admin"
         )
         
     except NotFoundError:
         raise
     except Exception as e:
-        logger.error(
-            "admin_delete_company_error",
-            company_uuid=str(company_uuid),
-            error=str(e),
-            exc_info=True
-        )
+        logger.error("admin_delete_company_error", company_uuid=str(company_uuid), error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete company"
