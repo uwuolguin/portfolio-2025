@@ -1,6 +1,4 @@
-#update company, admin list companies, admin delete compay and the WHOLE UI is BROKEN
-#USING POSTMAN TEST EVERY SINGLE ENDPOINT AND REPAIR
-#CHECK EVERY STATIC WEB PAGE AND TRIGGER ALL FUNCTIONALITIES TO SEE WHAT IS BROKEN AND FIX IT
+#UI is pending a proper fix and testing, the rest is already correct
 
 Kubernetes deployment: create manifests/helm, test in k8s
 

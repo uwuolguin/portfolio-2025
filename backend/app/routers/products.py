@@ -10,6 +10,7 @@ from app.schemas.products import ProductCreate, ProductUpdate, ProductResponse
 from app.auth.dependencies import require_admin, verify_csrf
 from app.redis.decorators import cache_response
 from app.redis.cache_manager import cache_manager
+from app.services.translation_service import translate_field
 
 logger = structlog.get_logger(__name__)
 
@@ -41,10 +42,17 @@ async def create_product(
     _: None = Depends(verify_csrf)
 ):
     try:
+        # Translate to get both languages (handles all cases: es only, en only, or both)
+        validated_name_es, validated_name_en = await translate_field(
+            field_name="name",
+            text_es=product_data.name_es,
+            text_en=product_data.name_en
+        )
+        
         product = await DB.create_product(
             conn=db,
-            name_es=product_data.name_es,
-            name_en=product_data.name_en
+            name_es=validated_name_es,
+            name_en=validated_name_en
         )
 
         await cache_manager.invalidate_products()
@@ -60,7 +68,6 @@ async def create_product(
             detail="Failed to create product"
         )
 
-
 @router.put(
     "/{product_uuid}/use-postman-or-similar-to-bypass-csrf",
     response_model=ProductResponse,
@@ -74,11 +81,18 @@ async def update_product(
     _: None = Depends(verify_csrf)
 ):
     try:
+        # Translate to get both languages (handles all cases: es only, en only, or both)
+        validated_name_es, validated_name_en = await translate_field(
+            field_name="name",
+            text_es=product_data.name_es,
+            text_en=product_data.name_en
+        )
+        
         product = await DB.update_product_by_uuid(
             conn=db,
             product_uuid=product_uuid,
-            name_es=product_data.name_es,
-            name_en=product_data.name_en
+            name_es=validated_name_es,
+            name_en=validated_name_en
         )
 
         await cache_manager.invalidate_products()
@@ -93,8 +107,6 @@ async def update_product(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update product"
         )
-
-
 @router.delete(
     "/{product_uuid}/use-postman-or-similar-to-bypass-csrf",
     status_code=status.HTTP_200_OK,

@@ -158,7 +158,15 @@ async def search_companies(
         search_query = normalize_whitespace(q) if q else ""
         commune_filter = normalize_whitespace(commune) if commune else None
         product_filter = normalize_whitespace(product) if product else None
-        
+        logger.info(f"q: {q}")
+        logger.info(f"commune: {commune}")
+        logger.info(f"product: {product}")
+        logger.info(f"lang: {lang}")
+        logger.info(f"limit: {limit}")
+        logger.info(f"offset: {offset}")
+        logger.info(f"search_query: {search_query}")
+        logger.info(f"commune_filter: {commune_filter}")
+        logger.info(f"product_filter: {product_filter}")
         return await DB.search_companies(
             conn=db,
             query=search_query,
@@ -265,8 +273,8 @@ async def create_company(
     address: str = Form(..., description="Company address"),
     phone: str = Form(..., description="Phone number"),
     email: str = Form(..., description="Company email"),
-    description_es: str = Form(..., description="Description in Spanish"),
-    description_en: Optional[str] = Form(None, description="Description in English (auto-translated if empty)"),
+    description_es: Optional[str] = Form(None, description="Description in Spanish"),
+    description_en: Optional[str] = Form(None, description="Description in English"),
     image: UploadFile = File(..., description="Company logo (required)"),
     lang: str = Form("es", description="Primary language"),
     current_user: dict = Depends(require_verified_email),
@@ -276,33 +284,53 @@ async def create_company(
     """Create a new company for the current user."""
     user_uuid = UUID(current_user["sub"])
     
-    # Validate inputs
+    # Validate basic inputs
     try:
         validated_name = validate_name(name)
         validated_address = validate_address(address)
         validated_phone = validate_phone(phone)
         validated_email = validate_email(email)
-        validated_desc_es = validate_description(description_es)
         validated_lang = validate_language(lang)
     except ValidationError as e:
         raise ValidationErrorResponse(message=e.message, field=e.field)
     
-    # Handle description translation
+    # Validate descriptions if provided
+    validated_desc_es = None
+    validated_desc_en = None
+    
+    if description_es:
+        try:
+            validated_desc_es = validate_description(description_es)
+        except ValidationError as e:
+            raise ValidationErrorResponse(message=e.message, field="description_es")
+    
     if description_en:
         try:
             validated_desc_en = validate_description(description_en)
         except ValidationError as e:
             raise ValidationErrorResponse(message=e.message, field="description_en")
-    else:
-        try:
-            _, validated_desc_en = await translate_field(
-                field_name="description",
-                text_es=validated_desc_es,
-                text_en=None
-            )
-        except Exception as e:
-            logger.warning("translation_failed", error=str(e), field="description_en")
+    
+    # Ensure at least one description is provided
+    if not validated_desc_es and not validated_desc_en:
+        raise ValidationErrorResponse(
+            message="At least one description (Spanish or English) must be provided",
+            field="description"
+        )
+    
+    # Translate to get both languages (handles all cases: es only, en only, or both)
+    try:
+        validated_desc_es, validated_desc_en = await translate_field(
+            field_name="description",
+            text_es=validated_desc_es,
+            text_en=validated_desc_en
+        )
+    except Exception as e:
+        logger.warning("translation_failed", error=str(e), field="description")
+        # Fallback: use the one we have for both
+        if validated_desc_es and not validated_desc_en:
             validated_desc_en = validated_desc_es
+        elif validated_desc_en and not validated_desc_es:
+            validated_desc_es = validated_desc_en
     
     try:
         existing = await DB.get_company_by_user_uuid(db, user_uuid)
@@ -320,7 +348,6 @@ async def create_company(
         upload_result = await upload_company_image(image, company_uuid, user_uuid)
         image_url = upload_result["image_id"]
         image_extension = upload_result["extension"]
-        
         company = await DB.create_company(
             conn=db,
             company_uuid=company_uuid,
@@ -362,7 +389,6 @@ async def create_company(
             detail="Failed to create company"
         )
 
-
 @router.patch(
     "/user/my-company",
     response_model=CompanyResponse,
@@ -392,7 +418,7 @@ async def update_my_company(
         if not company:
             raise NotFoundError(resource="company", identifier=f"user:{user_uuid}")
         
-        # Validate and prepare each field - these match the DB function parameter names exactly
+        # Validate and prepare each field
         validated_name: Optional[str] = None
         validated_address: Optional[str] = None
         validated_phone: Optional[str] = None
@@ -428,17 +454,43 @@ async def update_my_company(
             except ValidationError as e:
                 raise ValidationErrorResponse(message=e.message, field="email")
         
-        if description_es is not None:
-            try:
-                validated_desc_es = validate_description(description_es)
-            except ValidationError as e:
-                raise ValidationErrorResponse(message=e.message, field="description_es")
-        
-        if description_en is not None:
-            try:
-                validated_desc_en = validate_description(description_en)
-            except ValidationError as e:
-                raise ValidationErrorResponse(message=e.message, field="description_en")
+        # Handle descriptions - if either is provided, we need to handle translation
+        if description_es is not None or description_en is not None:
+            temp_desc_es = None
+            temp_desc_en = None
+            
+            if description_es is not None:
+                try:
+                    temp_desc_es = validate_description(description_es)
+                except ValidationError as e:
+                    raise ValidationErrorResponse(message=e.message, field="description_es")
+            
+            if description_en is not None:
+                try:
+                    temp_desc_en = validate_description(description_en)
+                except ValidationError as e:
+                    raise ValidationErrorResponse(message=e.message, field="description_en")
+            
+            # If only one description provided, translate to get the other
+            if temp_desc_es or temp_desc_en:
+                try:
+                    validated_desc_es, validated_desc_en = await translate_field(
+                        field_name="description",
+                        text_es=temp_desc_es,
+                        text_en=temp_desc_en
+                    )
+                except Exception as e:
+                    logger.warning("translation_failed", error=str(e), field="description")
+                    # Fallback: use what we have
+                    if temp_desc_es and not temp_desc_en:
+                        validated_desc_es = temp_desc_es
+                        validated_desc_en = temp_desc_es
+                    elif temp_desc_en and not temp_desc_es:
+                        validated_desc_es = temp_desc_en
+                        validated_desc_en = temp_desc_en
+                    else:
+                        validated_desc_es = temp_desc_es
+                        validated_desc_en = temp_desc_en
         
         if commune_name is not None:
             validated_commune_uuid = await resolve_commune_uuid(db, commune_name)
@@ -483,8 +535,7 @@ async def update_my_company(
                 company.image_extension,
             )
             return CompanyResponse(**response_dict)
-        
-        # Call DB update with explicit parameter names matching the function signature
+        # Call DB update with explicit parameter names
         updated_company = await DB.update_company_by_uuid(
             conn=db,
             company_uuid=company.uuid,
@@ -533,7 +584,6 @@ async def update_my_company(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update company"
         )
-
 
 @router.delete(
     "/user/my-company",

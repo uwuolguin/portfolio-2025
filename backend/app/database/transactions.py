@@ -1248,6 +1248,7 @@ class DB:
                         user_name, user_email, commune_name,
                         similarity(searchable_text, $1) AS score
                     FROM proveo.company_search
+                    WHERE 1=1
                 """
                 params.append(search)
                 order_clause = " ORDER BY score DESC, company_name ASC"
