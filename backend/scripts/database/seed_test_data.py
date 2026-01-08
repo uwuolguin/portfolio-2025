@@ -71,33 +71,43 @@ async def seed_test_data() -> None:
         try:
             logger.info("seed_start")
 
+            # Create or get communes
             try:
                 commune_1 = await DB.create_commune(conn, "Santiago Centro")
+                commune_1_uuid = commune_1.uuid
             except ValueError:
-                commune_1 = await conn.fetchrow(
-                    "SELECT * FROM proveo.communes WHERE name = 'Santiago Centro'"
+                row = await conn.fetchrow(
+                    "SELECT uuid FROM proveo.communes WHERE name = 'Santiago Centro'"
                 )
+                commune_1_uuid = row['uuid']
 
             try:
                 commune_2 = await DB.create_commune(conn, "Providencia")
+                commune_2_uuid = commune_2.uuid
             except ValueError:
-                commune_2 = await conn.fetchrow(
-                    "SELECT * FROM proveo.communes WHERE name = 'Providencia'"
+                row = await conn.fetchrow(
+                    "SELECT uuid FROM proveo.communes WHERE name = 'Providencia'"
                 )
+                commune_2_uuid = row['uuid']
 
+            # Create or get products
             try:
                 product_1 = await DB.create_product(conn, "Tecnología", "Technology")
+                product_1_uuid = product_1.uuid
             except ValueError:
-                product_1 = await conn.fetchrow(
-                    "SELECT * FROM proveo.products WHERE name_es = 'Tecnología'"
+                row = await conn.fetchrow(
+                    "SELECT uuid FROM proveo.products WHERE name_es = 'Tecnología'"
                 )
+                product_1_uuid = row['uuid']
 
             try:
                 product_2 = await DB.create_product(conn, "Alimentos", "Food")
+                product_2_uuid = product_2.uuid
             except ValueError:
-                product_2 = await conn.fetchrow(
-                    "SELECT * FROM proveo.products WHERE name_es = 'Alimentos'"
+                row = await conn.fetchrow(
+                    "SELECT uuid FROM proveo.products WHERE name_es = 'Alimentos'"
                 )
+                product_2_uuid = row['uuid']
 
             for i, user_data in enumerate(TEST_USERS):
                 try:
@@ -132,8 +142,8 @@ async def seed_test_data() -> None:
                         user_id=str(user.uuid),
                     )
 
-                    product_uuid = product_1.uuid if i < 8 else product_2.uuid
-                    commune_uuid = commune_1.uuid if i < 8 else commune_2.uuid
+                    product_uuid = product_1_uuid if i < 8 else product_2_uuid
+                    commune_uuid = commune_1_uuid if i < 8 else commune_2_uuid
                     template = COMPANY_TEMPLATES[i]
 
                     await DB.create_company(
