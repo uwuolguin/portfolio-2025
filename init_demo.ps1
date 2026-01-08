@@ -1,4 +1,5 @@
-# Save this as init_demo.ps1 with UTF-8 encoding (no BOM)
+#Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+#.\init_demo.ps1
 $ErrorActionPreference = "Stop"
 
 Write-Host "Waiting for containers to be healthy..."
@@ -15,7 +16,7 @@ docker compose exec -T backend python -m scripts.database.refresh_search_index
 Write-Host "Creating testing data..."
 docker compose exec -T backend python -m scripts.database.seed_test_data
 
-Write-Host "Running health test to check functionality..."
-docker compose exec -T backend pytest app/tests/test_health.py -v
+Write-Host "Running tests to check functionality..."
+docker compose exec backend pytest app/tests/ -v
 
 Write-Host "Backend initialization complete"

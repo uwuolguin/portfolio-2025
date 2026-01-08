@@ -5,7 +5,6 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-
 async def enforce_rate_limit(
     request: Request,
     route_name: str,
@@ -51,3 +50,21 @@ async def enforce_rate_limit(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Too many requests globally (max {global_limit}/min)."
         )
+
+def rate_limit(
+    *,
+    route_name: str,
+    ip_limit: int,
+    global_limit: int,
+    window_seconds: int = 60,
+):
+    async def dependency(request: Request):
+        await enforce_rate_limit(
+            request=request,
+            route_name=route_name,
+            ip_limit=ip_limit,
+            global_limit=global_limit,
+            window_seconds=window_seconds,
+        )
+
+    return dependency

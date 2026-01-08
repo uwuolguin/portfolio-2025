@@ -34,9 +34,16 @@ async def transaction(
     conn: asyncpg.Connection,
     isolation: IsolationLevel = IsolationLevel.READ_COMMITTED,
     readonly: bool = False,
+    force_rollback: bool = False,
 ) -> AsyncGenerator[asyncpg.Connection, None]:
     """
     Clean asyncpg transaction wrapper with accurate commit/rollback logging.
+    
+    Args:
+        conn: Database connection
+        isolation: Transaction isolation level
+        readonly: If True, transaction is read-only
+        force_rollback: If True, always rollback instead of commit (for testing)
     """
     iso_mapping = {
         IsolationLevel.READ_COMMITTED: "read_committed",
@@ -52,6 +59,7 @@ async def transaction(
         "transaction_started",
         isolation=isolation.value,
         readonly=readonly,
+        force_rollback=force_rollback,
     )
 
     tx = conn.transaction(
@@ -59,12 +67,20 @@ async def transaction(
         readonly=readonly,
     )
 
+    await tx.start()
+    
     try:
-        async with tx:
-            yield conn
-        logger.debug("transaction_committed", isolation=isolation.value, readonly=readonly)
+        yield conn
+        
+        if force_rollback:
+            await tx.rollback()
+            logger.debug("transaction_forced_rollback", isolation=isolation.value)
+        else:
+            await tx.commit()
+            logger.debug("transaction_committed", isolation=isolation.value, readonly=readonly)
 
     except Exception as e:
+        await tx.rollback()
         logger.warning(
             "transaction_rolled_back",
             error=str(e),
@@ -72,17 +88,24 @@ async def transaction(
             exc_info=True,
         )
         raise
+
 class DB:
 
     @staticmethod
     @db_retry()
-    async def create_user(conn: asyncpg.Connection, name: str, email: str, password: str) -> UserRecord:
+    async def create_user(
+        conn: asyncpg.Connection, 
+        name: str, 
+        email: str, 
+        password: str,
+        force_rollback: bool = False,
+    ) -> UserRecord:
         hashed_password = get_password_hash(password)
         user_uuid = uuid.uuid4()
         verification_token = generate_csrf_token()
         token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_email_time)
 
-        async with transaction(conn):
+        async with transaction(conn, force_rollback=force_rollback):
             query = """
                 INSERT INTO proveo.users 
                     (uuid, name, email, hashed_password, role, verification_token, verification_token_expires)
@@ -383,11 +406,11 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str) -> ProductRecord:
+    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str,force_rollback: bool = False) -> ProductRecord:
         product_uuid = str(uuid.uuid4())
 
         try:
-            async with transaction(conn):
+            async with transaction(conn,force_rollback=force_rollback):
                 row = await conn.fetchrow(
                     """
                     INSERT INTO proveo.products (uuid, name_es, name_en)
@@ -533,9 +556,9 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_commune(conn: asyncpg.Connection, name: str) -> CommuneRecord:        
+    async def create_commune(conn: asyncpg.Connection, name: str,force_rollback: bool = False) -> CommuneRecord:        
         commune_uuid = str(uuid.uuid4())
-        async with transaction(conn):
+        async with transaction(conn,force_rollback=force_rollback):
             insert_query = """
                 INSERT INTO proveo.communes (name,uuid) 
                 VALUES ($1,$2) 
@@ -745,7 +768,8 @@ class DB:
         phone: str,
         email: str,
         image_url: str,
-        image_extension: str
+        image_extension: str,
+        force_rollback: bool = False,
     ) -> CompanyRecord:
         """
         Create a new company.
@@ -764,6 +788,7 @@ class DB:
             email: Contact email
             image_url: Image identifier (UUID)
             image_extension: Image file extension (.jpg, .png)
+            force_rollback: If True, rollback transaction (for testing)
             
         Returns:
             CompanyRecord of the created company
@@ -771,7 +796,7 @@ class DB:
         Raises:
             ValueError: If business rules violated or foreign keys invalid
         """
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, force_rollback=force_rollback):
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
                 user_uuid

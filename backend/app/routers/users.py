@@ -4,7 +4,6 @@ from typing import List
 import asyncpg
 from datetime import timedelta
 from uuid import UUID
-from functools import partial
 import structlog
 
 from app.database.connection import get_db
@@ -21,18 +20,13 @@ from app.templates.email_verification import (
     verification_error_page,
     verification_server_error_page
 )
-from app.redis.rate_limit import enforce_rate_limit
+from app.redis.rate_limit import rate_limit
 from app.config import settings
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
 
-resend_limit = partial(
-    enforce_rate_limit,
-    route_name="resend_verification",
-    ip_limit=2,
-    global_limit=10
-)
+
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -91,7 +85,13 @@ async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db)):
 async def resend_verification(
     email: str,
     db: asyncpg.Connection = Depends(get_db),
-    _: None = Depends(resend_limit)
+    _: None = Depends(
+                rate_limit(
+                    route_name="resend_verification",
+                    ip_limit=2,
+                    global_limit=10,
+                )
+            )
 ):
     """Resend verification email"""
     try:

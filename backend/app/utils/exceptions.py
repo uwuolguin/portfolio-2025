@@ -122,7 +122,7 @@ class ValidationErrorResponse(APIError):
     """Input validation error"""
     def __init__(self, message: str, field: Optional[str] = None, errors: Optional[list] = None):
         super().__init__(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             message=message,
             error_code="VALIDATION_ERROR",
             details={"field": field, "errors": errors}
@@ -283,7 +283,7 @@ async def validation_exception_handler(
         message = f"Validation errors in {len(errors)} field(s)"
     
     response_content = _build_error_response(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         message=message,
         error_code="VALIDATION_ERROR",
         correlation_id=correlation_id,
@@ -292,7 +292,7 @@ async def validation_exception_handler(
     )
     
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content=response_content
     )
 
@@ -314,7 +314,7 @@ async def app_validation_error_handler(
     )
     
     response_content = _build_error_response(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         message=f"Validation error: {exc.message}",
         error_code="VALIDATION_ERROR",
         correlation_id=correlation_id,
@@ -323,7 +323,7 @@ async def app_validation_error_handler(
     )
     
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content=response_content
     )
 
