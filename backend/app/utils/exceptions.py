@@ -18,11 +18,9 @@ from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from pydantic import ValidationError as PydanticValidationError
 import structlog
 
 from app.config import settings
-from app.utils.validators import ValidationError as AppValidationError
 
 logger = structlog.get_logger(__name__)
 
@@ -129,19 +127,6 @@ class ValidationErrorResponse(APIError):
         )
 
 
-class RateLimitError(APIError):
-    """Rate limit exceeded error"""
-    def __init__(self, message: str = "Rate limit exceeded", retry_after: Optional[int] = None):
-        headers = {"Retry-After": str(retry_after)} if retry_after else None
-        super().__init__(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            message=message,
-            error_code="RATE_LIMIT_EXCEEDED",
-            details={"retry_after": retry_after},
-            headers=headers
-        )
-
-
 class ServiceUnavailableError(APIError):
     """External service unavailable error"""
     def __init__(self, service: str, message: Optional[str] = None):
@@ -151,6 +136,22 @@ class ServiceUnavailableError(APIError):
             error_code="SERVICE_UNAVAILABLE",
             details={"service": service}
         )
+
+
+class AppValidationError(APIError):
+    """Validation error raised by app validators"""
+    def __init__(self, field: str, message: str, value: str = None):
+        details = {"field": field}
+        if value is not None:
+            details["value"] = value
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            message=message,
+            error_code="VALIDATION_ERROR",
+            details=details
+        )
+        self.field = field
+        self.value = value
 
 
 def _get_correlation_id(request: Request) -> str:
@@ -314,7 +315,7 @@ async def app_validation_error_handler(
     )
     
     response_content = _build_error_response(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         message=f"Validation error: {exc.message}",
         error_code="VALIDATION_ERROR",
         correlation_id=correlation_id,
@@ -323,7 +324,7 @@ async def app_validation_error_handler(
     )
     
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content=response_content
     )
 
