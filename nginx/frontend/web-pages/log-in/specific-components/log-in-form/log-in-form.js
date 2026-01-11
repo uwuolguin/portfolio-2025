@@ -1,7 +1,6 @@
 import {
     getLanguage,
     setLoginState,
-    setCSRFToken,
     apiRequest
 } from '../../../0-shared-components/utils/shared-functions.js';
 
@@ -177,12 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 if (response.ok) {
-                    const data = await response.json();
-                    
-                    if (data.csrf_token) {
-                        setCSRFToken(data.csrf_token);
-                    }
-                    
+                    const data = await response.json();                    
                     setLoginState(true);
                     window.location.href = '/front-page/front-page.html';
                 } else if (response.status === 403) {
@@ -250,5 +244,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderLoginForm();
 
-    document.addEventListener('languageChange', renderLoginForm);
+    document.addEventListener('stateChange', renderLoginForm);
 });

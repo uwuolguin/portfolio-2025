@@ -262,5 +262,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderSignupForm();
 
-    document.addEventListener('languageChange', renderSignupForm);
+    document.addEventListener('stateChange', renderSignupForm);
 });

@@ -150,7 +150,7 @@ async def login(
         httponly=True, 
         secure=not settings.debug, 
         samesite="lax", 
-        expires=int(access_token_expires.total_seconds())
+        max_age=int(access_token_expires.total_seconds())
     )
     response.set_cookie(
         key="csrf_token", 
@@ -158,7 +158,7 @@ async def login(
         httponly=False, 
         secure=not settings.debug, 
         samesite="lax", 
-        expires=int(access_token_expires.total_seconds())
+        max_age=int(access_token_expires.total_seconds())
     )
     
     logger.info("login_success", user_uuid=str(user.uuid), email_verified=user.email_verified)

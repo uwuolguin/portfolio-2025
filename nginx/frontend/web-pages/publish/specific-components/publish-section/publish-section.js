@@ -511,5 +511,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await renderPublishForm();
 
-    document.addEventListener('languageChange', renderPublishForm);
+    document.addEventListener('stateChange', renderPublishForm);
 });

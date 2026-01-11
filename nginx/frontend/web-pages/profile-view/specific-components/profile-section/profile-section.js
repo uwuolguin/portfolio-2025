@@ -279,5 +279,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await renderProfile();
 
-    document.addEventListener('languageChange', renderProfile);
+    document.addEventListener('stateChange', renderProfile);
 });

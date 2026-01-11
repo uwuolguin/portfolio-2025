@@ -17,62 +17,61 @@ const STATE_CHANGE_EVENT = 'appStateChange';
 /**
  * Dispatch a custom state change event for same-tab updates
  */
-function dispatchStateChange(key, newValue) {
-    const event = new CustomEvent(STATE_CHANGE_EVENT, {
-        detail: { key, newValue }
-    });
-    window.dispatchEvent(event);
-}
+    function dispatchStateChange(key, newValue) {
+        const event = new CustomEvent(STATE_CHANGE_EVENT, {
+            detail: { key, newValue }
+        });
+        window.dispatchEvent(event);
+    }
 
-/**
- * Initialize storage event listener for cross-tab synchronization
- * Call this ONCE per page in DOMContentLoaded
- */
-export function initStorageListener() {
-    // Listen for changes from OTHER tabs
-    window.addEventListener('storage', (e) => {
-        if (!e.key) return; // Ignore clear() calls
+    /**
+     * Initialize storage event listener for cross-tab synchronization
+     * Call this ONCE per page in DOMContentLoaded
+     */
+    export function initStorageListener() {
+        // Listen for changes from OTHER tabs
+        window.addEventListener('storage', (e) => {
+            if (!e.key) return; // Ignore clear() calls
+            
+            console.log(`[Storage Sync] Key changed in another tab: ${e.key}`);
+            
+            // Trigger re-render based on which key changed
+            switch (e.key) {
+                case 'isLoggedIn':
+                case 'hasCompany':
+                case 'language':
+                    // Trigger navigation re-render
+                    document.dispatchEvent(new Event('stateChange'));
+                    break;
+            }
+        });
         
-        console.log(`[Storage Sync] Key changed in another tab: ${e.key}`);
+        // Listen for same-tab state changes
+        window.addEventListener(STATE_CHANGE_EVENT, (e) => {
+            console.log(`[State Sync] Key changed in same tab: ${e.detail.key}`);
+            document.dispatchEvent(new Event('stateChange'));
+        });
         
-        // Trigger re-render based on which key changed
-        switch (e.key) {
-            case 'isLoggedIn':
-            case 'hasCompany':
-            case 'language':
-                // Trigger navigation re-render
-                document.dispatchEvent(new Event('stateChange'));
-                break;
-        }
-    });
-    
-    // Listen for same-tab state changes
-    window.addEventListener(STATE_CHANGE_EVENT, (e) => {
-        console.log(`[State Sync] Key changed in same tab: ${e.detail.key}`);
-        document.dispatchEvent(new Event('stateChange'));
-    });
-    
-    console.log('[State Sync] Storage listener initialized');
-}
+        console.log('[State Sync] Storage listener initialized');
+    }
 
-// ============================================
-// LANGUAGE MANAGEMENT (with state sync)
-// ============================================
+    // ============================================
+    // LANGUAGE MANAGEMENT (with state sync)
+    // ============================================
 
-export function getLanguage() {
-    return localStorage.getItem('language') || 'es';
-}
+    export function getLanguage() {
+        return localStorage.getItem('language') || 'es';
+    }
 
-export function setLanguage(lang) {
-    const oldValue = localStorage.getItem('language');
-    localStorage.setItem('language', lang);
-    
-    // Dispatch events for both same-tab and cross-tab sync
-    document.dispatchEvent(new Event('languageChange'));
-    dispatchStateChange('language', lang);
-    
-    console.log(`[Language] Changed from ${oldValue} to ${lang}`);
-}
+    export function setLanguage(lang) {
+        const oldValue = localStorage.getItem('language');
+        localStorage.setItem('language', lang);
+        
+        // Dispatch events for both same-tab and cross-tab sync
+        dispatchStateChange('language', lang);
+        
+        console.log(`[Language] Changed from ${oldValue} to ${lang}`);
+    }
 
 // ============================================
 // LOGIN STATE MANAGEMENT (with state sync)
@@ -94,7 +93,6 @@ export function setLoginState(isLoggedIn) {
 
 export function logout() {
     localStorage.removeItem('isLoggedIn');
-    localStorage.removeItem('csrfToken');
     localStorage.removeItem('hasCompany');
     
     // Dispatch state change
@@ -129,12 +127,11 @@ export function setCompanyPublishState(hasCompany) {
 // ============================================
 
 export function getCSRFToken() {
-    return localStorage.getItem('csrfToken');
+    // Read from cookie, not localStorage
+    const match = document.cookie.match(/csrf_token=([^;]+)/);
+    return match ? match[1] : null;
 }
 
-export function setCSRFToken(token) {
-    localStorage.setItem('csrfToken', token);
-}
 
 // ============================================
 // CORRELATION ID GENERATION
@@ -165,7 +162,7 @@ export async function apiRequest(url, options = {}) {
     };
     
     const csrfToken = getCSRFToken();
-    if (csrfToken && !url.includes('/public/')) {
+    if (csrfToken ) {
         headers['X-CSRF-Token'] = csrfToken;
     }
     
@@ -306,7 +303,7 @@ export async function searchCompanies(filters = {}) {
         
         if (filters.product) params.append('product', filters.product);
         if (filters.commune) params.append('commune', filters.commune);
-        if (filters.search) params.append('search', filters.search);
+        if (filters.search) params.append('q', filters.search);
         
         const url = `/api/v1/companies/search?${params.toString()}`;
         const response = await apiRequest(url);
@@ -463,7 +460,6 @@ export default {
     setCompanyPublishState,
     logout,
     getCSRFToken,
-    setCSRFToken,
     checkAuthStatus,
     checkCompanyStatus,
     apiRequest,

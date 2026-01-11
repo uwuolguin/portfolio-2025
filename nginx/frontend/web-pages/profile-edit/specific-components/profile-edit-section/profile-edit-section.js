@@ -512,5 +512,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await renderEditForm();
 
-    document.addEventListener('languageChange', renderEditForm);
+    document.addEventListener('stateChange', renderEditForm);
 });

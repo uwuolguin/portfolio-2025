@@ -227,5 +227,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     await renderSearchBar();
 
     // Re-render on language change
-    document.addEventListener('languageChange', renderSearchBar);
+    document.addEventListener('stateChange', renderSearchBar);
 });

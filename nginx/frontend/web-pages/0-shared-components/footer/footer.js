@@ -82,6 +82,6 @@ document.addEventListener('DOMContentLoaded', () => {
         footerContainer.appendChild(bottom);
     }
 
-    document.addEventListener('languageChange', renderFooter);
+    document.addEventListener('stateChange', renderFooter);
     renderFooter();
 });

@@ -199,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Re-render on language change
-    document.addEventListener('languageChange', () => {
+    document.addEventListener('stateChange', () => {
         performSearch(currentPage);
     });
 
