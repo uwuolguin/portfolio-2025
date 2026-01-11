@@ -17,7 +17,6 @@ from app.utils.validators import (
 
 
 class UserRecord(BaseModel):
-    """Internal user record from database"""
     uuid: UUID
     name: str
     email: EmailStr
@@ -42,7 +41,6 @@ class UserRecord(BaseModel):
 
 
 class UserRecordHash(BaseModel):
-    """Internal user record with password hash"""
     uuid: UUID
     name: str
     email: EmailStr
@@ -53,45 +51,23 @@ class UserRecordHash(BaseModel):
 
 
 class UserSignup(BaseModel):
-    """User registration request"""
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="User's full name"
-    )
-    email: EmailStr = Field(
-        ...,
-        description="User's email address"
-    )
-    password: str = Field(
-        ...,
-        min_length=8,
-        max_length=100,
-        description="User's password (min 8 chars)"
-    )
-    
+    name: str = Field(..., min_length=1, max_length=100)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=100)
+
     @field_validator("name", mode="before")
     @classmethod
     def validate_name_field(cls, v):
-        """Validate and normalize name"""
         if not isinstance(v, str):
             raise ValueError("Name must be a string")
-        try:
-            return validate_name(v, "name", min_length=1, max_length=100)
-        except ValidationError as e:
-            raise ValueError(e.message)
-    
+        return validate_name(v, "name", min_length=1, max_length=100)
+
     @field_validator("password", mode="before")
     @classmethod
     def validate_password_field(cls, v):
-        """Validate password (no normalization)"""
         if not isinstance(v, str):
             raise ValueError("Password must be a string")
-        try:
-            return validate_password(v, "password", min_length=8, max_length=100)
-        except ValidationError as e:
-            raise ValueError(e.message)
+        return validate_password(v, "password", min_length=8, max_length=100)
 
     model_config = {
         "json_schema_extra": {
@@ -105,7 +81,6 @@ class UserSignup(BaseModel):
 
 
 class UserResponse(BaseModel):
-    """Public user response"""
     uuid: UUID
     name: str
     email: EmailStr
@@ -128,17 +103,8 @@ class UserResponse(BaseModel):
 
 
 class UserLogin(BaseModel):
-    """User login request"""
-    email: EmailStr = Field(
-        ...,
-        description="User's email address"
-    )
-    password: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="User's password"
-    )
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=100)
 
     model_config = {
         "json_schema_extra": {
@@ -151,15 +117,13 @@ class UserLogin(BaseModel):
 
 
 class LoginUserInfo(BaseModel):
-    """User info returned on login"""
     email: EmailStr
     email_verified: bool
 
 
 class LoginResponse(BaseModel):
-    """Login response with CSRF token"""
-    message: str = Field(..., description="Success message")
-    csrf_token: str = Field(..., description="CSRF token for subsequent requests")
+    message: str
+    csrf_token: str
     user: LoginUserInfo
 
     model_config = {
@@ -177,7 +141,6 @@ class LoginResponse(BaseModel):
 
 
 class AdminUserResponse(BaseModel):
-    """Admin view of user with company count"""
     uuid: UUID
     name: str
     email: EmailStr
@@ -202,7 +165,6 @@ class AdminUserResponse(BaseModel):
 
 
 class DeletedCompanyRecord(BaseModel):
-    """Record of deleted company"""
     uuid: UUID
     user_uuid: UUID
     product_uuid: UUID
@@ -220,7 +182,6 @@ class DeletedCompanyRecord(BaseModel):
 
 
 class DeletedUserRecord(BaseModel):
-    """Record of deleted user"""
     uuid: UUID
     name: str
     email: EmailStr
@@ -231,7 +192,6 @@ class DeletedUserRecord(BaseModel):
 
 
 class UserDeletionResponse(BaseModel):
-    """Response for user deletion"""
     user_uuid: UUID
     email: EmailStr
     company_deleted: int = 0
