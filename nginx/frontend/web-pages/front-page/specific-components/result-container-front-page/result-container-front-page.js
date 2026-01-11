@@ -32,19 +32,19 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     let currentPage = 1;
+    let totalResults = 0;
     const resultsPerPage = 20;
-
-    function clearResults() {
-        clearElement(resultsContainer);
-    }
 
     function showLoading() {
         const lang = getLanguage();
         const t = translations[lang];
-        clearResults();
+        clearElement(resultsContainer);
         
         const loading = document.createElement('div');
         loading.className = 'loading-message';
+        loading.style.textAlign = 'center';
+        loading.style.padding = '2rem';
+        loading.style.color = '#666';
         loading.textContent = t.loading;
         resultsContainer.appendChild(loading);
     }
@@ -52,10 +52,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function showError() {
         const lang = getLanguage();
         const t = translations[lang];
-        clearResults();
+        clearElement(resultsContainer);
         
         const error = document.createElement('div');
         error.className = 'error-message';
+        error.style.textAlign = 'center';
+        error.style.padding = '2rem';
+        error.style.color = '#dc3545';
         error.textContent = t.error;
         resultsContainer.appendChild(error);
     }
@@ -63,10 +66,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function showNoResults() {
         const lang = getLanguage();
         const t = translations[lang];
-        clearResults();
+        clearElement(resultsContainer);
         
         const noResults = document.createElement('div');
         noResults.className = 'no-results-message';
+        noResults.style.textAlign = 'center';
+        noResults.style.padding = '2rem';
+        noResults.style.color = '#666';
         noResults.textContent = t.noResults;
         resultsContainer.appendChild(noResults);
     }
@@ -101,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Sanitize all API response data
             const companies = sanitizeAPIResponse(rawData);
+            totalResults = companies.length;
 
             displayResults(companies, page);
 
@@ -113,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function displayResults(companies, page) {
         const lang = getLanguage();
 
-        clearResults();
+        clearElement(resultsContainer);
 
         if (!companies || companies.length === 0) {
             showNoResults();
@@ -132,13 +139,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         resultsContainer.appendChild(grid);
 
-        // Add pagination
-        if (companies.length === resultsPerPage) {
-            createPagination(page);
-        }
+        // Always show pagination if we have results
+        createPagination(page, companies.length);
     }
 
-    function createPagination(page) {
+    function createPagination(page, resultCount) {
         const lang = getLanguage();
         const t = translations[lang];
 
@@ -160,20 +165,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Current page indicator
         const pageInfo = document.createElement('span');
-        pageInfo.className = 'page-info';
+        pageInfo.className = 'page-link active';
         pageInfo.textContent = `${t.page} ${page}`;
         paginationContainer.appendChild(pageInfo);
 
-        // Next button
-        const nextLink = document.createElement('a');
-        nextLink.href = '#';
-        nextLink.className = 'page-link';
-        nextLink.textContent = t.next;
-        nextLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            performSearch(page + 1);
-        });
-        paginationContainer.appendChild(nextLink);
+        // Next button - show if we got a full page of results
+        if (resultCount === resultsPerPage) {
+            const nextLink = document.createElement('a');
+            nextLink.href = '#';
+            nextLink.className = 'page-link';
+            nextLink.textContent = t.next;
+            nextLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                performSearch(page + 1);
+            });
+            paginationContainer.appendChild(nextLink);
+        }
 
         resultsContainer.appendChild(paginationContainer);
     }

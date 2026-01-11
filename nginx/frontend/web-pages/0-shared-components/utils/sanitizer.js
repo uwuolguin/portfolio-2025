@@ -1,5 +1,3 @@
-import DOMPurify from 'dompurify';
-
 const SAFE_ATTRS = new Set([
     'class', 'id', 'title', 'role', 'tabindex', 'lang', 'dir',
     'aria-label', 'aria-describedby', 'aria-hidden', 'aria-live',
@@ -9,19 +7,9 @@ const SAFE_ATTRS = new Set([
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
 
-const DOMPURIFY_CONFIG = {
-    ALLOWED_TAGS: [
-        'p', 'br', 'strong', 'em', 'a', 'ul', 'ol', 'li',
-        'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'blockquote', 'code', 'pre'
-    ],
-    ALLOWED_ATTR: [
-        'href', 'class', 'role', 'id', 'tabindex', 'lang', 'dir', 'aria-*'
-    ],
-    ALLOWED_URI_REGEXP: /^(https?:|mailto:|tel:)/i,
-    ALLOW_DATA_ATTR: true,
-    RETURN_TRUSTED_TYPE: false
-};
+export function sanitizeText(text) {
+    return String(text ?? '');
+}
 
 export function setText(element, text) {
     if (!(element instanceof HTMLElement)) {
@@ -30,43 +18,36 @@ export function setText(element, text) {
     element.textContent = String(text ?? '');
 }
 
-export function setSafeAttr(element, name, value) {
-    if (!(element instanceof HTMLElement)) {
-        throw new TypeError('setSafeAttr requires an HTMLElement');
-    }
-
-    const lowerName = name.toLowerCase();
-
-    if (lowerName.startsWith('on')) {
-        throw new Error(`Event handler attributes are not allowed: ${name}`);
-    }
-
-    const isDataAttr = lowerName.startsWith('data-');
-    const isAriaAttr = lowerName.startsWith('aria-');
-
-    if (!isDataAttr && !isAriaAttr && !SAFE_ATTRS.has(lowerName)) {
-        throw new Error(`Attribute "${name}" is not in the safe allowlist`);
-    }
-
-    element.setAttribute(name, String(value ?? ''));
+export function sanitizeEmail(email) {
+    if (typeof email !== 'string') return '';
+    const trimmed = email.trim().toLowerCase();
+    if (trimmed.length > 254) return '';
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : '';
 }
 
-export function setSafeAttrs(element, attrs) {
-    if (!(element instanceof HTMLElement)) {
-        throw new TypeError('setSafeAttrs requires an HTMLElement');
-    }
+export function validateEmailFormat(email) {
+    if (typeof email !== 'string') return false;
+    const trimmed = email.trim();
+    if (trimmed.length > 254) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+}
 
-    for (const [name, value] of Object.entries(attrs)) {
-        setSafeAttr(element, name, value);
-    }
+export function sanitizePhone(phone) {
+    if (typeof phone !== 'string') return '';
+    return phone.replace(/[^\d\s\-\(\)\+]/g, '').trim();
+}
+
+export function validatePhoneFormat(phone) {
+    if (typeof phone !== 'string') return false;
+    const trimmed = phone.trim();
+    if (trimmed.length > 30) return false;
+    return /^(?=.*\d)[\d\s\-\(\)\+]{8,}$/.test(trimmed);
 }
 
 export function sanitizeURL(url) {
     if (typeof url !== 'string') return '';
-
     const trimmed = url.trim();
     if (!trimmed) return '';
-
     try {
         const parsed = new URL(trimmed, window.location.href);
         if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) return '';
@@ -80,17 +61,13 @@ export function setHref(element, url, options = {}) {
     if (!(element instanceof HTMLAnchorElement || element instanceof HTMLAreaElement)) {
         throw new TypeError('setHref requires an anchor or area element');
     }
-
     const safe = sanitizeURL(url);
     if (!safe) {
         element.removeAttribute('href');
         return;
     }
-
     element.setAttribute('href', safe);
-
     const isExternal = safe.startsWith('http') && !safe.startsWith(window.location.origin);
-
     if (options.forceBlank || (options.externalBlank !== false && isExternal)) {
         element.setAttribute('target', '_blank');
         element.setAttribute('rel', 'noopener noreferrer');
@@ -101,86 +78,172 @@ export function setSrc(element, url) {
     if (!(element instanceof HTMLImageElement || element instanceof HTMLMediaElement)) {
         throw new TypeError('setSrc requires an image or media element');
     }
-
     const safe = sanitizeURL(url);
     if (!safe || !safe.startsWith('http')) {
         element.removeAttribute('src');
         return;
     }
-
     element.setAttribute('src', safe);
+}
+
+export function setSafeAttr(element, name, value) {
+    if (!(element instanceof HTMLElement)) {
+        throw new TypeError('setSafeAttr requires an HTMLElement');
+    }
+    const lowerName = name.toLowerCase();
+    if (lowerName.startsWith('on')) {
+        throw new Error(`Event handler attributes are not allowed: ${name}`);
+    }
+    const isDataAttr = lowerName.startsWith('data-');
+    const isAriaAttr = lowerName.startsWith('aria-');
+    if (!isDataAttr && !isAriaAttr && !SAFE_ATTRS.has(lowerName)) {
+        throw new Error(`Attribute "${name}" is not in the safe allowlist`);
+    }
+    element.setAttribute(name, String(value ?? ''));
+}
+
+export function setSafeAttrs(element, attrs) {
+    if (!(element instanceof HTMLElement)) {
+        throw new TypeError('setSafeAttrs requires an HTMLElement');
+    }
+    for (const [name, value] of Object.entries(attrs)) {
+        setSafeAttr(element, name, value);
+    }
 }
 
 export function setHTML(element, html) {
     if (!(element instanceof HTMLElement)) {
         throw new TypeError('setHTML requires an HTMLElement');
     }
-    element.innerHTML = DOMPurify.sanitize(String(html ?? ''), DOMPURIFY_CONFIG);
+    element.innerHTML = DOMPurify.sanitize(String(html ?? ''), {
+        ALLOWED_TAGS: [
+            'p', 'br', 'strong', 'em', 'a', 'ul', 'ol', 'li',
+            'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'blockquote', 'code', 'pre'
+        ],
+        ALLOWED_ATTR: [
+            'href', 'class', 'role', 'id', 'tabindex', 'lang', 'dir', 'aria-*'
+        ],
+        ALLOWED_URI_REGEXP: /^(https?:|mailto:|tel:)/i
+    });
 }
 
-export function validateEmailFormat(email) {
-    if (typeof email !== 'string') return false;
-    const trimmed = email.trim();
-    if (trimmed.length > 254) return false;
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+export function sanitizeAPIResponse(data) {
+    return data;
 }
 
-export function validatePhoneFormat(phone) {
-    if (typeof phone !== 'string') return false;
-    const trimmed = phone.trim();
-    if (trimmed.length > 30) return false;
-    return /^(?=.*\d)[\d\s\-\(\)\+]{8,}$/.test(trimmed);
-}
-
-export function buildBusinessCard(company, container) {
-    if (!(container instanceof HTMLElement)) {
-        throw new TypeError('buildBusinessCard requires an HTMLElement container');
+export function validateFormData(formData) {
+    const validated = {};
+    for (const [key, value] of Object.entries(formData)) {
+        if (typeof value === 'string') {
+            if (key.toLowerCase().includes('email')) {
+                validated[key] = sanitizeEmail(value);
+            } else if (key.toLowerCase().includes('phone')) {
+                validated[key] = sanitizePhone(value);
+            } else if (key.toLowerCase().includes('url') || key.toLowerCase().includes('website')) {
+                validated[key] = sanitizeURL(value);
+            } else {
+                validated[key] = value;
+            }
+        } else {
+            validated[key] = value;
+        }
     }
+    return validated;
+}
 
+export function clearElement(element) {
+    if (!(element instanceof HTMLElement)) {
+        throw new TypeError('clearElement requires an HTMLElement');
+    }
+    element.textContent = '';
+}
+
+export function buildDropdownOption(value, displayText) {
+    const option = document.createElement('div');
+    option.className = 'dropdown-option';
+    option.dataset.value = String(value ?? '');
+    option.textContent = String(displayText ?? '');
+    return option;
+}
+
+export function buildBusinessCard(company, lang = 'es') {
     const card = document.createElement('div');
-    setSafeAttr(card, 'class', 'business-card');
+    card.className = 'business-card';
 
-    if (company.logo) {
+    if (company.image_url) {
+        const pictureDiv = document.createElement('div');
+        pictureDiv.className = 'card-picture';
         const img = document.createElement('img');
-        setSrc(img, company.logo);
+        setSrc(img, company.image_url);
         setSafeAttr(img, 'alt', company.name || 'Company image');
-        setSafeAttr(img, 'class', 'company-logo');
-        card.appendChild(img);
+        img.loading = 'lazy';
+        img.onerror = function () {
+            this.style.display = 'none';
+        };
+        pictureDiv.appendChild(img);
+        card.appendChild(pictureDiv);
     }
+
+    const detailsDiv = document.createElement('div');
+    detailsDiv.className = 'card-details';
 
     if (company.name) {
-        const nameEl = document.createElement('h2');
+        const nameEl = document.createElement('h3');
+        nameEl.className = 'business-name';
         setText(nameEl, company.name);
-        card.appendChild(nameEl);
+        detailsDiv.appendChild(nameEl);
     }
 
-    if (company.description) {
+    const description = lang === 'es' ? company.description_es : company.description_en;
+    if (description) {
         const descEl = document.createElement('p');
-        setText(descEl, company.description);
-        card.appendChild(descEl);
+        descEl.className = 'concise-description';
+        setText(descEl, description);
+        detailsDiv.appendChild(descEl);
     }
 
-    if (company.website) {
-        const link = document.createElement('a');
-        setHref(link, company.website, { externalBlank: true });
-        setText(link, 'Visit Website');
-        card.appendChild(link);
+    if (company.address) {
+        const addressEl = document.createElement('p');
+        addressEl.className = 'location';
+        setText(addressEl, company.address);
+        detailsDiv.appendChild(addressEl);
     }
 
-    if (company.email && validateEmailFormat(company.email)) {
-        const emailLink = document.createElement('a');
-        setHref(emailLink, `mailto:${company.email}`, { externalBlank: false });
-        setText(emailLink, company.email);
-        card.appendChild(emailLink);
+    if (company.phone) {
+        const phoneEl = document.createElement('p');
+        phoneEl.className = 'phone';
+        setText(phoneEl, company.phone);
+        detailsDiv.appendChild(phoneEl);
     }
 
-    if (company.phone && validatePhoneFormat(company.phone)) {
-        const phoneLink = document.createElement('a');
-        setHref(phoneLink, `tel:${company.phone}`, { externalBlank: false });
-        setText(phoneLink, company.phone);
-        card.appendChild(phoneLink);
+    if (company.email) {
+        const emailEl = document.createElement('p');
+        emailEl.className = 'mail';
+        setText(emailEl, company.email);
+        detailsDiv.appendChild(emailEl);
     }
 
-    container.appendChild(card);
+    card.appendChild(detailsDiv);
     return card;
 }
+
+export default {
+    sanitizeText,
+    setText,
+    sanitizeEmail,
+    validateEmailFormat,
+    sanitizePhone,
+    validatePhoneFormat,
+    sanitizeURL,
+    setHref,
+    setSrc,
+    setSafeAttr,
+    setSafeAttrs,
+    setHTML,
+    sanitizeAPIResponse,
+    validateFormData,
+    clearElement,
+    buildDropdownOption,
+    buildBusinessCard
+};

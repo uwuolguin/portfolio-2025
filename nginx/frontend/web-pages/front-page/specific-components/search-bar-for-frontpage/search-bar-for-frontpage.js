@@ -1,8 +1,7 @@
 import {
     getLanguage,
     fetchProducts,
-    fetchCommunes,
-    apiRequest
+    fetchCommunes
 } from '../../../0-shared-components/utils/shared-functions.js';
 
 import {
@@ -80,9 +79,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         optionsList.appendChild(defaultOption);
 
         // Add options (data already sanitized)
+        const lang = getLanguage();
         options.forEach(option => {
-            const lang = getLanguage();
-            const displayName = option.name_es || option.name_en || option.name || '';
+            const displayName = lang === 'es' 
+                ? (option.name_es || option.name_en || option.name || '')
+                : (option.name_en || option.name_es || option.name || '');
             const value = option.name_es || option.name_en || option.name || option.uuid || '';
             
             const optionElement = buildDropdownOption(value, displayName);

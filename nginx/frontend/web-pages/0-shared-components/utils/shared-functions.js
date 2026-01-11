@@ -8,73 +8,55 @@
 // STATE SYNCHRONIZATION SYSTEM
 // ============================================
 
-/**
- * Custom event for same-tab state changes
- * (storage event only fires for OTHER tabs)
- */
 const STATE_CHANGE_EVENT = 'appStateChange';
 
-/**
- * Dispatch a custom state change event for same-tab updates
- */
-    function dispatchStateChange(key, newValue) {
-        const event = new CustomEvent(STATE_CHANGE_EVENT, {
-            detail: { key, newValue }
-        });
-        window.dispatchEvent(event);
-    }
+function dispatchStateChange(key, newValue) {
+    const event = new CustomEvent(STATE_CHANGE_EVENT, {
+        detail: { key, newValue }
+    });
+    window.dispatchEvent(event);
+}
 
-    /**
-     * Initialize storage event listener for cross-tab synchronization
-     * Call this ONCE per page in DOMContentLoaded
-     */
-    export function initStorageListener() {
-        // Listen for changes from OTHER tabs
-        window.addEventListener('storage', (e) => {
-            if (!e.key) return; // Ignore clear() calls
-            
-            console.log(`[Storage Sync] Key changed in another tab: ${e.key}`);
-            
-            // Trigger re-render based on which key changed
-            switch (e.key) {
-                case 'isLoggedIn':
-                case 'hasCompany':
-                case 'language':
-                    // Trigger navigation re-render
-                    document.dispatchEvent(new Event('stateChange'));
-                    break;
-            }
-        });
+export function initStorageListener() {
+    window.addEventListener('storage', (e) => {
+        if (!e.key) return;
         
-        // Listen for same-tab state changes
-        window.addEventListener(STATE_CHANGE_EVENT, (e) => {
-            console.log(`[State Sync] Key changed in same tab: ${e.detail.key}`);
-            document.dispatchEvent(new Event('stateChange'));
-        });
+        console.log(`[Storage Sync] Key changed in another tab: ${e.key}`);
         
-        console.log('[State Sync] Storage listener initialized');
-    }
-
-    // ============================================
-    // LANGUAGE MANAGEMENT (with state sync)
-    // ============================================
-
-    export function getLanguage() {
-        return localStorage.getItem('language') || 'es';
-    }
-
-    export function setLanguage(lang) {
-        const oldValue = localStorage.getItem('language');
-        localStorage.setItem('language', lang);
-        
-        // Dispatch events for both same-tab and cross-tab sync
-        dispatchStateChange('language', lang);
-        
-        console.log(`[Language] Changed from ${oldValue} to ${lang}`);
-    }
+        switch (e.key) {
+            case 'isLoggedIn':
+            case 'hasCompany':
+            case 'language':
+                document.dispatchEvent(new Event('stateChange'));
+                break;
+        }
+    });
+    
+    window.addEventListener(STATE_CHANGE_EVENT, (e) => {
+        console.log(`[State Sync] Key changed in same tab: ${e.detail.key}`);
+        document.dispatchEvent(new Event('stateChange'));
+    });
+    
+    console.log('[State Sync] Storage listener initialized');
+}
 
 // ============================================
-// LOGIN STATE MANAGEMENT (with state sync)
+// LANGUAGE MANAGEMENT
+// ============================================
+
+export function getLanguage() {
+    return localStorage.getItem('language') || 'es';
+}
+
+export function setLanguage(lang) {
+    const oldValue = localStorage.getItem('language');
+    localStorage.setItem('language', lang);
+    dispatchStateChange('language', lang);
+    console.log(`[Language] Changed from ${oldValue} to ${lang}`);
+}
+
+// ============================================
+// LOGIN STATE MANAGEMENT
 // ============================================
 
 export function getLoginState() {
@@ -84,28 +66,21 @@ export function getLoginState() {
 export function setLoginState(isLoggedIn) {
     const oldValue = getLoginState();
     localStorage.setItem('isLoggedIn', isLoggedIn.toString());
-    
-    // Dispatch state change event (for same-tab sync)
     dispatchStateChange('isLoggedIn', isLoggedIn);
-    
     console.log(`[Auth] Login state changed: ${oldValue} → ${isLoggedIn}`);
 }
 
 export function logout() {
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('hasCompany');
-    
-    // Dispatch state change
     dispatchStateChange('isLoggedIn', false);
     dispatchStateChange('hasCompany', false);
-    
     console.log('[Auth] User logged out, state cleared');
-    
     window.location.href = '/front-page/front-page.html';
 }
 
 // ============================================
-// COMPANY PUBLISH STATE (with state sync)
+// COMPANY PUBLISH STATE
 // ============================================
 
 export function getCompanyPublishState() {
@@ -115,10 +90,7 @@ export function getCompanyPublishState() {
 export function setCompanyPublishState(hasCompany) {
     const oldValue = getCompanyPublishState();
     localStorage.setItem('hasCompany', hasCompany.toString());
-    
-    // Dispatch state change event
     dispatchStateChange('hasCompany', hasCompany);
-    
     console.log(`[Company] Publish state changed: ${oldValue} → ${hasCompany}`);
 }
 
@@ -127,11 +99,9 @@ export function setCompanyPublishState(hasCompany) {
 // ============================================
 
 export function getCSRFToken() {
-    // Read from cookie, not localStorage
     const match = document.cookie.match(/csrf_token=([^;]+)/);
     return match ? match[1] : null;
 }
-
 
 // ============================================
 // CORRELATION ID GENERATION
@@ -144,15 +114,9 @@ function generateCorrelationId() {
 }
 
 // ============================================
-// API REQUEST WRAPPER (with correlation ID)
+// API REQUEST WRAPPER
 // ============================================
 
-/**
- * API Request wrapper with automatic correlation ID injection
- * @param {string} url - API endpoint URL
- * @param {Object} options - Fetch options
- * @returns {Promise<Response>} Fetch response
- */
 export async function apiRequest(url, options = {}) {
     const correlationId = generateCorrelationId();
     
@@ -162,7 +126,7 @@ export async function apiRequest(url, options = {}) {
     };
     
     const csrfToken = getCSRFToken();
-    if (csrfToken ) {
+    if (csrfToken) {
         headers['X-CSRF-Token'] = csrfToken;
     }
     
@@ -185,14 +149,9 @@ export async function apiRequest(url, options = {}) {
 }
 
 // ============================================
-// AUTH STATUS CHECK (with state sync)
+// AUTH STATUS CHECK
 // ============================================
 
-/**
- * Check authentication status by calling the backend
- * Updates local state and triggers re-render if needed
- * @returns {Promise<boolean>} True if authenticated
- */
 export async function checkAuthStatus() {
     try {
         const response = await apiRequest('/api/v1/users/me');
@@ -200,7 +159,6 @@ export async function checkAuthStatus() {
         const isAuthenticated = response.ok;
         const currentState = getLoginState();
         
-        // Update state if it changed
         if (isAuthenticated !== currentState) {
             setLoginState(isAuthenticated);
         }
@@ -211,7 +169,6 @@ export async function checkAuthStatus() {
     } catch (error) {
         console.error('[Auth Check] Failed:', error);
         
-        // If auth check fails, assume not authenticated
         const currentState = getLoginState();
         if (currentState) {
             setLoginState(false);
@@ -221,11 +178,6 @@ export async function checkAuthStatus() {
     }
 }
 
-/**
- * Check if user has a published company
- * Updates local state and triggers re-render if needed
- * @returns {Promise<boolean>} True if user has a company
- */
 export async function checkCompanyStatus() {
     try {
         const response = await apiRequest('/api/v1/companies/user/my-company');
@@ -233,7 +185,6 @@ export async function checkCompanyStatus() {
         const hasCompany = response.ok;
         const currentState = getCompanyPublishState();
         
-        // Update state if it changed
         if (hasCompany !== currentState) {
             setCompanyPublishState(hasCompany);
         }
@@ -244,7 +195,6 @@ export async function checkCompanyStatus() {
     } catch (error) {
         console.error('[Company Check] Failed:', error);
         
-        // If check fails, assume no company
         const currentState = getCompanyPublishState();
         if (currentState) {
             setCompanyPublishState(false);
@@ -255,7 +205,7 @@ export async function checkCompanyStatus() {
 }
 
 // ============================================
-// DATA FETCHING (returns raw data - sanitize at usage point)
+// DATA FETCHING
 // ============================================
 
 export async function fetchProducts() {
@@ -297,41 +247,9 @@ export async function fetchUserCompany() {
     }
 }
 
-export async function searchCompanies(filters = {}) {
-    try {
-        const params = new URLSearchParams();
-        
-        if (filters.product) params.append('product', filters.product);
-        if (filters.commune) params.append('commune', filters.commune);
-        if (filters.search) params.append('q', filters.search);
-        
-        const url = `/api/v1/companies/search?${params.toString()}`;
-        const response = await apiRequest(url);
-        
-        if (response.ok) {
-            return await response.json();
-        }
-        return [];
-    } catch (error) {
-        console.error('Error searching companies:', error);
-        return [];
-    }
-}
-
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
-
-export function formatDate(dateString, lang = 'es') {
-    const date = new Date(dateString);
-    const locale = lang === 'es' ? 'es-CL' : 'en-US';
-    
-    return date.toLocaleDateString(locale, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-    });
-}
 
 export function debounce(func, wait = 300) {
     let timeout;
@@ -345,20 +263,6 @@ export function debounce(func, wait = 300) {
     };
 }
 
-
-export function requireAuth() {
-    if (!isAuthenticated()) {
-        window.location.href = '/log-in/log-in.html';
-        return false;
-    }
-    return true;
-}
-
-/**
- * Show loading indicator (XSS-safe using DOM methods)
- * @param {HTMLElement} element - Target element
- * @param {string} message - Loading message
- */
 export function showLoading(element, message = 'Cargando...') {
     element.textContent = '';
     
@@ -376,11 +280,6 @@ export function showLoading(element, message = 'Cargando...') {
     element.appendChild(container);
 }
 
-/**
- * Show error message (XSS-safe using DOM methods)
- * @param {HTMLElement} element - Target element
- * @param {string} message - Error message
- */
 export function showError(element, message = 'Error al cargar los datos') {
     element.textContent = '';
     
@@ -394,59 +293,10 @@ export function showError(element, message = 'Error al cargar los datos') {
     element.appendChild(container);
 }
 
-export function isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-}
+// ============================================
+// DEFAULT EXPORT
+// ============================================
 
-export function isValidPhone(phone) {
-    const phoneRegex = /^[\d\s\-\(\)\+]{8,}$/;
-    return phoneRegex.test(phone);
-}
-
-export function getFileExtension(filename) {
-    return filename.slice((filename.lastIndexOf('.') - 1 >>> 0) + 2);
-}
-
-export function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-}
-
-export async function copyToClipboard(text) {
-    try {
-        await navigator.clipboard.writeText(text);
-        return true;
-    } catch (error) {
-        console.error('Failed to copy to clipboard:', error);
-        return false;
-    }
-}
-
-export function scrollToElement(elementId) {
-    const element = document.getElementById(elementId);
-    if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-}
-
-export function getQueryParam(param) {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get(param);
-}
-
-export function setQueryParam(param, value) {
-    const url = new URL(window.location);
-    url.searchParams.set(param, value);
-    window.history.pushState({}, '', url);
-}
-
-// Export all functions as default object
 export default {
     initStorageListener,
     getLanguage,
@@ -463,18 +313,7 @@ export default {
     fetchProducts,
     fetchCommunes,
     fetchUserCompany,
-    searchCompanies,
-    formatDate,
     debounce,
-    requireAuth,
     showLoading,
-    showError,
-    isValidEmail,
-    isValidPhone,
-    getFileExtension,
-    formatFileSize,
-    copyToClipboard,
-    scrollToElement,
-    getQueryParam,
-    setQueryParam
+    showError
 };
