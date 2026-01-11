@@ -11,10 +11,8 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.utils.validators import (
-    normalize_whitespace,
     validate_name,
-    validate_password,
-    ValidationError
+    validate_password
 )
 
 

@@ -37,7 +37,7 @@ from app.config import settings
 from app.utils.exceptions import (
     NotFoundError,
     ConflictError,
-    ValidationErrorResponse,
+    ValidationError,
     ServiceUnavailableError
 )
 from app.utils.validators import (
@@ -47,8 +47,7 @@ from app.utils.validators import (
     validate_address,
     validate_description,
     validate_language,
-    normalize_whitespace,
-    ValidationError
+    normalize_whitespace
 )
 
 logger = structlog.get_logger(__name__)

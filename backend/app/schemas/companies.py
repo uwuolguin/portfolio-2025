@@ -12,13 +12,10 @@ from typing import Optional
 
 from app.utils.validators import (
     validate_name,
-    validate_email,
     validate_phone,
     validate_address,
     validate_description,
-    validate_language,
-    normalize_whitespace,
-    ValidationError
+    validate_language
 )
 
 

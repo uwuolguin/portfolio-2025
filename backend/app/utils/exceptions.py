@@ -116,7 +116,7 @@ class ForbiddenError(APIError):
         )
 
 
-class ValidationErrorResponse(APIError):
+class ValidationError(APIError):
     """Input validation error"""
     def __init__(self, message: str, field: Optional[str] = None, errors: Optional[list] = None):
         super().__init__(
@@ -160,7 +160,6 @@ def _get_correlation_id(request: Request) -> str:
 
 
 def _build_error_response(
-    status_code: int,
     message: str,
     error_code: str,
     correlation_id: str,
@@ -204,7 +203,6 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
     )
     
     response_content = _build_error_response(
-        status_code=exc.status_code,
         message=exc.message,
         error_code=exc.error_code,
         correlation_id=correlation_id,
@@ -238,7 +236,6 @@ async def http_exception_handler(
     error_code = APIError._derive_error_code(exc.status_code)
     
     response_content = _build_error_response(
-        status_code=exc.status_code,
         message=str(exc.detail),
         error_code=error_code,
         correlation_id=correlation_id,
@@ -284,7 +281,6 @@ async def validation_exception_handler(
         message = f"Validation errors in {len(errors)} field(s)"
     
     response_content = _build_error_response(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         message=message,
         error_code="VALIDATION_ERROR",
         correlation_id=correlation_id,
@@ -315,7 +311,6 @@ async def app_validation_error_handler(
     )
     
     response_content = _build_error_response(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         message=f"Validation error: {exc.message}",
         error_code="VALIDATION_ERROR",
         correlation_id=correlation_id,
@@ -363,7 +358,6 @@ async def generic_exception_handler(
         details = None
     
     response_content = _build_error_response(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         message=message,
         error_code="INTERNAL_ERROR",
         correlation_id=correlation_id,
