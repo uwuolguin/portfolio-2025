@@ -145,7 +145,7 @@ class AppValidationError(APIError):
         if value is not None:
             details["value"] = value
         super().__init__(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             message=message,
             error_code="VALIDATION_ERROR",
             details=details
@@ -319,7 +319,7 @@ async def app_validation_error_handler(
     )
     
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content=response_content
     )
 
