@@ -10,9 +10,6 @@ Start-Sleep -Seconds 5
 Write-Host "Running Alembic migrations..."
 docker compose exec -T backend alembic upgrade head
 
-Write-Host "Creating cronjob..."
-docker compose exec -T backend python -m scripts.database.refresh_search_index
-
 Write-Host "Creating testing data..."
 docker compose exec -T backend python -m scripts.database.seed_test_data
 

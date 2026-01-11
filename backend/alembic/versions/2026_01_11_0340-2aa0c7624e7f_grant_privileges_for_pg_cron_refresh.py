@@ -17,35 +17,34 @@ down_revision: Union[str, Sequence[str], None] = '03ccc9af1355'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-
 def upgrade():
-    # 1️⃣ Make sure the schema is accessible
+    # Make sure the schema is accessible
     op.execute("""
         GRANT USAGE ON SCHEMA proveo TO postgres;
     """)
 
-    # 2️⃣ Give read privileges on all tables
+    # Give read privileges on all tables
     op.execute("""
         GRANT SELECT ON ALL TABLES IN SCHEMA proveo TO postgres;
     """)
 
-    # 3️⃣ Set default privileges for future tables
+    # Set default privileges for future tables
     op.execute("""
         ALTER DEFAULT PRIVILEGES IN SCHEMA proveo
         GRANT SELECT ON TABLES TO postgres;
     """)
 
-    # 4️⃣ Ensure the materialized view exists and is owned by postgres
+    # Transfer ownership of materialized view to postgres for pg_cron
     op.execute("""
         ALTER MATERIALIZED VIEW proveo.company_search OWNER TO postgres;
     """)
 
-    # 5️⃣ Schedule pg_cron job to refresh the materialized view every 15 minutes
+    # Schedule pg_cron job to refresh the materialized view every 15 minutes
     op.execute("""
         SELECT cron.schedule(
             'refresh_company_search',
-            '*/15 * * * *',
-            $$SET search_path = proveo, public; REFRESH MATERIALIZED VIEW CONCURRENTLY company_search$$
+            '* * * * *',
+            $$REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search$$
         );
     """)
 
@@ -54,4 +53,18 @@ def downgrade():
     # Remove the cron job
     op.execute("""
         SELECT cron.unschedule('refresh_company_search');
+    """)
+
+    # Return ownership to user
+    op.execute("""
+        ALTER MATERIALIZED VIEW proveo.company_search OWNER TO "user";
+    """)
+
+    # Revoke privileges
+    op.execute("""
+        REVOKE SELECT ON ALL TABLES IN SCHEMA proveo FROM postgres;
+    """)
+
+    op.execute("""
+        REVOKE USAGE ON SCHEMA proveo FROM postgres;
     """)

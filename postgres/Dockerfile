@@ -13,3 +13,7 @@ RUN dos2unix /docker-entrypoint-initdb.d/01-init-ssl.sh \
 COPY init-user.sh /docker-entrypoint-initdb.d/02-init-user.sh
 RUN dos2unix /docker-entrypoint-initdb.d/02-init-user.sh \
  && chmod 755 /docker-entrypoint-initdb.d/02-init-user.sh
+
+COPY init-pgpass.sh /docker-entrypoint-initdb.d/03-init-pgpass.sh
+RUN dos2unix /docker-entrypoint-initdb.d/03-init-pgpass.sh \
+ && chmod 755 /docker-entrypoint-initdb.d/03-init-pgpass.sh

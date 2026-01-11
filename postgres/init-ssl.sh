@@ -39,7 +39,8 @@ if [ ! -f "$CUSTOM_HBA" ]; then
     cat > "$CUSTOM_HBA" <<EOF
 # Local connections
 local   all   all                         scram-sha-256
-
+host    all   all   127.0.0.1/32          scram-sha-256
+host    all   all   ::1/128               scram-sha-256
 # SSL-only TCP connections
 hostssl all   all   0.0.0.0/0             scram-sha-256
 hostssl all   all   ::/0                  scram-sha-256
