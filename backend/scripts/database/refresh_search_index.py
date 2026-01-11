@@ -58,8 +58,7 @@ async def setup_cron_refresh() -> None:
                 'refresh-company-search',
                 '* * * * *',
                 $$
-                SET search_path = proveo, public;
-                REFRESH MATERIALIZED VIEW CONCURRENTLY company_search;
+                REFRESH MATERIALIZED VIEW CONCURRENTLY  proveo.company_search;
                 $$
             )
             """

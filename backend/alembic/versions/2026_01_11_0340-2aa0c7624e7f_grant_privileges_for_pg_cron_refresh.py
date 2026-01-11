@@ -19,28 +19,39 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
+    # 1️⃣ Make sure the schema is accessible
     op.execute("""
-        -- Allow access to the schema
         GRANT USAGE ON SCHEMA proveo TO postgres;
-
-        -- Optional: allow read access
-        GRANT SELECT
-        ON ALL TABLES IN SCHEMA proveo
-        TO postgres;
-
-        ALTER DEFAULT PRIVILEGES IN SCHEMA proveo
-        GRANT SELECT ON TABLES TO postgres;
-
-        -- REQUIRED: pg_cron must own the materialized view
-        ALTER MATERIALIZED VIEW proveo.your_materialized_view
-        OWNER TO postgres;
     """)
 
-def downgrade():
+    # 2️⃣ Give read privileges on all tables
     op.execute("""
-        ALTER MATERIALIZED VIEW proveo.your_materialized_view
-        OWNER TO user;
+        GRANT SELECT ON ALL TABLES IN SCHEMA proveo TO postgres;
+    """)
 
-        REVOKE SELECT ON ALL TABLES IN SCHEMA proveo FROM postgres;
-        REVOKE USAGE ON SCHEMA proveo FROM postgres;
+    # 3️⃣ Set default privileges for future tables
+    op.execute("""
+        ALTER DEFAULT PRIVILEGES IN SCHEMA proveo
+        GRANT SELECT ON TABLES TO postgres;
+    """)
+
+    # 4️⃣ Ensure the materialized view exists and is owned by postgres
+    op.execute("""
+        ALTER MATERIALIZED VIEW proveo.company_search OWNER TO postgres;
+    """)
+
+    # 5️⃣ Schedule pg_cron job to refresh the materialized view every 15 minutes
+    op.execute("""
+        SELECT cron.schedule(
+            'refresh_company_search',
+            '*/15 * * * *',
+            $$SET search_path = proveo, public; REFRESH MATERIALIZED VIEW CONCURRENTLY company_search$$
+        );
+    """)
+
+
+def downgrade():
+    # Remove the cron job
+    op.execute("""
+        SELECT cron.unschedule('refresh_company_search');
     """)
