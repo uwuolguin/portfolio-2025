@@ -211,9 +211,13 @@ class DB:
             """
             company = await conn.fetchrow(company_query, user_uuid)
             if company:
-                image_id = company.get("image_url")
+                image_url = company.get("image_url")
                 image_ext = company.get("image_extension")
-                deleted_image = f"{image_id}{image_ext}" if image_id and image_ext else None
+                if image_url and image_ext:
+                    image_id = image_url.split("/")[-1].replace(image_ext, "")
+                    deleted_image = f"{image_id}{image_ext}"
+                else:
+                    deleted_image = None
                 company_uuid = str(company["uuid"])
                 insert_deleted_company = """
                     INSERT INTO proveo.companies_deleted
@@ -309,9 +313,13 @@ class DB:
             company = await conn.fetchrow(company_query, user_uuid)
 
             if company:
-                image_id = company.get("image_url")
+                image_url = company.get("image_url")
                 image_ext = company.get("image_extension")
-                deleted_image_path = f"{image_id}{image_ext}" if image_id and image_ext else None
+                if image_url and image_ext:
+                    image_id = image_url.split("/")[-1].replace(image_ext, "")
+                    deleted_image_path = f"{image_id}{image_ext}"
+                else:
+                    deleted_image_path = None
                 company_uuid = str(company["uuid"])
 
                 insert_deleted_company = """
@@ -1059,9 +1067,10 @@ class DB:
                 user_uuid=str(user_uuid)
             )
 
-            image_id = company.get("image_url")
+            image_url = company.get("image_url")
             image_ext = company.get("image_extension")
-            if image_id and image_ext:
+            if image_url and image_ext:
+                image_id = image_url.split("/")[-1].replace(image_ext, "")
                 deleted_image = f"{image_id}{image_ext}"
 
         if deleted_image:
@@ -1168,10 +1177,11 @@ class DB:
             
             logger.info("admin_deleted_company", company_uuid=str(company_uuid))
 
-            image_id = company.get("image_url")
+            image_url = company.get("image_url")
             image_ext = company.get("image_extension")
-            if image_id and image_ext:
-                deleted_image_path = f"{image_id}{image_ext}"
+            if image_url and image_ext:
+                image_id = image_url.split("/")[-1].replace(image_ext, "")
+                deleted_image_path{image_id}{image_ext}"
 
         if deleted_image_path:
             try:

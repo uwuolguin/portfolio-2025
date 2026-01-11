@@ -145,7 +145,11 @@ async def seed_test_data() -> None:
                     product_uuid = product_1_uuid if i < 8 else product_2_uuid
                     commune_uuid = commune_1_uuid if i < 8 else commune_2_uuid
                     template = COMPANY_TEMPLATES[i]
-
+                    image_extension = upload_result["extension"]
+                    full_image_url = image_service_client.build_image_url(
+                        upload_result["image_id"],
+                        image_extension,
+                    )
                     await DB.create_company(
                         conn=conn,
                         company_uuid=company_uuid,
@@ -158,8 +162,8 @@ async def seed_test_data() -> None:
                         address=template["address"],
                         phone=template["phone"],
                         email=template["email"],
-                        image_url=upload_result["image_id"],
-                        image_extension=upload_result["extension"],
+                        image_url=full_image_url,
+                        image_extension=image_extension,
                     )
 
                 except ValueError:

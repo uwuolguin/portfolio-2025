@@ -18,22 +18,22 @@ document.addEventListener('DOMContentLoaded', () => {
             loading: 'Cargando...',
             error: 'Error al cargar los resultados',
             page: 'Página',
-            previous: 'Anterior',
-            next: 'Siguiente'
+            previous: '← Anterior',
+            next: 'Siguiente →'
         },
         en: {
             noResults: 'No results found',
             loading: 'Loading...',
             error: 'Error loading results',
             page: 'Page',
-            previous: 'Previous',
-            next: 'Next'
+            previous: '← Previous',
+            next: 'Next →'
         }
     };
 
     let currentPage = 1;
     let totalResults = 0;
-    const resultsPerPage = 20;
+    const resultsPerPage = 4;
 
     function showLoading() {
         const lang = getLanguage();
@@ -150,18 +150,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const paginationContainer = document.createElement('div');
         paginationContainer.className = 'pagination-container';
 
-        // Previous button
-        if (page > 1) {
-            const prevLink = document.createElement('a');
-            prevLink.href = '#';
-            prevLink.className = 'page-link';
-            prevLink.textContent = t.previous;
+        // Previous button - always show but style as disabled if on first page
+        const prevLink = document.createElement('a');
+        prevLink.href = '#';
+        prevLink.className = 'page-link';
+        prevLink.textContent = t.previous;
+        
+        if (page <= 1) {
+            prevLink.classList.add('disabled');
+            prevLink.style.opacity = '0.4';
+            prevLink.style.cursor = 'not-allowed';
+            prevLink.style.pointerEvents = 'none';
+        } else {
             prevLink.addEventListener('click', (e) => {
                 e.preventDefault();
                 performSearch(page - 1);
             });
-            paginationContainer.appendChild(prevLink);
         }
+        paginationContainer.appendChild(prevLink);
 
         // Current page indicator
         const pageInfo = document.createElement('span');
@@ -169,18 +175,24 @@ document.addEventListener('DOMContentLoaded', () => {
         pageInfo.textContent = `${t.page} ${page}`;
         paginationContainer.appendChild(pageInfo);
 
-        // Next button - show if we got a full page of results
-        if (resultCount === resultsPerPage) {
-            const nextLink = document.createElement('a');
-            nextLink.href = '#';
-            nextLink.className = 'page-link';
-            nextLink.textContent = t.next;
+        // Next button - always show but style as disabled if no more results
+        const nextLink = document.createElement('a');
+        nextLink.href = '#';
+        nextLink.className = 'page-link';
+        nextLink.textContent = t.next;
+        
+        if (resultCount < resultsPerPage) {
+            nextLink.classList.add('disabled');
+            nextLink.style.opacity = '0.4';
+            nextLink.style.cursor = 'not-allowed';
+            nextLink.style.pointerEvents = 'none';
+        } else {
             nextLink.addEventListener('click', (e) => {
                 e.preventDefault();
                 performSearch(page + 1);
             });
-            paginationContainer.appendChild(nextLink);
         }
+        paginationContainer.appendChild(nextLink);
 
         resultsContainer.appendChild(paginationContainer);
     }

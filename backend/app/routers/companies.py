@@ -202,10 +202,6 @@ async def get_my_company(
             raise NotFoundError(resource="company", identifier=f"user:{user_uuid}")
 
         response_dict = company.model_dump()
-        response_dict["image_url"] = image_service_client.build_image_url(
-            company.image_url,
-            company.image_extension,
-        )
         return CompanyResponse(**response_dict)
 
     except NotFoundError:
@@ -239,10 +235,6 @@ async def get_company(
             raise NotFoundError(resource="company", identifier=str(company_uuid))
 
         response_dict = company.model_dump()
-        response_dict["image_url"] = image_service_client.build_image_url(
-            company.image_url,
-            company.image_extension,
-        )
         return CompanyResponse(**response_dict)
 
     except NotFoundError:
@@ -346,8 +338,11 @@ async def create_company(
             raise ValidationErrorResponse(message="Company image is required", field="image")
         
         upload_result = await upload_company_image(image, company_uuid, user_uuid)
-        image_url = upload_result["image_id"]
         image_extension = upload_result["extension"]
+        image_url = image_service_client.build_image_url(
+            upload_result["image_id"],
+            image_extension,
+        )
         company = await DB.create_company(
             conn=db,
             company_uuid=company_uuid,
@@ -369,10 +364,6 @@ async def create_company(
         company_with_relations = await DB.get_company_by_uuid(db, company.uuid)
         if company_with_relations:
             response_dict = company_with_relations.model_dump()
-            response_dict["image_url"] = image_service_client.build_image_url(
-                company_with_relations.image_url,
-                company_with_relations.image_extension,
-            )
             return CompanyResponse(**response_dict)
         
         raise HTTPException(
@@ -501,18 +492,23 @@ async def update_my_company(
         
         # Handle image upload if provided
         if image and image.filename:
-            # Delete old image
+            # Delete old image - extract image_id from full URL
             if company.image_url and company.image_extension:
                 try:
-                    old_filename = f"{company.image_url}{company.image_extension}"
+                    # Extract just the image_id from the full URL for deletion
+                    old_image_id = company.image_url.split("/")[-1].replace(company.image_extension, "")
+                    old_filename = f"{old_image_id}{company.image_extension}"
                     await image_service_client.delete_image(old_filename)
                     logger.info("old_company_image_deleted", company_uuid=str(company.uuid), old_image=old_filename)
                 except Exception as del_error:
                     logger.warning("old_image_delete_failed", error=str(del_error), company_uuid=str(company.uuid))
             
             upload_result = await upload_company_image(image, company.uuid, user_uuid)
-            validated_image_url = upload_result["image_id"]
             validated_image_ext = upload_result["extension"]
+            validated_image_url = image_service_client.build_image_url(
+                upload_result["image_id"],
+                validated_image_ext,
+            )
         
         # Check if any field was provided
         has_updates = any([
@@ -530,10 +526,6 @@ async def update_my_company(
         if not has_updates:
             # No updates provided, return current company
             response_dict = company.model_dump()
-            response_dict["image_url"] = image_service_client.build_image_url(
-                company.image_url,
-                company.image_extension,
-            )
             return CompanyResponse(**response_dict)
         # Call DB update with explicit parameter names
         updated_company = await DB.update_company_by_uuid(
@@ -562,18 +554,10 @@ async def update_my_company(
         company_with_relations = await DB.get_company_by_uuid(db, updated_company.uuid)
         if company_with_relations:
             response_dict = company_with_relations.model_dump()
-            response_dict["image_url"] = image_service_client.build_image_url(
-                company_with_relations.image_url,
-                company_with_relations.image_extension,
-            )
             return CompanyResponse(**response_dict)
         
         # Fallback
         response_dict = updated_company.model_dump()
-        response_dict["image_url"] = image_service_client.build_image_url(
-            updated_company.image_url,
-            updated_company.image_extension,
-        )
         return CompanyResponse(**response_dict)
         
     except (NotFoundError, ValidationErrorResponse, ServiceUnavailableError):

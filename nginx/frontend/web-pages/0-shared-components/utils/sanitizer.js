@@ -203,6 +203,22 @@ export function buildBusinessCard(company, lang = 'es') {
         detailsDiv.appendChild(descEl);
     }
 
+    const productName = lang === 'es' ? company.product_name_es : company.product_name_en;
+    if (productName) {
+        const productEl = document.createElement('p');
+        productEl.className = 'product';
+        setText(productEl, productName);
+        detailsDiv.appendChild(productEl);
+    }
+
+    // Commune
+    if (company.commune_name) {
+        const communeEl = document.createElement('p');
+        communeEl.className = 'commune';
+        setText(communeEl, company.commune_name);
+        detailsDiv.appendChild(communeEl);
+    }
+
     if (company.address) {
         const addressEl = document.createElement('p');
         addressEl.className = 'location';
