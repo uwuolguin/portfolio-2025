@@ -345,9 +345,6 @@ export function debounce(func, wait = 300) {
     };
 }
 
-export function isAuthenticated() {
-    return getLoginState();
-}
 
 export function requireAuth() {
     if (!isAuthenticated()) {
@@ -469,7 +466,6 @@ export default {
     searchCompanies,
     formatDate,
     debounce,
-    isAuthenticated,
     requireAuth,
     showLoading,
     showError,
