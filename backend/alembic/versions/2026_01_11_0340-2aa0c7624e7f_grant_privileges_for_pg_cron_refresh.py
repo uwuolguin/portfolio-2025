@@ -16,8 +16,12 @@ revision: str = '2aa0c7624e7f'
 down_revision: Union[str, Sequence[str], None] = '03ccc9af1355'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
-
 def upgrade():
+    # Create pg_cron extension in this database
+    op.execute("""
+        CREATE EXTENSION IF NOT EXISTS pg_cron;
+    """)
+
     # Make sure the schema is accessible
     op.execute("""
         GRANT USAGE ON SCHEMA proveo TO postgres;
@@ -39,7 +43,7 @@ def upgrade():
         ALTER MATERIALIZED VIEW proveo.company_search OWNER TO postgres;
     """)
 
-    # Schedule pg_cron job to refresh the materialized view every 15 minutes
+    # Schedule pg_cron job
     op.execute("""
         SELECT cron.schedule(
             'refresh_company_search',
@@ -50,17 +54,14 @@ def upgrade():
 
 
 def downgrade():
-    # Remove the cron job
     op.execute("""
         SELECT cron.unschedule('refresh_company_search');
     """)
 
-    # Return ownership to user
     op.execute("""
         ALTER MATERIALIZED VIEW proveo.company_search OWNER TO "user";
     """)
 
-    # Revoke privileges
     op.execute("""
         REVOKE SELECT ON ALL TABLES IN SCHEMA proveo FROM postgres;
     """)
