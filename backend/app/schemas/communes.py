@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 from uuid import UUID
 from datetime import datetime
 
-from app.utils.validators import validate_name, ValidationError
+from app.utils.validators import validate_name
+from app.utils.exceptions import ValidationError
 
 
 class CommuneRecord(BaseModel):

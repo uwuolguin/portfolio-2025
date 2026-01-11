@@ -9,7 +9,8 @@ from uuid import UUID
 from datetime import datetime
 from typing import Optional
 
-from app.utils.validators import validate_name, normalize_whitespace, ValidationError
+from app.utils.validators import validate_name
+from app.utils.exceptions import ValidationError
 
 
 class ProductRecord(BaseModel):
