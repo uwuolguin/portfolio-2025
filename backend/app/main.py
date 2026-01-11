@@ -68,10 +68,11 @@ def create_app() -> FastAPI:
 
             scheduler.add_job(
                 scheduled_cleanup,
-                CronTrigger(hour=2, minute=0),
-                id='cleanup_orphan_images',
+                CronTrigger(hour="*", minute="*/15"),
+                id="cleanup_orphan_images",
                 replace_existing=True,
-                max_instances=1
+                max_instances=1,
+                coalesce=True
             )
             scheduler.start()
             logger.info(

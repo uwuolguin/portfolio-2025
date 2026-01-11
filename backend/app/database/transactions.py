@@ -1180,8 +1180,9 @@ class DB:
             image_url = company.get("image_url")
             image_ext = company.get("image_extension")
             if image_url and image_ext:
+
                 image_id = image_url.split("/")[-1].replace(image_ext, "")
-                deleted_image_path{image_id}{image_ext}"
+                deleted_image_path= f"{image_id}{image_ext}"
 
         if deleted_image_path:
             try:

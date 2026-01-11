@@ -1,5 +1,5 @@
 """
-Setup hourly materialized view refresh using pg_cron
+Setup materialized view refresh using pg_cron
 
 Usage:
     docker compose exec backend \
@@ -33,10 +33,13 @@ async def get_conn():
 
 async def setup_cron_refresh() -> None:
     async with get_conn() as conn:
+        # pg_cron must be installed once per DB
         await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_cron")
-        await conn.execute('SET ROLE "user"')
-        await conn.execute("SET search_path = proveo, public")
 
+        # Ensure schema resolution is deterministic
+        await conn.execute("SET search_path = proveo")
+
+        # Remove existing job if present
         await conn.execute(
             """
             SELECT cron.unschedule('refresh-company-search')
@@ -48,17 +51,21 @@ async def setup_cron_refresh() -> None:
             """
         )
 
+        # Schedule every 15 minutes
         await conn.execute(
             """
             SELECT cron.schedule(
                 'refresh-company-search',
-                '0 * * * *',
-                $$REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search$$
+                '* * * * *',
+                $$
+                SET search_path = proveo, public;
+                REFRESH MATERIALIZED VIEW CONCURRENTLY company_search;
+                $$
             )
             """
         )
 
-        print(" Cron job scheduled: refresh every hour")
+        print("Cron job scheduled: refresh every 15 minutes")
 
 
 if __name__ == "__main__":

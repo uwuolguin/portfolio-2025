@@ -1,7 +1,7 @@
-FROM postgres:15
+FROM postgres:16
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-15-cron \
+    postgresql-16-cron \
     openssl \
     dos2unix \
  && rm -rf /var/lib/apt/lists/*

@@ -63,15 +63,15 @@ async def get_all_referenced_filenames_from_db(
 ) -> Set[str]:
     rows = await conn.fetch(
         """
-        SELECT image_url, image_extension
+        SELECT uuid, image_extension
         FROM proveo.companies
-        WHERE image_url IS NOT NULL
+        WHERE uuid IS NOT NULL
           AND image_extension IS NOT NULL
         """
     )
 
     filenames = {
-        f"{row['image_url']}{row['image_extension']}"
+        f"{row['uuid']}{row['image_extension']}"
         for row in rows
     }
 
