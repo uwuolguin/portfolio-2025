@@ -1,3 +1,15 @@
+"""
+Proveo API - Main Application Entry Point
+
+FastAPI application with:
+- Database connection pooling
+- Redis caching with graceful degradation
+- Structured logging with correlation IDs
+- Comprehensive error handling
+- Security middleware
+- Scheduled maintenance jobs
+"""
+
 from contextlib import asynccontextmanager
 
 import structlog
@@ -7,7 +19,6 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
 from app.database.connection import init_db_pools, close_db_pools
-from app.database.pg_cron import schedule_pg_cron_jobs, unschedule_pg_cron_jobs
 from app.redis.redis_client import redis_client
 from app.middleware.cors import setup_cors
 from app.middleware.logging import LoggingMiddleware, setup_logging
@@ -24,20 +35,28 @@ logger = structlog.get_logger(__name__)
 
 
 async def scheduled_cleanup():
+    """Run orphan image cleanup job"""
     logger.info("scheduled_cleanup_started")
     try:
         from scripts.maintenance.cleanup_orphan_images import cleanup_orphan_images
         await cleanup_orphan_images()
         logger.info("scheduled_cleanup_completed")
     except Exception as e:
-        logger.error("scheduled_cleanup_failed", error=str(e), exc_info=True)
+        logger.error(
+            "scheduled_cleanup_failed",
+            error=str(e),
+            exc_info=True
+        )
 
 
 def create_app() -> FastAPI:
+    """Factory function to create a FastAPI app instance with fresh scheduler"""
+    
     scheduler = AsyncIOScheduler()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """Application lifespan context with scheduled jobs"""
         logger.info("application_startup_begin")
 
         try:
@@ -46,8 +65,6 @@ def create_app() -> FastAPI:
 
             await redis_client.connect()
             logger.info("redis_connected")
-
-            await schedule_pg_cron_jobs()
 
             scheduler.add_job(
                 scheduled_cleanup,
@@ -61,7 +78,10 @@ def create_app() -> FastAPI:
             logger.info(
                 "scheduler_started",
                 jobs=[
-                    {"id": job.id, "next_run": job.next_run_time.isoformat() if job.next_run_time else None}
+                    {
+                        "id": job.id,
+                        "next_run": job.next_run_time.isoformat() if job.next_run_time else None
+                    }
                     for job in scheduler.get_jobs()
                 ]
             )
@@ -79,8 +99,6 @@ def create_app() -> FastAPI:
         try:
             scheduler.shutdown(wait=False)
             logger.info("scheduler_stopped")
-
-            await unschedule_pg_cron_jobs()
 
             await close_db_pools()
             logger.info("database_pools_closed")
@@ -101,8 +119,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.debug else None,
     )
 
+    # Register custom exception handlers
     register_exception_handlers(app)
 
+    # Add middleware (order matters - first added = last executed)
     app.add_middleware(HTTPSRedirectMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     setup_cors(app)
@@ -110,6 +130,7 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def global_rate_limit_middleware(request: Request, call_next):
+        """Apply global rate limiting to API endpoints"""
         if request.url.path in ["/health", "/", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
 
@@ -132,6 +153,7 @@ def create_app() -> FastAPI:
 
         return await call_next(request)
 
+    # Include routers
     app.include_router(users.router, prefix=settings.api_v1_prefix)
     app.include_router(products.router, prefix=settings.api_v1_prefix)
     app.include_router(communes.router, prefix=settings.api_v1_prefix)
