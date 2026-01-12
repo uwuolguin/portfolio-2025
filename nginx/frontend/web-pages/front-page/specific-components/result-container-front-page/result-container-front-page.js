@@ -32,13 +32,22 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     let currentPage = 1;
-    let lastResultCount = 0; // Track how many results we got on the last fetch
+    let lastResultCount = 0;
     const resultsPerPage = 4;
 
     function showLoading() {
         const lang = getLanguage();
         const t = translations[lang];
-        clearElement(resultsContainer);
+        
+        // Find existing content area or create it
+        let contentArea = resultsContainer.querySelector('.results-content-area');
+        if (!contentArea) {
+            contentArea = document.createElement('div');
+            contentArea.className = 'results-content-area';
+            resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
+        }
+        
+        clearElement(contentArea);
         
         const loading = document.createElement('div');
         loading.className = 'loading-message';
@@ -46,13 +55,21 @@ document.addEventListener('DOMContentLoaded', () => {
         loading.style.padding = '2rem';
         loading.style.color = '#666';
         loading.textContent = t.loading;
-        resultsContainer.appendChild(loading);
+        contentArea.appendChild(loading);
     }
 
     function showError() {
         const lang = getLanguage();
         const t = translations[lang];
-        clearElement(resultsContainer);
+        
+        let contentArea = resultsContainer.querySelector('.results-content-area');
+        if (!contentArea) {
+            contentArea = document.createElement('div');
+            contentArea.className = 'results-content-area';
+            resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
+        }
+        
+        clearElement(contentArea);
         
         const error = document.createElement('div');
         error.className = 'error-message';
@@ -60,13 +77,21 @@ document.addEventListener('DOMContentLoaded', () => {
         error.style.padding = '2rem';
         error.style.color = '#dc3545';
         error.textContent = t.error;
-        resultsContainer.appendChild(error);
+        contentArea.appendChild(error);
     }
 
     function showNoResults() {
         const lang = getLanguage();
         const t = translations[lang];
-        clearElement(resultsContainer);
+        
+        let contentArea = resultsContainer.querySelector('.results-content-area');
+        if (!contentArea) {
+            contentArea = document.createElement('div');
+            contentArea.className = 'results-content-area';
+            resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
+        }
+        
+        clearElement(contentArea);
         
         const noResults = document.createElement('div');
         noResults.className = 'no-results-message';
@@ -74,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         noResults.style.padding = '2rem';
         noResults.style.color = '#666';
         noResults.textContent = t.noResults;
-        resultsContainer.appendChild(noResults);
+        contentArea.appendChild(noResults);
     }
 
     async function fetchResults(query, commune, product, page = 1) {
@@ -106,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const rawData = await response.json();
             const companies = sanitizeAPIResponse(rawData);
             
-            // Store how many results we got
             lastResultCount = companies.length;
 
             displayResults(companies, page);
@@ -114,20 +138,28 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error('Search error:', error);
             showError();
+            // Pagination stays - user can go back!
+            updatePagination(currentPage);
         }
     }
 
     function displayResults(companies, page) {
         const lang = getLanguage();
 
-        clearElement(resultsContainer);
+        let contentArea = resultsContainer.querySelector('.results-content-area');
+        if (!contentArea) {
+            contentArea = document.createElement('div');
+            contentArea.className = 'results-content-area';
+            resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
+        }
+        
+        clearElement(contentArea);
 
         const hasResults = companies && companies.length > 0;
 
         if (!hasResults) {
             showNoResults();
         } else {
-            // Create grid container
             const grid = document.createElement('div');
             grid.className = 'results-grid';
 
@@ -136,19 +168,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 grid.appendChild(card);
             });
 
-            resultsContainer.appendChild(grid);
+            contentArea.appendChild(grid);
         }
 
-
-        createPagination(page);
+        // ALWAYS update pagination - never remove it
+        updatePagination(page);
     }
 
-    function createPagination(page) {
+    function updatePagination(page) {
         const lang = getLanguage();
         const t = translations[lang];
 
-        const paginationContainer = document.createElement('div');
-        paginationContainer.className = 'pagination-container';
+        // Find or create pagination container
+        let paginationContainer = resultsContainer.querySelector('.pagination-container');
+        
+        if (!paginationContainer) {
+            paginationContainer = document.createElement('div');
+            paginationContainer.className = 'pagination-container';
+            resultsContainer.appendChild(paginationContainer);
+        }
+
+        // Clear and rebuild pagination
+        clearElement(paginationContainer);
 
         // Previous button
         const prevLink = document.createElement('a');
@@ -181,9 +222,6 @@ document.addEventListener('DOMContentLoaded', () => {
         nextLink.className = 'page-link';
         nextLink.textContent = t.next;
         
-        // DISABLE NEXT IF WE GOT FEWER RESULTS THAN THE PAGE SIZE
-        // Example: limit=4, got 3 results -> no more pages -> disable
-        // Example: limit=4, got 4 results -> might be more -> enable
         if (lastResultCount < resultsPerPage) {
             nextLink.classList.add('disabled');
             nextLink.style.opacity = '0.4';
@@ -196,8 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         paginationContainer.appendChild(nextLink);
-
-        resultsContainer.appendChild(paginationContainer);
     }
 
     function performSearch(page = 1) {

@@ -1,3 +1,8 @@
+/* Results content container */
+.results-content {
+    min-height: 200px; /* Ensures space even when empty */
+}
+
 .results-grid {
     display: grid;
     grid-template-columns: repeat(1, 1fr); 
@@ -53,12 +58,21 @@
     color: #666;
 }
 
+/* Pagination wrapper - independent from results */
+.pagination-wrapper {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+    margin-bottom: 60px;
+    min-height: 50px; /* Ensures space is reserved */
+}
+
 .pagination-container {
     display: flex;
     justify-content: center;
     align-items: center;
-    margin-top: 40px;
-    margin-bottom: 60px;
+    gap: 8px;
 }
 
 .page-link {
@@ -68,6 +82,8 @@
     border: 1px solid #ddd;
     margin: 0 6px;
     border-radius: 4px;
+    display: inline-block;
+    transition: background-color 0.2s ease;
 }
 
 .page-link.active {
@@ -76,6 +92,33 @@
     border: 1px solid #282C34;
 }
 
-.page-link:hover:not(.active) {
+.page-link:hover:not(.active):not(.disabled) {
     background-color: #ddd;
+}
+
+.page-link.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* Loading, error, and no results states */
+.loading-message,
+.error-message,
+.no-results-message {
+    text-align: center;
+    padding: 2rem;
+    font-size: 1.1rem;
+}
+
+.loading-message {
+    color: #666;
+}
+
+.error-message {
+    color: #dc3545;
+}
+
+.no-results-message {
+    color: #666;
 }
