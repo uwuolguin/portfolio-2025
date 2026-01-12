@@ -56,14 +56,14 @@ router = APIRouter(prefix="/companies", tags=["companies"])
 
 async def resolve_commune_uuid(conn: asyncpg.Connection, commune_name: str) -> UUID:
     """Convert commune name to UUID"""
-    normalized = normalize_whitespace(commune_name)
+   
     result = await conn.fetchrow(
         "SELECT uuid FROM proveo.communes WHERE name = $1",
-        normalized
+         commune_name
     )
-    if not result:
-        raise ValidationErrorResponse(
-            message=f"Commune '{normalized}' not found",
+    if not result:  
+        raise ValidationError(
+            message=f"Commune '{commune_name}' not found",
             field="commune_name"
         )
     return result['uuid']
@@ -71,21 +71,21 @@ async def resolve_commune_uuid(conn: asyncpg.Connection, commune_name: str) -> U
 
 async def resolve_product_uuid(conn: asyncpg.Connection, product_name: str, lang: str) -> UUID:
     """Convert product name (in current language) to UUID"""
-    normalized = normalize_whitespace(product_name)
+
     if lang == 'es':
         result = await conn.fetchrow(
             "SELECT uuid FROM proveo.products WHERE name_es = $1",
-            normalized
+            product_name
         )
     else:
         result = await conn.fetchrow(
             "SELECT uuid FROM proveo.products WHERE name_en = $1",
-            normalized
+            product_name
         )
     
     if not result:
-        raise ValidationErrorResponse(
-            message=f"Product '{normalized}' not found",
+        raise ValidationError(
+            message=f"Product '{product_name}' not found",
             field="product_name"
         )
     return result['uuid']
@@ -101,7 +101,7 @@ async def upload_company_image(
     """
     content_type = image.content_type
     if content_type not in settings.content_type_map:
-        raise ValidationErrorResponse(
+        raise ValidationError(
             message=f"Unsupported image type: {content_type}. Allowed: {', '.join(settings.content_type_map.keys())}",
             field="image"
         )
@@ -283,7 +283,7 @@ async def create_company(
         validated_email = validate_email(email)
         validated_lang = validate_language(lang)
     except ValidationError as e:
-        raise ValidationErrorResponse(message=e.message, field=e.field)
+        raise ValidationError(message=e.message, field=e.field)
     
     # Validate descriptions if provided
     validated_desc_es = None
@@ -293,17 +293,17 @@ async def create_company(
         try:
             validated_desc_es = validate_description(description_es)
         except ValidationError as e:
-            raise ValidationErrorResponse(message=e.message, field="description_es")
+            raise ValidationError(message=e.message, field="description_es")
     
     if description_en:
         try:
             validated_desc_en = validate_description(description_en)
         except ValidationError as e:
-            raise ValidationErrorResponse(message=e.message, field="description_en")
+            raise ValidationError(message=e.message, field="description_en")
     
     # Ensure at least one description is provided
     if not validated_desc_es and not validated_desc_en:
-        raise ValidationErrorResponse(
+        raise ValidationError(
             message="At least one description (Spanish or English) must be provided",
             field="description"
         )
@@ -334,7 +334,7 @@ async def create_company(
         company_uuid = uuid.uuid4()
         
         if not image or not image.filename:
-            raise ValidationErrorResponse(message="Company image is required", field="image")
+            raise ValidationError(message="Company image is required", field="image")
         
         upload_result = await upload_company_image(image, company_uuid, user_uuid)
         image_extension = upload_result["extension"]
@@ -370,7 +370,7 @@ async def create_company(
             detail="Company created but failed to retrieve"
         )
         
-    except (ConflictError, ValidationErrorResponse, ServiceUnavailableError):
+    except (ConflictError, ValidationError, ServiceUnavailableError):
         raise
     except Exception as e:
         logger.error("create_company_error", user_uuid=str(user_uuid), error=str(e), exc_info=True)
@@ -424,25 +424,25 @@ async def update_my_company(
             try:
                 validated_name = validate_name(name)
             except ValidationError as e:
-                raise ValidationErrorResponse(message=e.message, field="name")
+                raise ValidationError(message=e.message, field="name")
         
         if address is not None:
             try:
                 validated_address = validate_address(address)
             except ValidationError as e:
-                raise ValidationErrorResponse(message=e.message, field="address")
+                raise ValidationError(message=e.message, field="address")
         
         if phone is not None:
             try:
                 validated_phone = validate_phone(phone)
             except ValidationError as e:
-                raise ValidationErrorResponse(message=e.message, field="phone")
+                raise ValidationError(message=e.message, field="phone")
         
         if email is not None:
             try:
                 validated_email = validate_email(email)
             except ValidationError as e:
-                raise ValidationErrorResponse(message=e.message, field="email")
+                raise ValidationError(message=e.message, field="email")
         
         # Handle descriptions - if either is provided, we need to handle translation
         if description_es is not None or description_en is not None:
@@ -453,13 +453,13 @@ async def update_my_company(
                 try:
                     temp_desc_es = validate_description(description_es)
                 except ValidationError as e:
-                    raise ValidationErrorResponse(message=e.message, field="description_es")
+                    raise ValidationError(message=e.message, field="description_es")
             
             if description_en is not None:
                 try:
                     temp_desc_en = validate_description(description_en)
                 except ValidationError as e:
-                    raise ValidationErrorResponse(message=e.message, field="description_en")
+                    raise ValidationError(message=e.message, field="description_en")
             
             # If only one description provided, translate to get the other
             if temp_desc_es or temp_desc_en:
@@ -559,7 +559,7 @@ async def update_my_company(
         response_dict = updated_company.model_dump()
         return CompanyResponse(**response_dict)
         
-    except (NotFoundError, ValidationErrorResponse, ServiceUnavailableError):
+    except (NotFoundError, ValidationError, ServiceUnavailableError):
         raise
     except Exception as e:
         logger.error("update_company_error", user_uuid=str(user_uuid), error=str(e), exc_info=True)
