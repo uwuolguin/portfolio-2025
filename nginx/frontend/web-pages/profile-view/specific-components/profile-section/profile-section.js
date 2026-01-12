@@ -93,7 +93,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         const lang = getLanguage();
         const t = translations[lang];
 
-        // Show loading
         clearElement(profileSection);
         const loadingDiv = document.createElement('div');
         loadingDiv.className = 'loading';
@@ -122,17 +121,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const container = document.createElement('div');
         container.className = 'profile-container';
 
-        // Title
         const title = document.createElement('h2');
         title.className = 'profile-title';
         title.textContent = `${t.welcome}, ${userData.name || ''}`;
         container.appendChild(title);
 
-        // Profile content
         const content = document.createElement('div');
         content.className = 'profile-content';
 
-        // User details section
         const userDetails = document.createElement('div');
         userDetails.className = 'user-details';
         
@@ -148,7 +144,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         content.appendChild(userDetails);
 
-        // Company section
         if (companyData) {
             const companySection = document.createElement('div');
             companySection.className = 'profile-info';
@@ -159,14 +154,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             companyTitle.textContent = t.myCompany;
             companySection.appendChild(companyTitle);
 
-            // Company image
             const imgUrl = companyData.image_url;
             if (imgUrl) {
                 const imgContainer = document.createElement('div');
                 imgContainer.style.marginBottom = '1rem';
                 
                 const img = document.createElement('img');
-                img.src = sanitizeURL(imgUrl);
+                const cacheParam = companyData.updated_at 
+                    ? new Date(companyData.updated_at).getTime()
+                    : Date.now();
+                const cacheBustUrl = imgUrl.includes('?') 
+                    ? `${imgUrl}&v=${cacheParam}` 
+                    : `${imgUrl}?v=${cacheParam}`;
+                img.src = sanitizeURL(cacheBustUrl);
                 img.alt = sanitizeText(companyData.name || 'Company image');
                 img.className = 'company-image-preview';
                 img.style.maxWidth = '100%';
@@ -178,7 +178,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 companySection.appendChild(imgContainer);
             }
 
-            // Company info items
             const infoItems = [
                 { label: t.name, value: companyData.name },
                 { label: t.email, value: companyData.email },
@@ -210,7 +209,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             content.appendChild(companySection);
         } else {
-            // No company message
             const noCompanyDiv = document.createElement('div');
             noCompanyDiv.className = 'info-item';
             noCompanyDiv.style.textAlign = 'center';
@@ -225,7 +223,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         container.appendChild(content);
 
-        // Action buttons
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'profile-actions';
 
