@@ -2,7 +2,9 @@ const SAFE_ATTRS = new Set([
     'class', 'id', 'title', 'role', 'tabindex', 'lang', 'dir',
     'aria-label', 'aria-describedby', 'aria-hidden', 'aria-live',
     'aria-expanded', 'aria-selected', 'aria-checked', 'aria-disabled',
-    'aria-controls', 'aria-labelledby', 'aria-haspopup', 'aria-current'
+    'aria-controls', 'aria-labelledby', 'aria-haspopup', 'aria-current',
+    'alt', 'loading', 'width', 'height', 'name', 'type', 'value', 'placeholder',
+    'disabled', 'readonly', 'checked', 'selected', 'for'
 ]);
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
@@ -171,12 +173,12 @@ export function buildBusinessCard(company, lang = 'es') {
     const card = document.createElement('div');
     card.className = 'business-card';
 
-    if (company.image_url) {
+    if (company.img_url) {
         const pictureDiv = document.createElement('div');
         pictureDiv.className = 'card-picture';
         const img = document.createElement('img');
-        setSrc(img, company.image_url);
-        setSafeAttr(img, 'alt', company.name || 'Company image');
+        setSrc(img, company.img_url);
+        img.alt = String(company.name || 'Company image');
         img.loading = 'lazy';
         img.onerror = function () {
             this.style.display = 'none';
@@ -195,7 +197,8 @@ export function buildBusinessCard(company, lang = 'es') {
         detailsDiv.appendChild(nameEl);
     }
 
-    const description = lang === 'es' ? company.description_es : company.description_en;
+    // For search results, use 'description' field (language already selected by backend)
+    const description = company.description || (lang === 'es' ? company.description_es : company.description_en);
     if (description) {
         const descEl = document.createElement('p');
         descEl.className = 'concise-description';
@@ -203,7 +206,8 @@ export function buildBusinessCard(company, lang = 'es') {
         detailsDiv.appendChild(descEl);
     }
 
-    const productName = lang === 'es' ? company.product_name_es : company.product_name_en;
+    // For search results, use 'product_name' field (language already selected by backend)
+    const productName = company.product_name || (lang === 'es' ? company.product_name_es : company.product_name_en);
     if (productName) {
         const productEl = document.createElement('p');
         productEl.className = 'product';

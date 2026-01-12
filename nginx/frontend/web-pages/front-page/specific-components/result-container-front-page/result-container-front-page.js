@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     let currentPage = 1;
-    let totalResults = 0;
+    let lastResultCount = 0; // Track how many results we got on the last fetch
     const resultsPerPage = 4;
 
     function showLoading() {
@@ -104,10 +104,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const rawData = await response.json();
-            
-            // Sanitize all API response data
             const companies = sanitizeAPIResponse(rawData);
-            totalResults = companies.length;
+            
+            // Store how many results we got
+            lastResultCount = companies.length;
 
             displayResults(companies, page);
 
@@ -122,35 +122,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         clearElement(resultsContainer);
 
-        if (!companies || companies.length === 0) {
+        const hasResults = companies && companies.length > 0;
+
+        if (!hasResults) {
             showNoResults();
-            return;
+        } else {
+            // Create grid container
+            const grid = document.createElement('div');
+            grid.className = 'results-grid';
+
+            companies.forEach(company => {
+                const card = buildBusinessCard(company, lang);
+                grid.appendChild(card);
+            });
+
+            resultsContainer.appendChild(grid);
         }
 
-        // Create grid container
-        const grid = document.createElement('div');
-        grid.className = 'results-grid';
 
-        companies.forEach(company => {
-            // buildBusinessCard handles all sanitization internally
-            const card = buildBusinessCard(company, lang);
-            grid.appendChild(card);
-        });
-
-        resultsContainer.appendChild(grid);
-
-        // Always show pagination if we have results
-        createPagination(page, companies.length);
+        createPagination(page);
     }
 
-    function createPagination(page, resultCount) {
+    function createPagination(page) {
         const lang = getLanguage();
         const t = translations[lang];
 
         const paginationContainer = document.createElement('div');
         paginationContainer.className = 'pagination-container';
 
-        // Previous button - always show but style as disabled if on first page
+        // Previous button
         const prevLink = document.createElement('a');
         prevLink.href = '#';
         prevLink.className = 'page-link';
@@ -175,13 +175,16 @@ document.addEventListener('DOMContentLoaded', () => {
         pageInfo.textContent = `${t.page} ${page}`;
         paginationContainer.appendChild(pageInfo);
 
-        // Next button - always show but style as disabled if no more results
+        // Next button
         const nextLink = document.createElement('a');
         nextLink.href = '#';
         nextLink.className = 'page-link';
         nextLink.textContent = t.next;
         
-        if (resultCount < resultsPerPage) {
+        // DISABLE NEXT IF WE GOT FEWER RESULTS THAN THE PAGE SIZE
+        // Example: limit=4, got 3 results -> no more pages -> disable
+        // Example: limit=4, got 4 results -> might be more -> enable
+        if (lastResultCount < resultsPerPage) {
             nextLink.classList.add('disabled');
             nextLink.style.opacity = '0.4';
             nextLink.style.cursor = 'not-allowed';
@@ -222,6 +225,6 @@ document.addEventListener('DOMContentLoaded', () => {
         performSearch(currentPage);
     });
 
-    // Initial load - show all companies
+    // Initial load
     performSearch(1);
 });

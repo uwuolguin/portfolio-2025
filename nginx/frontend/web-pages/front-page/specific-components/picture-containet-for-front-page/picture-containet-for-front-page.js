@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     wrapper.className = 'image-container';
 
     const img = document.createElement('img');
-    img.src = '/files/pictures/background-picture.jpg';
+    img.src = '/files/test_pictures/background-picture.jpg';
     img.alt = 'Description of the image';
 
     wrapper.appendChild(img);

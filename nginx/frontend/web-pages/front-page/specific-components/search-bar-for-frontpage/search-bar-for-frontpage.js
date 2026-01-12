@@ -1,7 +1,8 @@
 import {
     getLanguage,
     fetchProducts,
-    fetchCommunes
+    fetchCommunes,
+    debounce
 } from '../../../0-shared-components/utils/shared-functions.js';
 
 import {
@@ -75,6 +76,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             selectedText.textContent = defaultText;
             selected.dataset.value = '';
             optionsContainer.style.display = 'none';
+            // Trigger search input changed event
+            document.dispatchEvent(new CustomEvent('searchInputChanged'));
         });
         optionsList.appendChild(defaultOption);
 
@@ -92,6 +95,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 selectedText.textContent = displayName;
                 selected.dataset.value = value;
                 optionsContainer.style.display = 'none';
+                // Trigger search input changed event
+                document.dispatchEvent(new CustomEvent('searchInputChanged'));
             });
             
             optionsList.appendChild(optionElement);
@@ -201,7 +206,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         searchContainer.appendChild(searchWrapper);
 
-        // Enter key support
+        // Debounced input handler
+        const debouncedInputHandler = debounce(() => {
+            document.dispatchEvent(new CustomEvent('searchInputChanged'));
+        }, 500);
+
+        // Add input event listener with debounce
+        searchInput.addEventListener('input', debouncedInputHandler);
+
+        // Enter key support - immediate search without debounce
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
