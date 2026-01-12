@@ -216,16 +216,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         editSection.innerHTML = '';
 
         const container = document.createElement('div');
-        container.className = 'edit-container';
+        container.className = 'profile-edit-container';
 
         const title = document.createElement('h2');
-        title.className = 'edit-title';
+        title.className = 'profile-edit-title';
         title.textContent = t.title;
         container.appendChild(title);
 
         const form = document.createElement('form');
-        form.className = 'edit-form';
-        form.id = 'edit-form';
+        form.className = 'profile-edit-form';
+        form.id = 'profile-edit-form';
 
         // Company name
         const nameGroup = document.createElement('div');
@@ -233,7 +233,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.name = 'name';
-        nameInput.className = 'edit-input';
+        nameInput.className = 'profile-edit-input';
         nameInput.placeholder = t.companyName;
         nameInput.value = company.name || '';
         nameInput.required = true;
@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const emailInput = document.createElement('input');
         emailInput.type = 'email';
         emailInput.name = 'email';
-        emailInput.className = 'edit-input';
+        emailInput.className = 'profile-edit-input';
         emailInput.placeholder = t.email;
         emailInput.value = company.email || '';
         emailInput.required = true;
@@ -259,7 +259,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const phoneInput = document.createElement('input');
         phoneInput.type = 'tel';
         phoneInput.name = 'phone';
-        phoneInput.className = 'edit-input';
+        phoneInput.className = 'profile-edit-input';
         phoneInput.placeholder = t.phone;
         phoneInput.value = company.phone || '';
         phoneInput.required = true;
@@ -272,7 +272,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const addressInput = document.createElement('input');
         addressInput.type = 'text';
         addressInput.name = 'address';
-        addressInput.className = 'edit-input';
+        addressInput.className = 'profile-edit-input';
         addressInput.placeholder = t.address;
         addressInput.value = company.address || '';
         addressInput.required = true;
@@ -304,7 +304,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         descGroup.className = 'input-group';
         const descTextarea = document.createElement('textarea');
         descTextarea.name = 'description';
-        descTextarea.className = 'edit-textarea';
+        descTextarea.className = 'profile-edit-textarea';
         descTextarea.placeholder = t.description;
         descTextarea.rows = 4;
         descTextarea.value = (lang === 'es' ? company.description_es : company.description_en) || '';
@@ -383,16 +383,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Buttons
         const buttonGroup = document.createElement('div');
-        buttonGroup.className = 'edit-actions';
+        buttonGroup.className = 'profile-edit-actions';
 
         const saveButton = document.createElement('button');
         saveButton.type = 'submit';
-        saveButton.className = 'edit-button';
+        saveButton.className = 'profile-edit-button';
         saveButton.textContent = t.save;
 
         const cancelButton = document.createElement('button');
         cancelButton.type = 'button';
-        cancelButton.className = 'edit-button secondary';
+        cancelButton.className = 'profile-edit-button secondary';
         cancelButton.textContent = t.cancel;
         cancelButton.addEventListener('click', () => {
             window.location.href = '/profile-view/profile-view.html';
@@ -400,12 +400,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
-        deleteButton.className = 'edit-button danger';
+        deleteButton.className = 'profile-edit-button danger';
         deleteButton.textContent = t.delete;
         deleteButton.addEventListener('click', async () => {
             if (confirm(t.deleteConfirm)) {
                 try {
-                    const response = await apiRequest(`/api/v1/companies/${company.uuid}`, {
+                    const response = await apiRequest(`/api/v1/companies/user/my-company`, {
                         method: 'DELETE'
                     });
 
@@ -479,7 +479,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 saveButton.textContent = t.saving;
 
                 //  CHANGED: Use apiRequest instead of fetch
-                const response = await apiRequest(`/api/v1/companies/${company.uuid}`, {
+                const response = await apiRequest(`/api/v1/companies/user/my-company`, {
                     method: 'PATCH',
                     body: formData
                 });
