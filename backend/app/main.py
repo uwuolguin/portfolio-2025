@@ -144,7 +144,7 @@ def create_app() -> FastAPI:
                 await enforce_rate_limit(
                     request=request,
                     route_name="global",
-                    ip_limit=2,
+                    ip_limit=20,
                     global_limit=20,
                     window_seconds=1,
                 )
