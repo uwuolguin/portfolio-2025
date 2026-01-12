@@ -80,12 +80,15 @@ export function setSrc(element, url) {
     if (!(element instanceof HTMLImageElement || element instanceof HTMLMediaElement)) {
         throw new TypeError('setSrc requires an image or media element');
     }
+
     const safe = sanitizeURL(url);
     if (!safe || !safe.startsWith('http')) {
         element.removeAttribute('src');
         return;
     }
-    element.setAttribute('src', safe);
+
+    const busted = `${safe}${safe.includes('?') ? '&' : '?'}v=${Date.now()}`;
+    element.setAttribute('src', busted);
 }
 
 export function setSafeAttr(element, name, value) {

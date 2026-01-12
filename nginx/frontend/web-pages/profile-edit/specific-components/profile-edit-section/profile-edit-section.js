@@ -1,19 +1,9 @@
-import {
-    getLanguage,
-    apiRequest,
-    fetchProducts,
-    fetchCommunes
-} from '../../../0-shared-components/utils/shared-functions.js';
-
-//  ADDED: Import all necessary sanitizer functions
-import {
-    sanitizeText,
-    sanitizeAPIResponse,
-    validateFormData,
-    buildDropdownOption
-} from '../../../0-shared-components/utils/sanitizer.js';
+let initialized = false;  // Guard flag
 
 document.addEventListener('DOMContentLoaded', async () => {
+    if (initialized) return; // Prevent re-initialization
+    initialized = true; // Set the guard flag after first initialization
+
     const editSection = document.getElementById('profile-edit-section');
 
     const translations = {
@@ -94,21 +84,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const selected = document.createElement('div');
         selected.className = 'dropdown-selected';
-        
-        // Find the selected option
-        const selectedOption = options.find(opt => 
-            (opt.uuid || opt.name) === selectedValue || 
-            (opt.name_es || opt.name_en || opt.name) === selectedValue
+
+        const normalize = v => sanitizeText(String(v || '').toLowerCase());
+
+        // text-only match
+        const selectedOption = options.find(opt =>
+            normalize(opt.name) === normalize(selectedValue) ||
+            normalize(opt.name_es) === normalize(selectedValue) ||
+            normalize(opt.name_en) === normalize(selectedValue)
         );
-        
-        selected.dataset.value = selectedOption ? (selectedOption.uuid || selectedOption.name) : '';
-        
+
+        const canonicalValue = selectedOption?.name || '';
+
+        selected.dataset.value = canonicalValue;
+
         const selectedText = document.createElement('span');
-        selectedText.textContent = selectedOption ? 
-            (selectedOption.name_es || selectedOption.name_en || selectedOption.name) : 
-            placeholder;
+        selectedText.textContent = selectedOption
+            ? (optLabel(selectedOption))
+            : placeholder;
         selected.appendChild(selectedText);
-        
+
         const arrow = document.createElement('span');
         arrow.className = 'dropdown-arrow';
         arrow.textContent = '▼';
@@ -127,63 +122,47 @@ document.addEventListener('DOMContentLoaded', async () => {
         const optionsList = document.createElement('div');
         optionsList.className = 'options-list';
 
-        //  Data already sanitized from fetchProducts/fetchCommunes
         options.forEach(option => {
-            const optionElement = buildDropdownOption(
-                option.uuid || option.name,
-                option.name_es || option.name_en || option.name
-            );
-            
+            const label = optLabel(option);
+            const optionElement = buildDropdownOption(label, label);
+
             optionElement.addEventListener('click', () => {
-                selectedText.textContent = option.name_es || option.name_en || option.name;
-                selected.dataset.value = option.uuid || option.name;
+                selectedText.textContent = label;
+                selected.dataset.value = option.name;
                 optionsContainer.style.display = 'none';
                 container.classList.remove('dropdown-open');
             });
-            
+
             optionsList.appendChild(optionElement);
         });
 
         optionsContainer.appendChild(optionsList);
 
-        // Search functionality
-        searchInput.addEventListener('input', (e) => {
-            const searchTerm = sanitizeText(e.target.value.toLowerCase());
-            const allOptions = optionsList.querySelectorAll('.dropdown-option');
-            
-            allOptions.forEach(opt => {
-                const text = opt.textContent.toLowerCase();
-                opt.style.display = text.includes(searchTerm) ? 'block' : 'none';
+        searchInput.addEventListener('input', e => {
+            const term = normalize(e.target.value);
+            optionsList.querySelectorAll('.dropdown-option').forEach(opt => {
+                opt.style.display = normalize(opt.textContent).includes(term)
+                    ? 'block'
+                    : 'none';
             });
         });
 
-        // Toggle dropdown
-        selected.addEventListener('click', (e) => {
+        selected.addEventListener('click', e => {
             e.stopPropagation();
-            const isOpen = optionsContainer.style.display === 'block';
-            
-            // Close all other dropdowns
-            document.querySelectorAll('.dropdown-options').forEach(opt => {
-                opt.style.display = 'none';
+
+            document.querySelectorAll('.dropdown-options').forEach(o => o.style.display = 'none');
+            document.querySelectorAll('.input-group').forEach(g => g.classList.remove('dropdown-open'));
+
+            optionsContainer.style.display = 'block';
+            container.classList.add('dropdown-open');
+            searchInput.value = '';
+            searchInput.focus();
+
+            optionsList.querySelectorAll('.dropdown-option').forEach(opt => {
+                opt.style.display = 'block';
             });
-            document.querySelectorAll('.input-group').forEach(grp => {
-                grp.classList.remove('dropdown-open');
-            });
-            
-            if (!isOpen) {
-                optionsContainer.style.display = 'block';
-                container.classList.add('dropdown-open');
-                searchInput.value = '';
-                searchInput.focus();
-                
-                // Reset all options visibility
-                optionsList.querySelectorAll('.dropdown-option').forEach(opt => {
-                    opt.style.display = 'block';
-                });
-            }
         });
 
-        // Close dropdown when clicking outside
         document.addEventListener('click', () => {
             optionsContainer.style.display = 'none';
             container.classList.remove('dropdown-open');
@@ -191,8 +170,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         container.appendChild(selected);
         container.appendChild(optionsContainer);
-
         return container;
+    }
+
+    function optLabel(option) {
+        const lang = getLanguage();
+        return sanitizeText(
+            lang === 'es'
+                ? option.name_es || option.name
+                : option.name_en || option.name
+        );
     }
 
     async function renderEditForm() {
@@ -311,26 +298,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         descGroup.appendChild(descTextarea);
         form.appendChild(descGroup);
 
-        // Current image preview
-        if (company.image_url) {
-            const currentImageDiv = document.createElement('div');
-            currentImageDiv.className = 'current-image-preview';
-            
-            const previewLabel = document.createElement('p');
-            previewLabel.textContent = 'Imagen actual:';
-            previewLabel.style.color = 'white';
-            currentImageDiv.appendChild(previewLabel);
-            
-            const imgPreview = document.createElement('img');
-            imgPreview.src = company.image_url;
-            imgPreview.alt = 'Current company image';
-            imgPreview.style.maxWidth = '200px';
-            imgPreview.style.borderRadius = '8px';
-            currentImageDiv.appendChild(imgPreview);
-            
-            form.appendChild(currentImageDiv);
-        }
-
         // Image upload (optional for edit)
         const imageGroup = document.createElement('div');
         imageGroup.className = 'input-group';
@@ -344,173 +311,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         fileInput.name = 'image';
         fileInput.className = 'file-input-hidden';
         fileInput.accept = 'image/jpeg,image/png';
-        
-        const fileLabel = document.createElement('label');
-        fileLabel.htmlFor = 'company-image';
-        fileLabel.className = 'file-input-label';
-        fileLabel.textContent = t.selectImage;
-        
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                fileLabel.textContent = sanitizeText(e.target.files[0].name);
-                fileLabel.classList.add('has-file');
-            } else {
-                fileLabel.textContent = t.selectImage;
-                fileLabel.classList.remove('has-file');
-            }
-        });
-        
+
         fileWrapper.appendChild(fileInput);
-        fileWrapper.appendChild(fileLabel);
         imageGroup.appendChild(fileWrapper);
         form.appendChild(imageGroup);
-
-        // Error message container
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.style.display = 'none';
-        errorDiv.style.color = '#ff6b6b';
-        errorDiv.style.marginBottom = '1rem';
-        form.appendChild(errorDiv);
-
-        // Success message container
-        const successDiv = document.createElement('div');
-        successDiv.className = 'success-message';
-        successDiv.style.display = 'none';
-        successDiv.style.color = '#4CAF50';
-        successDiv.style.marginBottom = '1rem';
-        form.appendChild(successDiv);
-
-        // Buttons
-        const buttonGroup = document.createElement('div');
-        buttonGroup.className = 'profile-edit-actions';
-
-        const saveButton = document.createElement('button');
-        saveButton.type = 'submit';
-        saveButton.className = 'profile-edit-button';
-        saveButton.textContent = t.save;
-
-        const cancelButton = document.createElement('button');
-        cancelButton.type = 'button';
-        cancelButton.className = 'profile-edit-button secondary';
-        cancelButton.textContent = t.cancel;
-        cancelButton.addEventListener('click', () => {
-            window.location.href = '/profile-view/profile-view.html';
-        });
-
-        const deleteButton = document.createElement('button');
-        deleteButton.type = 'button';
-        deleteButton.className = 'profile-edit-button danger';
-        deleteButton.textContent = t.delete;
-        deleteButton.addEventListener('click', async () => {
-            if (confirm(t.deleteConfirm)) {
-                try {
-                    const response = await apiRequest(`/api/v1/companies/user/my-company`, {
-                        method: 'DELETE'
-                    });
-
-                    if (response.ok) {
-                        //  FIXED: Use safe alert with sanitized message
-                        window.alert(t.deleteSuccess);
-                        window.location.href = '/front-page/front-page.html';
-                    } else {
-                        throw new Error(t.deleteError);
-                    }
-                } catch (error) {
-                    console.error('Delete error:', error);
-                    //  FIXED: Sanitize error message
-                    window.alert(sanitizeText(error.message) || t.deleteError);
-                }
-            }
-        });
-
-        buttonGroup.appendChild(saveButton);
-        buttonGroup.appendChild(cancelButton);
-        buttonGroup.appendChild(deleteButton);
-        form.appendChild(buttonGroup);
-
-        //  CRITICAL FIX: Validate, sanitize, and use apiRequest
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            errorDiv.style.display = 'none';
-            successDiv.style.display = 'none';
-
-            try {
-                // Get selected values
-                const communeSelected = communeDropdown.querySelector('.dropdown-selected');
-                const productSelected = productDropdown.querySelector('.dropdown-selected');
-                
-                const communeValue = communeSelected.dataset.value;
-                const productValue = productSelected.dataset.value;
-
-                if (!communeValue) {
-                    throw new Error(t.selectCommune);
-                }
-                if (!productValue) {
-                    throw new Error(t.selectProduct);
-                }
-
-                //  Validate and sanitize form data
-                const validatedData = validateFormData({
-                    name: nameInput.value,
-                    email: emailInput.value,
-                    phone: phoneInput.value,
-                    address: addressInput.value,
-                    description: descTextarea.value
-                });
-
-                // Create FormData for multipart upload
-                const formData = new FormData();
-                formData.append('name', validatedData.name);
-                formData.append('email', validatedData.email);
-                formData.append('phone', validatedData.phone);
-                formData.append('address', validatedData.address);
-                formData.append('description_es', validatedData.description);
-                formData.append('commune_name', sanitizeText(communeValue));
-                formData.append('product_name', sanitizeText(productValue));
-                formData.append('lang', lang);
-                
-                // Only append image if a new one was selected
-                if (fileInput.files.length > 0) {
-                    formData.append('image', fileInput.files[0]);
-                }
-
-                saveButton.disabled = true;
-                saveButton.textContent = t.saving;
-
-                //  CHANGED: Use apiRequest instead of fetch
-                const response = await apiRequest(`/api/v1/companies/user/my-company`, {
-                    method: 'PATCH',
-                    body: formData
-                });
-
-                if (response.ok) {
-                    successDiv.textContent = t.success;
-                    successDiv.style.display = 'block';
-                    
-                    setTimeout(() => {
-                        window.location.href = '/profile-view/profile-view.html';
-                    }, 2000);
-                } else {
-                    const error = await response.json();
-                    throw new Error(error.detail || t.error);
-                }
-
-            } catch (error) {
-                console.error('Save error:', error);
-                //  FIXED: Sanitize error message before display
-                errorDiv.textContent = sanitizeText(error.message) || t.error;
-                errorDiv.style.display = 'block';
-                saveButton.disabled = false;
-                saveButton.textContent = t.save;
-            }
-        });
 
         container.appendChild(form);
         editSection.appendChild(container);
     }
 
     await renderEditForm();
-
-    document.addEventListener('stateChange', renderEditForm);
 });
