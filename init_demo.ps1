@@ -10,6 +10,9 @@ Start-Sleep -Seconds 5
 Write-Host "Running Alembic migrations..."
 docker compose exec -T backend alembic upgrade head
 
+Write-Host "Resetting pg_cron job for materialized view refresh..."
+docker compose exec -T backend python -m scripts.database.manage_search_refresh_cron
+
 Write-Host "Creating testing data..."
 docker compose exec -T backend python -m scripts.database.seed_test_data
 
