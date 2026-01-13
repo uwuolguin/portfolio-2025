@@ -19,92 +19,91 @@ JOB_NAME = "refresh_company_search"
 CRON_SCHEDULE = "* * * * *"  # Every minute
 REFRESH_COMMAND = "REFRESH MATERIALIZED VIEW CONCURRENTLY proveo.company_search"
 
+# Arbitrary but stable lock ID (any int64 is fine)
+ADVISORY_LOCK_ID = 742391845
+
 
 async def reset_cron_job() -> None:
-    """Delete existing cron job (if any) and create a fresh one."""
-    
+    """Delete existing cron job (if any) and create a fresh one safely."""
     conn = await asyncpg.connect(settings.alembic_database_url)
-    
+
     try:
         logger.info("cron_reset_start", job_name=JOB_NAME)
-        
-        # First, check if pg_cron extension exists
+
+        # Prevent concurrent executions of this script
+        await conn.execute("SELECT pg_advisory_lock($1)", ADVISORY_LOCK_ID)
+
+        # Ensure pg_cron exists
         ext_check = await conn.fetchrow(
             "SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'"
         )
         if not ext_check:
             logger.error("pg_cron_not_installed")
-            print("ERROR: pg_cron extension is not installed!")
-            return
-        
-        # List current jobs to see what exists
-        existing_jobs = await conn.fetch(
-            "SELECT jobid, jobname, schedule, command FROM cron.job WHERE jobname = $1",
-            JOB_NAME
+            raise RuntimeError("pg_cron extension is not installed")
+
+        # Log existing jobs
+        existing_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM cron.job WHERE jobname = $1",
+            JOB_NAME,
         )
-        
-        if existing_jobs:
-            print(f"Found {len(existing_jobs)} existing job(s) with name '{JOB_NAME}':")
-            for job in existing_jobs:
-                print(f"  - jobid: {job['jobid']}, schedule: {job['schedule']}")
-        else:
-            print(f"No existing job found with name '{JOB_NAME}'")
-        
-        # Delete ALL jobs with this name (using jobid for precision)
-        # Use $1::bigint to cast properly for pg_cron
-        for job in existing_jobs:
-            jobid = job['jobid']
-            print(f"Deleting job with jobid {jobid}...")
-            await conn.execute(
-                "SELECT cron.unschedule($1::bigint)",
-                jobid
-            )
-            print(f"  Deleted jobid {jobid}")
-        
-        # Also try unschedule by name just in case
-        try:
-            await conn.execute(
-                "SELECT cron.unschedule($1::text)",
-                JOB_NAME
-            )
-            print(f"Also ran unschedule by name '{JOB_NAME}'")
-        except Exception as e:
-            # This might fail if no job with that name exists, which is fine
-            print(f"Unschedule by name result: {e}")
-        
-        # Now schedule a fresh job
-        print(f"\nScheduling new cron job '{JOB_NAME}'...")
+        logger.info("existing_cron_jobs_found", count=existing_count)
+
+        # Delete ALL jobs with this name (single, deterministic statement)
+        await conn.execute(
+            "SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = $1",
+            JOB_NAME,
+        )
+
+        # Schedule fresh job
         result = await conn.fetchrow(
-            "SELECT cron.schedule($1::text, $2::text, $3::text) AS jobid",
+            "SELECT cron.schedule($1, $2, $3) AS jobid",
             JOB_NAME,
             CRON_SCHEDULE,
-            REFRESH_COMMAND
+            REFRESH_COMMAND,
         )
-        
-        new_jobid = result['jobid']
-        print(f"SUCCESS: Created new job with jobid {new_jobid}")
-        
-        # Verify the new job
+
+        new_jobid = result["jobid"]
+        logger.info("cron_job_created", jobid=new_jobid)
+
+        # Verify exactly one job exists
+        final_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM cron.job WHERE jobname = $1",
+            JOB_NAME,
+        )
+        if final_count != 1:
+            raise RuntimeError(
+                f"Expected exactly 1 cron job named '{JOB_NAME}', found {final_count}"
+            )
+
+        # Verification details
         verification = await conn.fetchrow(
-            "SELECT jobid, jobname, schedule, command FROM cron.job WHERE jobid = $1::bigint",
-            new_jobid
+            """
+            SELECT jobid, jobname, schedule, command
+            FROM cron.job
+            WHERE jobid = $1
+            """,
+            new_jobid,
         )
-        
-        if verification:
-            print(f"\nVerification:")
-            print(f"  jobid:    {verification['jobid']}")
-            print(f"  jobname:  {verification['jobname']}")
-            print(f"  schedule: {verification['schedule']}")
-            print(f"  command:  {verification['command']}")
-        
-        logger.info("cron_reset_complete", new_jobid=new_jobid)
+
+        logger.info(
+            "cron_reset_complete",
+            jobid=verification["jobid"],
+            schedule=verification["schedule"],
+        )
+
         print("\nCron job reset completed successfully!")
-        
+        print(f"  jobid:    {verification['jobid']}")
+        print(f"  jobname:  {verification['jobname']}")
+        print(f"  schedule: {verification['schedule']}")
+        print(f"  command:  {verification['command']}")
+
     except Exception as e:
         logger.error("cron_reset_failed", error=str(e), exc_info=True)
-        print(f"ERROR: {e}")
         raise
+
     finally:
+        # Always release the lock
+        await conn.execute("SELECT pg_advisory_unlock($1)", ADVISORY_LOCK_ID)
         await conn.close()
 
 
