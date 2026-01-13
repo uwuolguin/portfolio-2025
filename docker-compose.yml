@@ -53,6 +53,8 @@ services:
       -c ssl_min_protocol_version=TLSv1.2
       -c shared_preload_libraries=pg_cron
       -c cron.database_name=portfolio
+      -c cron.use_background_workers=on
+      -c max_worker_processes=10
       -c password_encryption=scram-sha-256
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

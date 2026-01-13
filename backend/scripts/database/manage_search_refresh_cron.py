@@ -51,11 +51,12 @@ async def reset_cron_job() -> None:
             print(f"No existing job found with name '{JOB_NAME}'")
         
         # Delete ALL jobs with this name (using jobid for precision)
+        # Use $1::bigint to cast properly for pg_cron
         for job in existing_jobs:
             jobid = job['jobid']
             print(f"Deleting job with jobid {jobid}...")
             await conn.execute(
-                "SELECT cron.unschedule($1)",
+                "SELECT cron.unschedule($1::bigint)",
                 jobid
             )
             print(f"  Deleted jobid {jobid}")
@@ -63,7 +64,7 @@ async def reset_cron_job() -> None:
         # Also try unschedule by name just in case
         try:
             await conn.execute(
-                "SELECT cron.unschedule($1)",
+                "SELECT cron.unschedule($1::text)",
                 JOB_NAME
             )
             print(f"Also ran unschedule by name '{JOB_NAME}'")
@@ -74,7 +75,7 @@ async def reset_cron_job() -> None:
         # Now schedule a fresh job
         print(f"\nScheduling new cron job '{JOB_NAME}'...")
         result = await conn.fetchrow(
-            "SELECT cron.schedule($1, $2, $3) AS jobid",
+            "SELECT cron.schedule($1::text, $2::text, $3::text) AS jobid",
             JOB_NAME,
             CRON_SCHEDULE,
             REFRESH_COMMAND
@@ -85,7 +86,7 @@ async def reset_cron_job() -> None:
         
         # Verify the new job
         verification = await conn.fetchrow(
-            "SELECT jobid, jobname, schedule, command FROM cron.job WHERE jobid = $1",
+            "SELECT jobid, jobname, schedule, command FROM cron.job WHERE jobid = $1::bigint",
             new_jobid
         )
         
