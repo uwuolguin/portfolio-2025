@@ -116,6 +116,7 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
     selected.className = 'dropdown-selected';
 
     const normalize = v => sanitizeText(String(v || '').toLowerCase());
+    const lang = getLanguage();
 
     // Find matching option by name
     const selectedOption = options.find(opt => {
@@ -143,7 +144,7 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
     searchInput.className = 'dropdown-search';
-    searchInput.placeholder = translations[getLanguage()].searchPlaceholder;
+    searchInput.placeholder = translations[lang].searchPlaceholder;
     optionsContainer.appendChild(searchInput);
 
     const optionsList = document.createElement('div');
@@ -199,9 +200,9 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
 function optLabel(option) {
     const lang = getLanguage();
     if (lang === 'es') {
-        return sanitizeText(option.name_es || option.name || '');
+        return sanitizeText(option.name_es || option.name || option.name_en || '');
     } else {
-        return sanitizeText(option.name_en || option.name || '');
+        return sanitizeText(option.name_en || option.name || option.name_es || '');
     }
 }
 
@@ -270,7 +271,7 @@ async function handleFormSubmit(e) {
         formData.append('product_name', productName);  // Send NAME, not UUID
         formData.append('lang', lang);
         
-        // Only append description for the current language
+        // FIXED: Only append description for the current language
         if (lang === 'es') {
             formData.append('description_es', description);
         } else {

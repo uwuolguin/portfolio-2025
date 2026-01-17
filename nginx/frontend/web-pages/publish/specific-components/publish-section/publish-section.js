@@ -127,7 +127,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const lang = getLanguage();
         options.forEach(option => {
-            const displayName = option.name_es || option.name_en || option.name || '';
+            const displayName = lang === 'es' 
+                ? (option.name_es || option.name_en || option.name || '')
+                : (option.name_en || option.name_es || option.name || '');
             const value = option.name_es || option.name_en || option.name || option.uuid || '';
             
             const optionElement = buildDropdownOption(value, displayName);
@@ -480,7 +482,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 formData.append('email', sanitizedEmail);
                 formData.append('phone', sanitizedPhone);
                 formData.append('address', sanitizedAddress);
-                formData.append('description_es', sanitizedDescription);
+                
+                // FIXED: Send description based on current language
+                if (lang === 'es') {
+                    formData.append('description_es', sanitizedDescription);
+                } else {
+                    formData.append('description_en', sanitizedDescription);
+                }
+                
                 formData.append('commune_name', communeValue);
                 formData.append('product_name', productValue);
                 formData.append('lang', lang);
