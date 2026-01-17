@@ -193,9 +193,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         const lang = getLanguage() || 'es';
         const t = translations[lang] || translations.es;
 
-        // ============================================
-        // CHECK AUTHENTICATION FIRST
-        // ============================================
         const isLoggedIn = getLoginState();
         
         if (!isLoggedIn) {
@@ -244,7 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             container.appendChild(signupSection);
             publishSection.appendChild(container);
             
-            return; // BLOCK EXECUTION HERE - DON'T LOAD FORM
+            return;
         }
 
         clearElement(publishSection);
@@ -369,6 +366,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         descTextarea.placeholder = t.description;
         descTextarea.rows = 4;
         descTextarea.maxLength = 500;
+        descTextarea.required = true;
         descGroup.appendChild(descTextarea);
         form.appendChild(descGroup);
 
@@ -483,7 +481,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 formData.append('phone', sanitizedPhone);
                 formData.append('address', sanitizedAddress);
                 
-                // FIXED: Send description based on current language
+                // CRITICAL: Send description based on CURRENT language flag
+                // If Spanish flag (es) -> description_es, if English flag (en) -> description_en
                 if (lang === 'es') {
                     formData.append('description_es', sanitizedDescription);
                 } else {
@@ -510,9 +509,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                     },
                     body: formData
                 });
-
-                console.log(`[${correlationId}] API Request: POST /api/v1/companies/`);
-                console.log(`[${correlationId}] Response: ${response.status} ${response.statusText}`);
 
                 if (response.ok) {
                     successDiv.textContent = t.success;

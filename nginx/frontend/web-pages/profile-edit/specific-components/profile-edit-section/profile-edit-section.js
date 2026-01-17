@@ -11,9 +11,6 @@ import {
     sanitizeText,
     setText,
     sanitizeEmail,
-    validateEmailFormat,
-    sanitizePhone,
-    validatePhoneFormat,
     sanitizeAPIResponse,
     buildDropdownOption,
     setSrc,
@@ -118,13 +115,11 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
     const normalize = v => sanitizeText(String(v || '').toLowerCase());
     const lang = getLanguage();
 
-    // Find matching option by name
     const selectedOption = options.find(opt => {
         const optName = opt.name || opt.name_es || opt.name_en || '';
         return normalize(optName) === normalize(selectedValue);
     });
 
-    // Store the ACTUAL NAME (not UUID) as the value
     const canonicalValue = selectedOption ? (selectedOption.name || selectedOption.name_es || selectedOption.name_en || '') : '';
     selected.dataset.value = canonicalValue;
 
@@ -156,7 +151,6 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
 
         optionElement.addEventListener('click', () => {
             selectedText.textContent = label;
-            // Store the NAME, not UUID
             selected.dataset.value = option.name || option.name_es || option.name_en || '';
             optionsContainer.style.display = 'none';
             container.classList.remove('dropdown-open');
@@ -229,62 +223,38 @@ async function handleFormSubmit(e) {
         const address = form.querySelector('[name="address"]').value.trim();
         const description = form.querySelector('[name="description"]').value.trim();
         
-        // Get dropdown values - THESE ARE NOW COMMUNE/PRODUCT NAMES (not UUIDs)
+        // Get dropdown values
         const communeDropdown = form.querySelector('[data-dropdown-id="commune"] .dropdown-selected');
         const productDropdown = form.querySelector('[data-dropdown-id="product"] .dropdown-selected');
         
         const communeName = communeDropdown?.dataset.value || '';
         const productName = productDropdown?.dataset.value || '';
         
-        console.log('Form values:', { name, email, phone, address, communeName, productName, description });
+        // ONLY append fields that have values (partial update support)
+        if (name) formData.append('name', name);
+        if (email) formData.append('email', email);
+        if (phone) formData.append('phone', phone);
+        if (address) formData.append('address', address);
+        if (communeName) formData.append('commune_name', communeName);
+        if (productName) formData.append('product_name', productName);
         
-        // Validate required fields
-        if (!name || !email || !phone || !address || !communeName || !productName || !description) {
-            alert(lang === 'es' ? 'Por favor completa todos los campos requeridos' : 'Please fill all required fields');
-            submitButton.disabled = false;
-            submitButton.textContent = originalText;
-            return;
+        // CRITICAL: Send description based on CURRENT language flag
+        if (description) {
+            if (lang === 'es') {
+                formData.append('description_es', description);
+            } else {
+                formData.append('description_en', description);
+            }
         }
         
-        // Validate email format
-        if (!validateEmailFormat(email)) {
-            alert(lang === 'es' ? 'Por favor ingresa un email válido' : 'Please enter a valid email');
-            submitButton.disabled = false;
-            submitButton.textContent = originalText;
-            return;
-        }
-        
-        // Validate phone format
-        if (!validatePhoneFormat(phone)) {
-            alert(lang === 'es' ? 'Por favor ingresa un teléfono válido' : 'Please enter a valid phone');
-            submitButton.disabled = false;
-            submitButton.textContent = originalText;
-            return;
-        }
-        
-        // Append form data - BACKEND EXPECTS commune_name and product_name as TEXT
-        formData.append('name', name);
-        formData.append('email', email);
-        formData.append('phone', phone);
-        formData.append('address', address);
-        formData.append('commune_name', communeName);  // Send NAME, not UUID
-        formData.append('product_name', productName);  // Send NAME, not UUID
+        // Always send lang to indicate which language we're editing
         formData.append('lang', lang);
         
-        // FIXED: Only append description for the current language
-        if (lang === 'es') {
-            formData.append('description_es', description);
-        } else {
-            formData.append('description_en', description);
-        }
-        
-        // Append image if selected
+        // Append image only if user selected a new one
         const imageInput = form.querySelector('[name="image"]');
         if (imageInput?.files?.[0]) {
             formData.append('image', imageInput.files[0]);
         }
-        
-        console.log('Submitting form data:', Object.fromEntries(formData));
         
         // Submit form
         const response = await apiRequest('/api/v1/companies/user/my-company', {
@@ -300,7 +270,7 @@ async function handleFormSubmit(e) {
             }, 1500);
         } else {
             const errorData = await response.json();
-            throw new Error(errorData.error?.message || t.error);
+            throw new Error(errorData.error?.message || errorData.detail || t.error);
         }
         
     } catch (error) {
@@ -358,9 +328,6 @@ async function renderEditForm() {
     const lang = getLanguage() || 'es';
     const t = translations[lang] || translations.es;
     
-    // ============================================
-    // CHECK AUTHENTICATION FIRST
-    // ============================================
     if (!getLoginState()) {
         clearElement(editSection);
         
@@ -408,12 +375,9 @@ async function renderEditForm() {
         container.appendChild(signupSection);
         editSection.appendChild(container);
         
-        return; // BLOCK EXECUTION
+        return;
     }
     
-    // ============================================
-    // CHECK IF USER HAS A COMPANY
-    // ============================================
     if (!getCompanyPublishState()) {
         clearElement(editSection);
         
@@ -441,12 +405,9 @@ async function renderEditForm() {
         
         editSection.appendChild(container);
         
-        return; // BLOCK EXECUTION
+        return;
     }
 
-    // ============================================
-    // USER IS AUTHENTICATED AND HAS COMPANY - SHOW LOADING
-    // ============================================
     clearElement(editSection);
     
     const loadingContainer = document.createElement('div');
@@ -462,7 +423,6 @@ async function renderEditForm() {
     loadingContainer.appendChild(loadingDiv);
     editSection.appendChild(loadingContainer);
 
-    // Load company data
     const company = await loadCurrentCompany();
     if (!company) {
         clearElement(editSection);
@@ -480,15 +440,11 @@ async function renderEditForm() {
         return;
     }
 
-    console.log('Loaded company data:', company);
-
-    // Fetch products and communes
     const rawProducts = await fetchProducts();
     const rawCommunes = await fetchCommunes();
     const products = sanitizeAPIResponse(rawProducts);
     const communes = sanitizeAPIResponse(rawCommunes);
 
-    // Clear and build form
     clearElement(editSection);
 
     const container = document.createElement('div');
@@ -499,7 +455,6 @@ async function renderEditForm() {
     setText(title, t.title);
     container.appendChild(title);
 
-    // Show current image
     if (company.image_url) {
         const imageContainer = document.createElement('div');
         imageContainer.className = 'current-image-container';
@@ -528,7 +483,6 @@ async function renderEditForm() {
     form.className = 'profile-edit-form';
     form.id = 'profile-edit-form';
 
-    // Company name
     const nameGroup = document.createElement('div');
     nameGroup.className = 'input-group';
     const nameInput = document.createElement('input');
@@ -537,11 +491,9 @@ async function renderEditForm() {
     nameInput.className = 'profile-edit-input';
     nameInput.placeholder = t.companyName;
     nameInput.value = sanitizeText(company.name || '');
-    nameInput.required = true;
     nameGroup.appendChild(nameInput);
     form.appendChild(nameGroup);
 
-    // Email
     const emailGroup = document.createElement('div');
     emailGroup.className = 'input-group';
     const emailInput = document.createElement('input');
@@ -550,11 +502,9 @@ async function renderEditForm() {
     emailInput.className = 'profile-edit-input';
     emailInput.placeholder = t.email;
     emailInput.value = sanitizeEmail(company.email || '');
-    emailInput.required = true;
     emailGroup.appendChild(emailInput);
     form.appendChild(emailGroup);
 
-    // Phone
     const phoneGroup = document.createElement('div');
     phoneGroup.className = 'input-group';
     const phoneInput = document.createElement('input');
@@ -562,12 +512,10 @@ async function renderEditForm() {
     phoneInput.name = 'phone';
     phoneInput.className = 'profile-edit-input';
     phoneInput.placeholder = t.phone;
-    phoneInput.value = sanitizePhone(company.phone || '');
-    phoneInput.required = true;
+    phoneInput.value = sanitizeText(company.phone || '');
     phoneGroup.appendChild(phoneInput);
     form.appendChild(phoneGroup);
 
-    // Address
     const addressGroup = document.createElement('div');
     addressGroup.className = 'input-group';
     const addressInput = document.createElement('input');
@@ -576,31 +524,27 @@ async function renderEditForm() {
     addressInput.className = 'profile-edit-input';
     addressInput.placeholder = t.address;
     addressInput.value = sanitizeText(company.address || '');
-    addressInput.required = true;
     addressGroup.appendChild(addressInput);
     form.appendChild(addressGroup);
 
-    // Commune dropdown - pass commune NAME from API
     const communeDropdown = createFilterableDropdown(
         'commune',
         t.commune,
         communes,
         t.selectCommune,
-        company.commune_name  // This is already a NAME from the API
+        company.commune_name
     );
     form.appendChild(communeDropdown);
 
-    // Product dropdown - pass product NAME from API (in current language)
     const productDropdown = createFilterableDropdown(
         'product',
         t.product,
         products,
         t.selectProduct,
-        lang === 'es' ? company.product_name_es : company.product_name_en  // This is already a NAME from the API
+        lang === 'es' ? company.product_name_es : company.product_name_en
     );
     form.appendChild(productDropdown);
 
-    // Description
     const descGroup = document.createElement('div');
     descGroup.className = 'input-group';
     const descTextarea = document.createElement('textarea');
@@ -608,14 +552,13 @@ async function renderEditForm() {
     descTextarea.className = 'profile-edit-textarea';
     descTextarea.placeholder = t.description;
     descTextarea.rows = 4;
+    // CRITICAL: Show description based on current language flag
     descTextarea.value = sanitizeText(
         (lang === 'es' ? company.description_es : company.description_en) || ''
     );
-    descTextarea.required = true;
     descGroup.appendChild(descTextarea);
     form.appendChild(descGroup);
 
-    // Image upload
     const imageGroup = document.createElement('div');
     imageGroup.className = 'input-group';
     
@@ -649,7 +592,6 @@ async function renderEditForm() {
     imageGroup.appendChild(fileWrapper);
     form.appendChild(imageGroup);
 
-    // Action buttons
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'profile-edit-actions';
     
@@ -677,22 +619,17 @@ async function renderEditForm() {
     
     form.appendChild(actionsDiv);
 
-    // Add form submit handler
     form.addEventListener('submit', handleFormSubmit);
 
     container.appendChild(form);
     editSection.appendChild(container);
 }
 
-// Initialize on page load - ONLY ONCE
 document.addEventListener('DOMContentLoaded', async () => {
     if (initialized) return;
     initialized = true;
     
-    console.log('[Profile Edit] Initializing...');
     await renderEditForm();
-    console.log('[Profile Edit] Initialization complete');
 });
 
-// Re-render on language/state change
 document.addEventListener('stateChange', renderEditForm);
