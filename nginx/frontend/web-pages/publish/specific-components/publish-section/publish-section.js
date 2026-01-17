@@ -1,5 +1,6 @@
 import {
     getLanguage,
+    getLoginState,
     apiRequest,
     fetchProducts,
     fetchCommunes,
@@ -40,8 +41,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             error: 'Error al publicar la empresa',
             alreadyPublished: 'Ya tienes una empresa publicada',
             viewCompany: 'Ver Mi Empresa',
-            loginRequired: 'Debes iniciar sesión para publicar',
-            loginHere: 'Iniciar sesión',
+            loginRequired: 'Debes iniciar sesión para publicar tu empresa',
+            loginHere: 'Iniciar sesión aquí',
+            registerHere: 'Regístrate aquí',
+            noAccount: '¿No tienes cuenta?',
             searchPlaceholder: 'Buscar...',
             requiredField: 'Este campo es requerido',
             invalidEmail: 'Correo electrónico inválido',
@@ -68,8 +71,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             error: 'Error publishing company',
             alreadyPublished: 'You already have a published company',
             viewCompany: 'View My Company',
-            loginRequired: 'You must log in to publish',
-            loginHere: 'Log in',
+            loginRequired: 'You must log in to publish your company',
+            loginHere: 'Log in here',
+            registerHere: 'Sign up here',
+            noAccount: 'Don\'t have an account?',
             searchPlaceholder: 'Search...',
             requiredField: 'This field is required',
             invalidEmail: 'Invalid email address',
@@ -120,7 +125,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         const optionsList = document.createElement('div');
         optionsList.className = 'options-list';
 
-        // Add options (data already sanitized)
         const lang = getLanguage();
         options.forEach(option => {
             const displayName = option.name_es || option.name_en || option.name || '';
@@ -140,7 +144,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         optionsContainer.appendChild(optionsList);
 
-        // Search functionality
         searchInput.addEventListener('input', (e) => {
             const searchTerm = e.target.value.toLowerCase();
             const allOptions = optionsList.querySelectorAll('.dropdown-option');
@@ -155,12 +158,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             e.stopPropagation();
         });
 
-        // Toggle dropdown
         selected.addEventListener('click', (e) => {
             e.stopPropagation();
             const isOpen = optionsContainer.style.display === 'block';
             
-            // Close all other dropdowns
             document.querySelectorAll('.dropdown-options').forEach(opt => {
                 opt.style.display = 'none';
             });
@@ -187,10 +188,63 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function renderPublishForm() {
-        const lang = getLanguage();
-        const t = translations[lang];
+        const lang = getLanguage() || 'es';
+        const t = translations[lang] || translations.es;
 
-        // Show loading
+        // ============================================
+        // CHECK AUTHENTICATION FIRST
+        // ============================================
+        const isLoggedIn = getLoginState();
+        
+        if (!isLoggedIn) {
+            clearElement(publishSection);
+            
+            const container = document.createElement('div');
+            container.className = 'publish-container';
+            
+            const title = document.createElement('h2');
+            title.className = 'publish-title';
+            title.textContent = t.title;
+            container.appendChild(title);
+            
+            const message = document.createElement('p');
+            message.className = 'login-message';
+            message.textContent = t.loginRequired;
+            container.appendChild(message);
+            
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'publish-actions';
+            actionsDiv.style.marginTop = '2rem';
+            
+            const loginButton = document.createElement('a');
+            loginButton.href = '/log-in/log-in.html';
+            loginButton.className = 'publish-button';
+            loginButton.textContent = t.loginHere;
+            loginButton.style.textDecoration = 'none';
+            loginButton.style.display = 'inline-block';
+            actionsDiv.appendChild(loginButton);
+            
+            const signupSection = document.createElement('div');
+            signupSection.style.marginTop = '1.5rem';
+            signupSection.style.color = '#ffffff';
+            
+            const noAccountText = document.createTextNode(t.noAccount + ' ');
+            signupSection.appendChild(noAccountText);
+            
+            const signupLink = document.createElement('a');
+            signupLink.href = '/sign-up/sign-up.html';
+            signupLink.textContent = t.registerHere;
+            signupLink.style.color = '#FF9800';
+            signupLink.style.textDecoration = 'none';
+            signupSection.appendChild(signupLink);
+            
+            container.appendChild(actionsDiv);
+            container.appendChild(signupSection);
+            publishSection.appendChild(container);
+            
+            return; // BLOCK EXECUTION HERE - DON'T LOAD FORM
+        }
+
         clearElement(publishSection);
         const loadingDiv = document.createElement('div');
         loadingDiv.className = 'loading';
@@ -200,7 +254,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadingDiv.textContent = t.loading;
         publishSection.appendChild(loadingDiv);
 
-        // Check if user already has a company
         const hasCompany = await checkExistingCompany();
         if (hasCompany) {
             clearElement(publishSection);
@@ -225,7 +278,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Fetch and sanitize data
         const rawProducts = await fetchProducts();
         const rawCommunes = await fetchCommunes();
         const products = sanitizeAPIResponse(rawProducts);
@@ -245,7 +297,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         form.className = 'publish-form';
         form.id = 'publish-form';
 
-        // Company name
         const nameGroup = document.createElement('div');
         nameGroup.className = 'input-group';
         const nameInput = document.createElement('input');
@@ -258,7 +309,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         nameGroup.appendChild(nameInput);
         form.appendChild(nameGroup);
 
-        // Email
         const emailGroup = document.createElement('div');
         emailGroup.className = 'input-group';
         const emailInput = document.createElement('input');
@@ -270,7 +320,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         emailGroup.appendChild(emailInput);
         form.appendChild(emailGroup);
 
-        // Phone
         const phoneGroup = document.createElement('div');
         phoneGroup.className = 'input-group';
         const phoneInput = document.createElement('input');
@@ -282,7 +331,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         phoneGroup.appendChild(phoneInput);
         form.appendChild(phoneGroup);
 
-        // Address
         const addressGroup = document.createElement('div');
         addressGroup.className = 'input-group';
         const addressInput = document.createElement('input');
@@ -295,7 +343,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         addressGroup.appendChild(addressInput);
         form.appendChild(addressGroup);
 
-        // Commune dropdown
         const communeDropdown = createFilterableDropdown(
             'commune',
             communes,
@@ -304,7 +351,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         );
         form.appendChild(communeDropdown);
 
-        // Product dropdown
         const productDropdown = createFilterableDropdown(
             'product',
             products,
@@ -313,7 +359,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         );
         form.appendChild(productDropdown);
 
-        // Description
         const descGroup = document.createElement('div');
         descGroup.className = 'input-group';
         const descTextarea = document.createElement('textarea');
@@ -325,7 +370,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         descGroup.appendChild(descTextarea);
         form.appendChild(descGroup);
 
-        // Image upload
         const imageGroup = document.createElement('div');
         imageGroup.className = 'input-group';
         
@@ -347,7 +391,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
-                // Sanitize filename for display only
                 fileLabel.textContent = sanitizeText(e.target.files[0].name);
                 fileLabel.classList.add('has-file');
             } else {
@@ -361,7 +404,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         imageGroup.appendChild(fileWrapper);
         form.appendChild(imageGroup);
 
-        // Error message container
         const errorDiv = document.createElement('div');
         errorDiv.className = 'error-message';
         errorDiv.style.display = 'none';
@@ -369,7 +411,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         errorDiv.style.marginBottom = '1rem';
         form.appendChild(errorDiv);
 
-        // Success message container
         const successDiv = document.createElement('div');
         successDiv.className = 'success-message';
         successDiv.style.display = 'none';
@@ -377,7 +418,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         successDiv.style.marginBottom = '1rem';
         form.appendChild(successDiv);
 
-        // Buttons
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'publish-actions';
 
@@ -398,14 +438,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         buttonGroup.appendChild(cancelButton);
         form.appendChild(buttonGroup);
 
-        // Form submit handler
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorDiv.style.display = 'none';
             successDiv.style.display = 'none';
 
             try {
-                // Get selected values from dropdowns
                 const communeSelected = communeDropdown.querySelector('.dropdown-selected');
                 const productSelected = productDropdown.querySelector('.dropdown-selected');
                 
@@ -419,13 +457,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     throw new Error(t.selectProduct);
                 }
 
-                // Validate email
                 const sanitizedEmail = sanitizeEmail(emailInput.value);
                 if (!sanitizedEmail) {
                     throw new Error(t.invalidEmail);
                 }
 
-                // Sanitize other fields
                 const sanitizedName = sanitizeText(nameInput.value.trim());
                 const sanitizedPhone = sanitizePhone(phoneInput.value);
                 const sanitizedAddress = sanitizeText(addressInput.value.trim());
@@ -435,12 +471,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     throw new Error(t.requiredField);
                 }
 
-                // Check if image is selected
                 if (!fileInput.files || fileInput.files.length === 0) {
                     throw new Error(t.selectImage);
                 }
 
-                // Create FormData for multipart upload
                 const formData = new FormData();
                 formData.append('name', sanitizedName);
                 formData.append('email', sanitizedEmail);
@@ -455,7 +489,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 publishButton.disabled = true;
                 publishButton.textContent = t.publishing;
 
-                // Use apiRequest for correlation ID (but don't set Content-Type for FormData)
                 const csrfToken = getCSRFToken();
                 const correlationId = `fe_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
                 
@@ -497,7 +530,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         publishSection.appendChild(container);
     }
 
-    // Close dropdowns when clicking outside
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.filterable-dropdown')) {
             document.querySelectorAll('.dropdown-options').forEach(opt => {

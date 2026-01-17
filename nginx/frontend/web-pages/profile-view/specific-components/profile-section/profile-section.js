@@ -1,14 +1,16 @@
 import {
     getLanguage,
+    getLoginState,
     apiRequest,
     setLoginState
 } from '../../../0-shared-components/utils/shared-functions.js';
 
 import {
     sanitizeText,
-    sanitizeURL,
+    setText,
     sanitizeAPIResponse,
-    clearElement
+    clearElement,
+    setSrc
 } from '../../../0-shared-components/utils/sanitizer.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -35,7 +37,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             error: 'Error al cargar los datos',
             deleteConfirm: '¿Estás seguro de que deseas eliminar tu cuenta? Esta acción no se puede deshacer.',
             deleteSuccess: 'Cuenta eliminada exitosamente',
-            deleteError: 'Error al eliminar la cuenta'
+            deleteError: 'Error al eliminar la cuenta',
+            loginRequired: 'Debes iniciar sesión para ver tu perfil',
+            loginHere: 'Iniciar sesión aquí',
+            registerHere: 'Regístrate aquí',
+            noAccount: '¿No tienes cuenta?'
         },
         en: {
             welcome: 'Welcome',
@@ -57,7 +63,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             error: 'Error loading data',
             deleteConfirm: 'Are you sure you want to delete your account? This action cannot be undone.',
             deleteSuccess: 'Account deleted successfully',
-            deleteError: 'Error deleting account'
+            deleteError: 'Error deleting account',
+            loginRequired: 'You must log in to view your profile',
+            loginHere: 'Log in here',
+            registerHere: 'Sign up here',
+            noAccount: 'Don\'t have an account?'
         }
     };
 
@@ -90,8 +100,63 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function renderProfile() {
-        const lang = getLanguage();
-        const t = translations[lang];
+        const lang = getLanguage() || 'es';
+        const t = translations[lang] || translations.es;
+
+        // ============================================
+        // CHECK AUTHENTICATION FIRST
+        // ============================================
+        const isLoggedIn = getLoginState();
+        
+        if (!isLoggedIn) {
+            clearElement(profileSection);
+            
+            const container = document.createElement('div');
+            container.className = 'profile-container';
+            
+            const title = document.createElement('h2');
+            title.className = 'profile-title';
+            setText(title, t.myProfile);
+            container.appendChild(title);
+            
+            const message = document.createElement('p');
+            message.className = 'login-message';
+            setText(message, t.loginRequired);
+            container.appendChild(message);
+            
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'profile-actions';
+            actionsDiv.style.marginTop = '2rem';
+            
+            const loginButton = document.createElement('a');
+            loginButton.href = '/log-in/log-in.html';
+            loginButton.className = 'profile-button update-button';
+            setText(loginButton, t.loginHere);
+            loginButton.style.textDecoration = 'none';
+            loginButton.style.display = 'inline-block';
+            actionsDiv.appendChild(loginButton);
+            
+            container.appendChild(actionsDiv);
+            
+            const signupSection = document.createElement('div');
+            signupSection.style.marginTop = '1.5rem';
+            signupSection.style.color = '#ffffff';
+            
+            const noAccountText = document.createTextNode(t.noAccount + ' ');
+            signupSection.appendChild(noAccountText);
+            
+            const signupLink = document.createElement('a');
+            signupLink.href = '/sign-up/sign-up.html';
+            setText(signupLink, t.registerHere);
+            signupLink.style.color = '#FF9800';
+            signupLink.style.textDecoration = 'none';
+            signupSection.appendChild(signupLink);
+            
+            container.appendChild(signupSection);
+            profileSection.appendChild(container);
+            
+            return; // BLOCK EXECUTION HERE
+        }
 
         clearElement(profileSection);
         const loadingDiv = document.createElement('div');
@@ -99,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadingDiv.style.color = 'white';
         loadingDiv.style.textAlign = 'center';
         loadingDiv.style.padding = '2rem';
-        loadingDiv.textContent = t.loading;
+        setText(loadingDiv, t.loading);
         profileSection.appendChild(loadingDiv);
 
         const userData = await fetchUserData();
@@ -113,7 +178,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             errorDiv.style.color = 'white';
             errorDiv.style.textAlign = 'center';
             errorDiv.style.padding = '2rem';
-            errorDiv.textContent = t.error;
+            setText(errorDiv, t.error);
             profileSection.appendChild(errorDiv);
             return;
         }
@@ -123,7 +188,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const title = document.createElement('h2');
         title.className = 'profile-title';
-        title.textContent = `${t.welcome}, ${userData.name || ''}`;
+        setText(title, `${t.welcome}, ${sanitizeText(userData.name || '')}`);
         container.appendChild(title);
 
         const content = document.createElement('div');
@@ -134,12 +199,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         const userName = document.createElement('div');
         userName.className = 'user-name';
-        userName.textContent = userData.name || '';
+        setText(userName, userData.name || '');
         userDetails.appendChild(userName);
         
         const userEmail = document.createElement('div');
         userEmail.className = 'user-email';
-        userEmail.textContent = userData.email || '';
+        setText(userEmail, userData.email || '');
         userDetails.appendChild(userEmail);
         
         content.appendChild(userDetails);
@@ -151,7 +216,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const companyTitle = document.createElement('h3');
             companyTitle.style.color = '#FF9800';
             companyTitle.style.marginBottom = '1rem';
-            companyTitle.textContent = t.myCompany;
+            setText(companyTitle, t.myCompany);
             companySection.appendChild(companyTitle);
 
             const imgUrl = companyData.image_url;
@@ -160,17 +225,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 imgContainer.style.marginBottom = '1rem';
                 
                 const img = document.createElement('img');
-                const cacheParam = companyData.updated_at 
-                    ? new Date(companyData.updated_at).getTime()
-                    : Date.now();
-                const cacheBustUrl = imgUrl.includes('?') 
-                    ? `${imgUrl}&v=${cacheParam}` 
-                    : `${imgUrl}?v=${cacheParam}`;
-                img.src = sanitizeURL(cacheBustUrl);
-                img.alt = sanitizeText(companyData.name || 'Company image');
                 img.className = 'company-image-preview';
                 img.style.maxWidth = '100%';
                 img.style.borderRadius = '8px';
+                setSrc(img, imgUrl);
+                img.alt = sanitizeText(companyData.name || 'Company image');
                 img.onerror = function() {
                     this.style.display = 'none';
                 };
@@ -195,11 +254,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     
                     const label = document.createElement('span');
                     label.className = 'info-label';
-                    label.textContent = item.label;
+                    setText(label, item.label);
                     
                     const value = document.createElement('span');
                     value.className = 'info-value';
-                    value.textContent = item.value;
+                    setText(value, item.value);
                     
                     infoItem.appendChild(label);
                     infoItem.appendChild(value);
@@ -215,7 +274,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             const noCompanyText = document.createElement('p');
             noCompanyText.style.color = '#a0a0a0';
-            noCompanyText.textContent = t.noCompany;
+            setText(noCompanyText, t.noCompany);
             noCompanyDiv.appendChild(noCompanyText);
             
             content.appendChild(noCompanyDiv);
@@ -229,7 +288,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (companyData) {
             const editButton = document.createElement('button');
             editButton.className = 'profile-button update-button';
-            editButton.textContent = t.editCompany;
+            setText(editButton, t.editCompany);
             editButton.addEventListener('click', () => {
                 window.location.href = '/profile-edit/profile-edit.html';
             });
@@ -237,7 +296,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             const createButton = document.createElement('button');
             createButton.className = 'profile-button update-button';
-            createButton.textContent = t.createCompany;
+            setText(createButton, t.createCompany);
             createButton.addEventListener('click', () => {
                 window.location.href = '/publish/publish.html';
             });
@@ -246,7 +305,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const deleteButton = document.createElement('button');
         deleteButton.className = 'profile-button delete-button';
-        deleteButton.textContent = t.deleteAccount;
+        setText(deleteButton, t.deleteAccount);
         deleteButton.addEventListener('click', async () => {
             if (confirm(t.deleteConfirm)) {
                 try {

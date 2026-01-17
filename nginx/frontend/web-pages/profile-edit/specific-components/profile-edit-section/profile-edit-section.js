@@ -16,7 +16,8 @@ import {
     validatePhoneFormat,
     sanitizeAPIResponse,
     buildDropdownOption,
-    setSrc
+    setSrc,
+    clearElement
 } from '../../../0-shared-components/utils/sanitizer.js';
 
 let initialized = false;
@@ -52,7 +53,9 @@ const translations = {
         loginLink: 'Ir a Login',
         createCompanyLink: 'Crear Empresa',
         currentImage: 'Imagen Actual:',
-        noImage: 'Sin imagen'
+        noImage: 'Sin imagen',
+        registerHere: 'Regístrate aquí',
+        noAccount: '¿No tienes cuenta?'
     },
     en: {
         title: 'Edit My Company',
@@ -83,7 +86,9 @@ const translations = {
         loginLink: 'Go to Login',
         createCompanyLink: 'Create Company',
         currentImage: 'Current Image:',
-        noImage: 'No image'
+        noImage: 'No image',
+        registerHere: 'Sign up here',
+        noAccount: 'Don\'t have an account?'
     }
 };
 
@@ -321,7 +326,7 @@ async function handleDelete() {
         if (response.ok) {
             showMessage(t.deleteSuccess, 'success');
             setTimeout(() => {
-                window.location.href = '/publish-company/publish-company.html';
+                window.location.href = '/publish/publish.html';
             }, 1500);
         } else {
             throw new Error(t.deleteError);
@@ -338,7 +343,7 @@ function showMessage(message, type) {
     
     const messageDiv = document.createElement('div');
     messageDiv.className = `${type}-message`;
-    messageDiv.textContent = message;
+    setText(messageDiv, message);
     
     container.insertBefore(messageDiv, container.firstChild);
     
@@ -349,54 +354,128 @@ function showMessage(message, type) {
 
 async function renderEditForm() {
     const editSection = document.getElementById('profile-edit-section');
-    const lang = getLanguage();
-    const t = translations[lang];
+    const lang = getLanguage() || 'es';
+    const t = translations[lang] || translations.es;
     
-    // Check authentication
+    // ============================================
+    // CHECK AUTHENTICATION FIRST
+    // ============================================
     if (!getLoginState()) {
-        editSection.innerHTML = `
-            <div class="profile-edit-container">
-                <h2 class="profile-edit-title">${t.title}</h2>
-                <p class="login-message">
-                    ${t.notLoggedIn}
-                    <br><br>
-                    <a href="/login/login.html">${t.loginLink}</a>
-                </p>
-            </div>
-        `;
-        return;
+        clearElement(editSection);
+        
+        const container = document.createElement('div');
+        container.className = 'profile-edit-container';
+        
+        const title = document.createElement('h2');
+        title.className = 'profile-edit-title';
+        setText(title, t.title);
+        container.appendChild(title);
+        
+        const message = document.createElement('p');
+        message.className = 'login-message';
+        setText(message, t.notLoggedIn);
+        container.appendChild(message);
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'profile-edit-actions';
+        actionsDiv.style.marginTop = '2rem';
+        
+        const loginButton = document.createElement('a');
+        loginButton.href = '/log-in/log-in.html';
+        loginButton.className = 'profile-edit-button';
+        setText(loginButton, t.loginLink);
+        loginButton.style.textDecoration = 'none';
+        loginButton.style.display = 'inline-block';
+        actionsDiv.appendChild(loginButton);
+        
+        container.appendChild(actionsDiv);
+        
+        const signupSection = document.createElement('div');
+        signupSection.style.marginTop = '1.5rem';
+        signupSection.style.color = '#ffffff';
+        
+        const noAccountText = document.createTextNode(t.noAccount + ' ');
+        signupSection.appendChild(noAccountText);
+        
+        const signupLink = document.createElement('a');
+        signupLink.href = '/sign-up/sign-up.html';
+        setText(signupLink, t.registerHere);
+        signupLink.style.color = '#FF9800';
+        signupLink.style.textDecoration = 'none';
+        signupSection.appendChild(signupLink);
+        
+        container.appendChild(signupSection);
+        editSection.appendChild(container);
+        
+        return; // BLOCK EXECUTION
     }
     
-    // Check if user has a company
+    // ============================================
+    // CHECK IF USER HAS A COMPANY
+    // ============================================
     if (!getCompanyPublishState()) {
-        editSection.innerHTML = `
-            <div class="profile-edit-container">
-                <h2 class="profile-edit-title">${t.title}</h2>
-                <p class="no-company-message">
-                    ${t.noCompany}
-                    <br><br>
-                    <a href="/publish-company/publish-company.html">${t.createCompanyLink}</a>
-                </p>
-            </div>
-        `;
-        return;
+        clearElement(editSection);
+        
+        const container = document.createElement('div');
+        container.className = 'profile-edit-container';
+        
+        const title = document.createElement('h2');
+        title.className = 'profile-edit-title';
+        setText(title, t.title);
+        container.appendChild(title);
+        
+        const message = document.createElement('p');
+        message.className = 'no-company-message';
+        setText(message, t.noCompany);
+        container.appendChild(message);
+        
+        const createButton = document.createElement('a');
+        createButton.href = '/publish/publish.html';
+        createButton.className = 'profile-edit-button';
+        setText(createButton, t.createCompanyLink);
+        createButton.style.textDecoration = 'none';
+        createButton.style.display = 'inline-block';
+        createButton.style.marginTop = '1rem';
+        container.appendChild(createButton);
+        
+        editSection.appendChild(container);
+        
+        return; // BLOCK EXECUTION
     }
 
-    // Show loading
-    editSection.innerHTML = `
-        <div class="profile-edit-container">
-            <div class="loading" style="color: white; text-align: center; padding: 2rem;">${t.loading}</div>
-        </div>
-    `;
+    // ============================================
+    // USER IS AUTHENTICATED AND HAS COMPANY - SHOW LOADING
+    // ============================================
+    clearElement(editSection);
+    
+    const loadingContainer = document.createElement('div');
+    loadingContainer.className = 'profile-edit-container';
+    
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'loading';
+    loadingDiv.style.color = 'white';
+    loadingDiv.style.textAlign = 'center';
+    loadingDiv.style.padding = '2rem';
+    setText(loadingDiv, t.loading);
+    
+    loadingContainer.appendChild(loadingDiv);
+    editSection.appendChild(loadingContainer);
 
     // Load company data
     const company = await loadCurrentCompany();
     if (!company) {
-        editSection.innerHTML = `
-            <div class="profile-edit-container">
-                <p style="color: white; text-align: center;">Error loading company data</p>
-            </div>
-        `;
+        clearElement(editSection);
+        
+        const errorContainer = document.createElement('div');
+        errorContainer.className = 'profile-edit-container';
+        
+        const errorP = document.createElement('p');
+        errorP.style.color = 'white';
+        errorP.style.textAlign = 'center';
+        setText(errorP, 'Error loading company data');
+        
+        errorContainer.appendChild(errorP);
+        editSection.appendChild(errorContainer);
         return;
     }
 
@@ -409,7 +488,7 @@ async function renderEditForm() {
     const communes = sanitizeAPIResponse(rawCommunes);
 
     // Clear and build form
-    editSection.innerHTML = '';
+    clearElement(editSection);
 
     const container = document.createElement('div');
     container.className = 'profile-edit-container';
@@ -613,3 +692,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await renderEditForm();
     console.log('[Profile Edit] Initialization complete');
 });
+
+// Re-render on language/state change
+document.addEventListener('stateChange', renderEditForm);
