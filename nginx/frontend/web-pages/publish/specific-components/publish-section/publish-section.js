@@ -130,7 +130,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const displayName = lang === 'es' 
                 ? (option.name_es || option.name_en || option.name || '')
                 : (option.name_en || option.name_es || option.name || '');
-            const value = option.name_es || option.name_en || option.name || option.uuid || '';
+            
+            // FIX: Use canonical name (option.name) as the value, not language-specific name
+            const value = option.name || option.name_es || option.name_en || option.uuid || '';
             
             const optionElement = buildDropdownOption(value, displayName);
             
@@ -209,19 +211,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             const message = document.createElement('p');
             message.className = 'login-message';
             message.textContent = t.loginRequired;
+            message.style.color = 'white';
+            message.style.marginBottom = '1.5rem';
             container.appendChild(message);
             
-            const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'publish-actions';
-            actionsDiv.style.marginTop = '2rem';
-            
-            const loginButton = document.createElement('a');
-            loginButton.href = '/log-in/log-in.html';
-            loginButton.className = 'publish-button';
-            loginButton.textContent = t.loginHere;
-            loginButton.style.textDecoration = 'none';
-            loginButton.style.display = 'inline-block';
-            actionsDiv.appendChild(loginButton);
+            const loginLink = document.createElement('a');
+            loginLink.href = '/log-in/log-in.html';
+            loginLink.className = 'publish-button';
+            loginLink.textContent = t.loginHere;
+            loginLink.style.textDecoration = 'none';
+            loginLink.style.display = 'inline-block';
+            container.appendChild(loginLink);
             
             const signupSection = document.createElement('div');
             signupSection.style.marginTop = '1.5rem';
@@ -237,21 +237,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             signupLink.style.textDecoration = 'none';
             signupSection.appendChild(signupLink);
             
-            container.appendChild(actionsDiv);
             container.appendChild(signupSection);
             publishSection.appendChild(container);
-            
             return;
         }
-
-        clearElement(publishSection);
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'loading';
-        loadingDiv.style.color = 'white';
-        loadingDiv.style.textAlign = 'center';
-        loadingDiv.style.padding = '2rem';
-        loadingDiv.textContent = t.loading;
-        publishSection.appendChild(loadingDiv);
 
         const hasCompany = await checkExistingCompany();
         if (hasCompany) {
@@ -260,27 +249,29 @@ document.addEventListener('DOMContentLoaded', async () => {
             const container = document.createElement('div');
             container.className = 'publish-container';
             
+            const title = document.createElement('h2');
+            title.className = 'publish-title';
+            title.textContent = t.title;
+            container.appendChild(title);
+            
             const message = document.createElement('p');
             message.className = 'already-published-message';
             message.textContent = t.alreadyPublished;
-            
-            const viewButton = document.createElement('button');
-            viewButton.className = 'publish-button';
-            viewButton.textContent = t.viewCompany;
-            viewButton.addEventListener('click', () => {
-                window.location.href = '/profile-view/profile-view.html';
-            });
-            
+            message.style.color = 'white';
+            message.style.marginBottom = '1.5rem';
             container.appendChild(message);
-            container.appendChild(viewButton);
+            
+            const viewLink = document.createElement('a');
+            viewLink.href = '/profile-view/profile-view.html';
+            viewLink.className = 'publish-button';
+            viewLink.textContent = t.viewCompany;
+            viewLink.style.textDecoration = 'none';
+            viewLink.style.display = 'inline-block';
+            container.appendChild(viewLink);
+            
             publishSection.appendChild(container);
             return;
         }
-
-        const rawProducts = await fetchProducts();
-        const rawCommunes = await fetchCommunes();
-        const products = sanitizeAPIResponse(rawProducts);
-        const communes = sanitizeAPIResponse(rawCommunes);
 
         clearElement(publishSection);
 
@@ -294,7 +285,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const form = document.createElement('form');
         form.className = 'publish-form';
-        form.id = 'publish-form';
+
+        const products = sanitizeAPIResponse(await fetchProducts());
+        const communes = sanitizeAPIResponse(await fetchCommunes());
 
         const nameGroup = document.createElement('div');
         nameGroup.className = 'input-group';
@@ -303,8 +296,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         nameInput.name = 'name';
         nameInput.className = 'publish-input';
         nameInput.placeholder = t.companyName;
-        nameInput.required = true;
         nameInput.maxLength = 100;
+        nameInput.required = true;
         nameGroup.appendChild(nameInput);
         form.appendChild(nameGroup);
 
@@ -326,7 +319,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         phoneInput.name = 'phone';
         phoneInput.className = 'publish-input';
         phoneInput.placeholder = t.phone;
-        phoneInput.required = true;
         phoneGroup.appendChild(phoneInput);
         form.appendChild(phoneGroup);
 
@@ -337,8 +329,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         addressInput.name = 'address';
         addressInput.className = 'publish-input';
         addressInput.placeholder = t.address;
-        addressInput.required = true;
-        addressInput.maxLength = 200;
         addressGroup.appendChild(addressInput);
         form.appendChild(addressGroup);
 

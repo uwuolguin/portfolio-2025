@@ -116,8 +116,15 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
     const lang = getLanguage();
 
     const selectedOption = options.find(opt => {
-        const optName = opt.name || opt.name_es || opt.name_en || '';
-        return normalize(optName) === normalize(selectedValue);
+        // Match against all possible names (canonical, Spanish, English)
+        const canonicalName = opt.name || '';
+        const spanishName = opt.name_es || '';
+        const englishName = opt.name_en || '';
+        const normalizedValue = normalize(selectedValue);
+        
+        return normalize(canonicalName) === normalizedValue ||
+               normalize(spanishName) === normalizedValue ||
+               normalize(englishName) === normalizedValue;
     });
 
     const canonicalValue = selectedOption ? (selectedOption.name || selectedOption.name_es || selectedOption.name_en || '') : '';
