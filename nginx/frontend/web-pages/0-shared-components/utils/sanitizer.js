@@ -7,7 +7,7 @@ const SAFE_ATTRS = new Set([
     'disabled', 'readonly', 'checked', 'selected', 'for'
 ]);
 
-const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+const ALLOWED_SCHEMES = new Set(['http:', 'https:', 'mailto:', 'tel:']);
 
 export function sanitizeText(text) {
     return String(text ?? '');
@@ -52,7 +52,7 @@ export function sanitizeURL(url) {
     if (!trimmed) return '';
     try {
         const parsed = new URL(trimmed, window.location.href);
-        if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) return '';
+        if (!ALLOWED_SCHEMES.has(parsed.protocol)) return '';
         return parsed.href;
     } catch {
         return '';
