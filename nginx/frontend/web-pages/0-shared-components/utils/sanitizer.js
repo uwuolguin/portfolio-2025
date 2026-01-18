@@ -175,77 +175,60 @@ export function buildDropdownOption(value, displayText) {
 export function buildBusinessCard(company, lang) {
     const card = document.createElement('div');
     card.className = 'business-card';
-
-    if (company.img_url) {
-        const pictureDiv = document.createElement('div');
-        pictureDiv.className = 'card-picture';
-        const img = document.createElement('img');
-        setSrc(img, company.img_url);
-        img.alt = String(company.name || 'Company image');
-        img.loading = 'lazy';
-        img.onerror = function () {
-            this.style.display = 'none';
-        };
-        pictureDiv.appendChild(img);
-        card.appendChild(pictureDiv);
-    }
-
+    
+    const pictureDiv = document.createElement('div');
+    pictureDiv.className = 'card-picture';
+    const img = document.createElement('img');
+    setSrc(img, company.img_url);
+    img.alt = String(company.name || 'Company image');
+    img.loading = 'lazy';
+    img.onerror = function () {
+        this.style.display = 'none';
+    };
+    pictureDiv.appendChild(img);
+    card.appendChild(pictureDiv);
+    
     const detailsDiv = document.createElement('div');
     detailsDiv.className = 'card-details';
 
-    if (company.name) {
-        const nameEl = document.createElement('h3');
-        nameEl.className = 'business-name';
-        setText(nameEl, company.name);
-        detailsDiv.appendChild(nameEl);
-    }
+    const nameEl = document.createElement('h3');
+    nameEl.className = 'business-name';
+    setText(nameEl, company.name);
+    detailsDiv.appendChild(nameEl);
 
     // For search results, use 'description' field (language already selected by backend)
-    const description = company.description || (lang === 'es' ? company.description_es : company.description_en);
-    if (description) {
-        const descEl = document.createElement('p');
-        descEl.className = 'concise-description';
-        setText(descEl, description);
-        detailsDiv.appendChild(descEl);
-    }
+    const descEl = document.createElement('p');
+    descEl.className = 'concise-description';
+    setText(descEl, company.description);
+    detailsDiv.appendChild(descEl);
 
     // For search results, use 'product_name' field (language already selected by backend)
-    const productName = company.product_name || (lang === 'es' ? company.product_name_es : company.product_name_en);
-    if (productName) {
-        const productEl = document.createElement('p');
-        productEl.className = 'product';
-        setText(productEl, productName);
-        detailsDiv.appendChild(productEl);
-    }
+    const productEl = document.createElement('p');
+    productEl.className = 'product';
+    setText(productEl,company.product_name);
+    detailsDiv.appendChild(productEl);
 
     // Commune
-    if (company.commune_name) {
-        const communeEl = document.createElement('p');
-        communeEl.className = 'commune';
-        setText(communeEl, company.commune_name);
-        detailsDiv.appendChild(communeEl);
-    }
 
-    if (company.address) {
-        const addressEl = document.createElement('p');
-        addressEl.className = 'location';
-        setText(addressEl, company.address);
-        detailsDiv.appendChild(addressEl);
-    }
+    const communeEl = document.createElement('p');
+    communeEl.className = 'commune';
+    setText(communeEl, company.commune_name);
+    detailsDiv.appendChild(communeEl);
 
-    if (company.phone) {
-        const phoneEl = document.createElement('p');
-        phoneEl.className = 'phone';
-        setText(phoneEl, company.phone);
-        detailsDiv.appendChild(phoneEl);
-    }
+    const addressEl = document.createElement('p');
+    addressEl.className = 'location';
+    setText(addressEl, company.address);
+    detailsDiv.appendChild(addressEl);
 
-    if (company.email) {
-        const emailEl = document.createElement('p');
-        emailEl.className = 'mail';
-        setText(emailEl, company.email);
-        detailsDiv.appendChild(emailEl);
-    }
+    const phoneEl = document.createElement('p');
+    phoneEl.className = 'phone';
+    setText(phoneEl, company.phone);
+    detailsDiv.appendChild(phoneEl);
+
+    const emailEl = document.createElement('p');
+    emailEl.className = 'mail';
+    setText(emailEl, company.email);
+    detailsDiv.appendChild(emailEl);
 
     card.appendChild(detailsDiv);
     return card;
