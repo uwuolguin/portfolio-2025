@@ -8,33 +8,34 @@
 // STATE SYNCHRONIZATION SYSTEM
 // ============================================
 
-const STATE_CHANGE_EVENT = 'appStateChange';
-
-function dispatchStateChange(key, newValue) {
-    const event = new CustomEvent(STATE_CHANGE_EVENT, {
-        detail: { key, newValue }
-    });
-    window.dispatchEvent(event);
+/**
+ * Dispatches a 'stateChange' event on document
+ * This notifies all components that app state has changed
+ */
+function notifyStateChange(key) {
+    console.log(`[State Sync] ${key} changed, notifying components`);
+    document.dispatchEvent(new Event('stateChange'));
 }
 
+/**
+ * Initialize storage listeners for cross-tab synchronization
+ * Call this once in each page's main JS file
+ */
 export function initStorageListener() {
+    // Listen for changes from OTHER tabs (storage event only fires cross-tab)
     window.addEventListener('storage', (e) => {
         if (!e.key) return;
         
         console.log(`[Storage Sync] Key changed in another tab: ${e.key}`);
         
+        // Only react to our tracked keys
         switch (e.key) {
             case 'isLoggedIn':
             case 'hasCompany':
             case 'language':
-                document.dispatchEvent(new Event('stateChange'));
+                notifyStateChange(e.key);
                 break;
         }
-    });
-    
-    window.addEventListener(STATE_CHANGE_EVENT, (e) => {
-        console.log(`[State Sync] Key changed in same tab: ${e.detail.key}`);
-        document.dispatchEvent(new Event('stateChange'));
     });
     
     console.log('[State Sync] Storage listener initialized');
@@ -51,7 +52,10 @@ export function getLanguage() {
 export function setLanguage(lang) {
     const oldValue = localStorage.getItem('language');
     localStorage.setItem('language', lang);
-    dispatchStateChange('language', lang);
+    
+    // Notify THIS tab immediately (storage event won't fire for same tab)
+    notifyStateChange('language');
+    
     console.log(`[Language] Changed from ${oldValue} to ${lang}`);
 }
 
@@ -66,15 +70,21 @@ export function getLoginState() {
 export function setLoginState(isLoggedIn) {
     const oldValue = getLoginState();
     localStorage.setItem('isLoggedIn', isLoggedIn.toString());
-    dispatchStateChange('isLoggedIn', isLoggedIn);
+    
+    // Notify THIS tab immediately (storage event won't fire for same tab)
+    notifyStateChange('isLoggedIn');
+    
     console.log(`[Auth] Login state changed: ${oldValue} → ${isLoggedIn}`);
 }
 
 export function logout() {
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('hasCompany');
-    dispatchStateChange('isLoggedIn', false);
-    dispatchStateChange('hasCompany', false);
+    
+    // Notify THIS tab immediately
+    notifyStateChange('isLoggedIn');
+
+    
     console.log('[Auth] User logged out, state cleared');
     window.location.href = '/front-page/front-page.html';
 }
@@ -90,7 +100,10 @@ export function getCompanyPublishState() {
 export function setCompanyPublishState(hasCompany) {
     const oldValue = getCompanyPublishState();
     localStorage.setItem('hasCompany', hasCompany.toString());
-    dispatchStateChange('hasCompany', hasCompany);
+    
+    // Notify THIS tab immediately (storage event won't fire for same tab)
+    notifyStateChange('hasCompany');
+    
     console.log(`[Company] Publish state changed: ${oldValue} → ${hasCompany}`);
 }
 
@@ -263,36 +276,6 @@ export function debounce(func, wait = 300) {
     };
 }
 
-export function showLoading(element, message = 'Cargando...') {
-    element.textContent = '';
-    
-    const container = document.createElement('div');
-    container.className = 'loading-spinner';
-    
-    const spinner = document.createElement('div');
-    spinner.className = 'spinner';
-    
-    const text = document.createElement('p');
-    text.textContent = message;
-    
-    container.appendChild(spinner);
-    container.appendChild(text);
-    element.appendChild(container);
-}
-
-export function showError(element, message = 'Error al cargar los datos') {
-    element.textContent = '';
-    
-    const container = document.createElement('div');
-    container.className = 'error-message';
-    
-    const text = document.createElement('p');
-    text.textContent = message;
-    
-    container.appendChild(text);
-    element.appendChild(container);
-}
-
 // ============================================
 // DEFAULT EXPORT
 // ============================================
@@ -313,7 +296,5 @@ export default {
     fetchProducts,
     fetchCommunes,
     fetchUserCompany,
-    debounce,
-    showLoading,
-    showError
+    debounce
 };

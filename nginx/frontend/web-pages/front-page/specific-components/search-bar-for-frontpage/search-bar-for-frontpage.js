@@ -1,16 +1,3 @@
-import {
-    getLanguage,
-    fetchProducts,
-    fetchCommunes,
-    debounce
-} from '../../../0-shared-components/utils/shared-functions.js';
-
-import {
-    sanitizeAPIResponse,
-    buildDropdownOption,
-    clearElement
-} from '../../../0-shared-components/utils/sanitizer.js';
-
 document.addEventListener('DOMContentLoaded', async () => {
     const searchContainer = document.getElementById('search-container');
 
@@ -84,10 +71,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Add options (data already sanitized)
         const lang = getLanguage();
         options.forEach(option => {
-            const displayName = lang === 'es' 
-                ? (option.name_es || option.name_en || option.name || '')
-                : (option.name_en || option.name_es || option.name || '');
-            const value = option.name_es || option.name_en || option.name || option.uuid || '';
+            // Crash if lang is not properly set
+            if (lang !== 'es' && lang !== 'en') {
+                throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
+            }
+            
+            // Use the exact language for display
+            const displayName = lang === 'es' ? option.name_es : option.name_en;
+            
+            // Use the SAME LANGUAGE for value - no bias!
+            const value = lang === 'es' ? option.name_es : option.name_en;
+            
+            // Crash if the required translation is missing
+            if (!displayName || !value) {
+                throw new Error(`Missing ${lang} translation for option: ${JSON.stringify(option)}`);
+            }
             
             const optionElement = buildDropdownOption(value, displayName);
             
@@ -95,7 +93,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 selectedText.textContent = displayName;
                 selected.dataset.value = value;
                 optionsContainer.style.display = 'none';
-                // Trigger search input changed event
                 document.dispatchEvent(new CustomEvent('searchInputChanged'));
             });
             
@@ -150,14 +147,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function renderSearchBar() {
         const lang = getLanguage();
         const t = translations[lang];
-
-        // Fetch and sanitize data
-        const rawProducts = await fetchProducts();
-        const rawCommunes = await fetchCommunes();
         
-        const products = sanitizeAPIResponse(rawProducts);
-        const communes = sanitizeAPIResponse(rawCommunes);
-
+        const products = await fetchProducts();
+        const communes = await fetchCommunes();
         // Clear container safely
         clearElement(searchContainer);
 
@@ -223,9 +215,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    // Protection flag for triggerSearch
+    let isSearching = false;
+
     function triggerSearch() {
-        const event = new CustomEvent('searchTriggered');
-        document.dispatchEvent(event);
+        if (isSearching) return; // Ignore if already searching
+        
+        isSearching = true;
+        document.dispatchEvent(new CustomEvent('searchTriggered'));
+        
+        // Reset after 10ms cooldown
+        setTimeout(() => {
+            isSearching = false;
+        }, 10);
     }
 
     // Close dropdowns when clicking outside
