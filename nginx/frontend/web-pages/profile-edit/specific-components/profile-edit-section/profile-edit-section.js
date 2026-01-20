@@ -11,7 +11,6 @@ import {
     sanitizeText,
     setText,
     sanitizeEmail,
-    sanitizeAPIResponse,
     buildDropdownOption,
     setSrc,
     clearElement
@@ -94,7 +93,7 @@ async function loadCurrentCompany() {
         const response = await apiRequest('/api/v1/companies/user/my-company');
         if (response.ok) {
             const data = await response.json();
-            currentCompany = sanitizeAPIResponse(data);
+            currentCompany = data;
             return currentCompany;
         }
         throw new Error('Company not found');
@@ -104,7 +103,14 @@ async function loadCurrentCompany() {
     }
 }
 
-function createFilterableDropdown(id, label, options, placeholder, selectedValue = null) {
+function createFilterableDropdown(id, options, placeholder, selectedValue = null) {
+    const lang = getLanguage();
+    
+    // Crash if lang is not properly set
+    if (lang !== 'es' && lang !== 'en') {
+        throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
+    }
+    
     const container = document.createElement('div');
     container.className = 'input-group';
     container.dataset.dropdownId = id;
@@ -113,25 +119,23 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
     selected.className = 'dropdown-selected';
 
     const normalize = v => sanitizeText(String(v || '').toLowerCase());
-    const lang = getLanguage();
 
     const selectedOption = options.find(opt => {
-        // Match against all possible names (canonical, Spanish, English)
-        const canonicalName = opt.name || '';
         const spanishName = opt.name_es || '';
         const englishName = opt.name_en || '';
+        const communeName = opt.name || '';
         const normalizedValue = normalize(selectedValue);
         
-        return normalize(canonicalName) === normalizedValue ||
-               normalize(spanishName) === normalizedValue ||
-               normalize(englishName) === normalizedValue;
+        return normalize(spanishName) === normalizedValue ||
+               normalize(englishName) === normalizedValue ||
+               normalize(communeName) === normalizedValue;
     });
 
-    const canonicalValue = selectedOption ? (selectedOption.name || selectedOption.name_es || selectedOption.name_en || '') : '';
-    selected.dataset.value = canonicalValue;
+    const displayValue = selectedOption ? getOptionLabel(selectedOption, lang) : '';
+    selected.dataset.value = displayValue;
 
     const selectedText = document.createElement('span');
-    selectedText.textContent = selectedOption ? optLabel(selectedOption) : placeholder;
+    selectedText.textContent = selectedOption ? getOptionLabel(selectedOption, lang) : placeholder;
     selected.appendChild(selectedText);
 
     const arrow = document.createElement('span');
@@ -153,12 +157,25 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
     optionsList.className = 'options-list';
 
     options.forEach(option => {
-        const label = optLabel(option);
-        const optionElement = buildDropdownOption(label, label);
+        const displayName = lang === 'es' 
+            ? (option.name_es || option.name)
+            : (option.name_en || option.name);
+
+        const value = lang === 'es'
+            ? (option.name_es || option.name)
+            : (option.name_en || option.name);
+        
+        // Crash if the required translation is missing for products
+        if (option.name_es && option.name_en && !displayName) {
+            throw new Error(`Missing ${lang} translation for product: ${JSON.stringify(option)}`);
+        }
+
+        const label = sanitizeText(displayName);
+        const optionElement = buildDropdownOption(value, label);
 
         optionElement.addEventListener('click', () => {
             selectedText.textContent = label;
-            selected.dataset.value = option.name || option.name_es || option.name_en || '';
+            selected.dataset.value = value;
             optionsContainer.style.display = 'none';
             container.classList.remove('dropdown-open');
         });
@@ -198,14 +215,23 @@ function createFilterableDropdown(id, label, options, placeholder, selectedValue
     return container;
 }
 
-function optLabel(option) {
-    const lang = getLanguage();
-    if (lang === 'es') {
-        return sanitizeText(option.name_es || option.name || option.name_en || '');
-    } else {
-        return sanitizeText(option.name_en || option.name || option.name_es || '');
+function getOptionLabel(option, lang) {
+    // Crash if lang is not properly set
+    if (lang !== 'es' && lang !== 'en') {
+        throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
     }
+    
+    const displayName = lang === 'es'
+        ? (option.name_es || option.name)
+        : (option.name_en || option.name);
+    
+    if (!displayName) {
+        throw new Error(`Missing ${lang} translation for option: ${JSON.stringify(option)}`);
+    }
+    
+    return sanitizeText(displayName);
 }
+
 
 async function handleFormSubmit(e) {
     e.preventDefault();
@@ -233,6 +259,7 @@ async function handleFormSubmit(e) {
         // Get dropdown values
         const communeDropdown = form.querySelector('[data-dropdown-id="commune"] .dropdown-selected');
         const productDropdown = form.querySelector('[data-dropdown-id="product"] .dropdown-selected');
+
         
         const communeName = communeDropdown?.dataset.value || '';
         const productName = productDropdown?.dataset.value || '';
@@ -332,8 +359,14 @@ function showMessage(message, type) {
 
 async function renderEditForm() {
     const editSection = document.getElementById('profile-edit-section');
-    const lang = getLanguage() || 'es';
-    const t = translations[lang] || translations.es;
+    const lang = getLanguage();
+    
+    // Crash if lang is not properly set
+    if (lang !== 'es' && lang !== 'en') {
+        throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
+    }
+    
+    const t = translations[lang];
     
     if (!getLoginState()) {
         clearElement(editSection);
@@ -447,10 +480,8 @@ async function renderEditForm() {
         return;
     }
 
-    const rawProducts = await fetchProducts();
-    const rawCommunes = await fetchCommunes();
-    const products = sanitizeAPIResponse(rawProducts);
-    const communes = sanitizeAPIResponse(rawCommunes);
+    const products = await fetchProducts();
+    const communes = await fetchCommunes();
 
     clearElement(editSection);
 
@@ -534,21 +565,25 @@ async function renderEditForm() {
     addressGroup.appendChild(addressInput);
     form.appendChild(addressGroup);
 
+    // COMMUNE: Just use name (no name_es/name_en)
     const communeDropdown = createFilterableDropdown(
         'commune',
-        t.commune,
         communes,
         t.selectCommune,
         company.commune_name
     );
     form.appendChild(communeDropdown);
 
+    // PRODUCT: Spanish → name_es, English → name_en, NO FALLBACK
+    const productSelectedValue = lang === 'es' 
+        ? company.product_name_es
+        : company.product_name_en;
+    
     const productDropdown = createFilterableDropdown(
         'product',
-        t.product,
         products,
         t.selectProduct,
-        lang === 'es' ? company.product_name_es : company.product_name_en
+        productSelectedValue
     );
     form.appendChild(productDropdown);
 

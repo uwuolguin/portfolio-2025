@@ -11,7 +11,6 @@ import {
     sanitizeText,
     sanitizeEmail,
     sanitizePhone,
-    sanitizeAPIResponse,
     buildDropdownOption,
     clearElement
 } from '../../../0-shared-components/utils/sanitizer.js';
@@ -127,12 +126,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const lang = getLanguage();
         options.forEach(option => {
-            const displayName = lang === 'es' 
-                ? (option.name_es || option.name_en || option.name || '')
-                : (option.name_en || option.name_es || option.name || '');
+            // Crash if lang is not properly set
+            if (lang !== 'es' && lang !== 'en') {
+                throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
+            }
             
-            // FIX: Use canonical name (option.name) as the value, not language-specific name
-            const value = option.name || option.name_es || option.name_en || option.uuid || '';
+            // Use the exact language for display
+            const displayName =
+                lang === 'es'
+                    ? (option.name_es || option.name)
+                    : (option.name_en || option.name);
+
+            // Use the SAME LANGUAGE for value – with fallback
+            const value =
+                lang === 'es'
+                    ? (option.name_es || option.name)
+                    : (option.name_en || option.name);
+            
+            // Crash if the required translation is missing
+            if (!displayName || !value) {
+                throw new Error(`Missing ${lang} translation for option: ${JSON.stringify(option)}`);
+            }
+            
             
             const optionElement = buildDropdownOption(value, displayName);
             
@@ -192,8 +207,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function renderPublishForm() {
-        const lang = getLanguage() || 'es';
-        const t = translations[lang] || translations.es;
+        const lang = getLanguage();
+        const t = translations[lang];
 
         const isLoggedIn = getLoginState();
         
@@ -286,8 +301,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const form = document.createElement('form');
         form.className = 'publish-form';
 
-        const products = sanitizeAPIResponse(await fetchProducts());
-        const communes = sanitizeAPIResponse(await fetchCommunes());
+        const products = await fetchProducts();
+        const communes = await fetchCommunes();
 
         const nameGroup = document.createElement('div');
         nameGroup.className = 'input-group';
