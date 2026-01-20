@@ -1,3 +1,14 @@
+import {
+    getLanguage,
+    fetchProducts,
+    fetchCommunes,
+    debounce
+} from '../../../0-shared-components/utils/shared-functions.js';
+
+import {
+    buildDropdownOption,
+    clearElement
+} from '../../../0-shared-components/utils/sanitizer.js';
 document.addEventListener('DOMContentLoaded', async () => {
     const searchContainer = document.getElementById('search-container');
 
