@@ -88,10 +88,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             
             // Use the exact language for display
-            const displayName = lang === 'es' ? option.name_es : option.name_en;
-            
-            // Use the SAME LANGUAGE for value - no bias!
-            const value = lang === 'es' ? option.name_es : option.name_en;
+            const displayName =
+                lang === 'es'
+                    ? (option.name_es || option.name)
+                    : (option.name_en || option.name);
+
+            // Use the SAME LANGUAGE for value – with fallback
+            const value =
+                lang === 'es'
+                    ? (option.name_es || option.name)
+                    : (option.name_en || option.name);
             
             // Crash if the required translation is missing
             if (!displayName || !value) {
