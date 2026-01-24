@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     )
 
     nsfw_threshold: float = Field(
-        default=0.75,
+        default=0.2,
         description="NSFW detection threshold (0.0-1.0)",
         ge=0.0,
         le=1.0,
