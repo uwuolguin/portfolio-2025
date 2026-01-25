@@ -1,0 +1,174 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-replica
+  namespace: portfolio
+  labels:
+    app: postgres-replica
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres
+  selector:
+    app: postgres-replica
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-replica
+  namespace: portfolio
+spec:
+  serviceName: postgres-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-replica
+  template:
+    metadata:
+      labels:
+        app: postgres-replica
+        role: replica
+    spec:
+      initContainers:
+        # SSL Certificates
+        - name: ssl-certgen
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              apk add --no-cache openssl
+              mkdir -p /certs
+              if [ ! -f /certs/server.crt ]; then
+                echo "Generating PostgreSQL SSL certificates"
+                openssl req -new -x509 -nodes -days 3650 \
+                  -subj "/C=CL/ST=NA/L=NA/O=portfolio/CN=postgres-replica" \
+                  -out /certs/server.crt \
+                  -keyout /certs/server.key
+                chmod 600 /certs/server.key
+                chmod 644 /certs/server.crt
+                chown 999:999 /certs/server.key /certs/server.crt
+              fi
+          volumeMounts:
+            - name: postgres-certs
+              mountPath: /certs
+        
+        # Base backup from primary
+        - name: replica-init
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f "$PGDATA/PG_VERSION" ]; then
+                echo "Initializing replica from primary..."
+                PGPASSWORD=$POSTGRES_PASSWORD pg_basebackup \
+                  -h postgres-primary \
+                  -U $POSTGRES_USER \
+                  -D $PGDATA \
+                  -Fp -Xs -R -P
+                
+                # Configure standby
+                cat >> $PGDATA/postgresql.auto.conf <<EOF
+              hot_standby = on
+              primary_conninfo = 'host=postgres-primary port=5432 user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=require'
+              primary_slot_name = 'replica_slot_1'
+              EOF
+                
+                # Create standby.signal
+                touch $PGDATA/standby.signal
+                
+                echo "Replica initialization complete"
+              else
+                echo "Replica already initialized, skipping"
+              fi
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          args:
+            - "postgres"
+            - "-c"
+            - "ssl=on"
+            - "-c"
+            - "ssl_cert_file=/var/lib/postgresql/certs/server.crt"
+            - "-c"
+            - "ssl_key_file=/var/lib/postgresql/certs/server.key"
+            - "-c"
+            - "ssl_min_protocol_version=TLSv1.2"
+            - "-c"
+            - "hot_standby=on"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-certs
+              mountPath: /var/lib/postgresql/certs
+              readOnly: true
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U $POSTGRES_USER
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  pg_isready -U $POSTGRES_USER && \
+                  psql -U $POSTGRES_USER -d postgres -tAc "SELECT pg_is_in_recovery();" | grep -q 't'
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-replica-data
+        - name: postgres-certs
+          emptyDir: {}

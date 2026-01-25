@@ -1,0 +1,148 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary
+  namespace: portfolio
+  labels:
+    app: postgres-primary
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres
+  selector:
+    app: postgres-primary
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+  namespace: portfolio
+spec:
+  serviceName: postgres-primary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-primary
+  template:
+    metadata:
+      labels:
+        app: postgres-primary
+        role: primary
+    spec:
+      initContainers:
+        # SSL Certificate generation
+        - name: ssl-certgen
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              apk add --no-cache openssl
+              mkdir -p /certs
+              if [ ! -f /certs/server.crt ]; then
+                echo "Generating PostgreSQL SSL certificates"
+                openssl req -new -x509 -nodes -days 3650 \
+                  -subj "/C=CL/ST=NA/L=NA/O=portfolio/CN=postgres" \
+                  -out /certs/server.crt \
+                  -keyout /certs/server.key
+                chmod 600 /certs/server.key
+                chmod 644 /certs/server.crt
+                chown 999:999 /certs/server.key /certs/server.crt
+              fi
+          volumeMounts:
+            - name: postgres-certs
+              mountPath: /certs
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: portfolio-config
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          args:
+            - "postgres"
+            - "-c"
+            - "ssl=on"
+            - "-c"
+            - "ssl_cert_file=/var/lib/postgresql/certs/server.crt"
+            - "-c"
+            - "ssl_key_file=/var/lib/postgresql/certs/server.key"
+            - "-c"
+            - "ssl_min_protocol_version=TLSv1.2"
+            - "-c"
+            - "shared_preload_libraries=pg_cron"
+            - "-c"
+            - "cron.database_name=portfolio"
+            - "-c"
+            - "cron.use_background_workers=on"
+            - "-c"
+            - "max_worker_processes=10"
+            - "-c"
+            - "password_encryption=scram-sha-256"
+            - "-c"
+            - "wal_level=replica"
+            - "-c"
+            - "max_wal_senders=3"
+            - "-c"
+            - "max_replication_slots=3"
+            - "-c"
+            - "hot_standby=on"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-certs
+              mountPath: /var/lib/postgresql/certs
+              readOnly: true
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-primary-data
+        - name: postgres-certs
+          emptyDir: {}

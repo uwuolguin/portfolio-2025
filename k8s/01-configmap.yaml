@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: portfolio-config
+  namespace: portfolio
+data:
+  # PostgreSQL
+  POSTGRES_DB: "portfolio"
+  
+  # MinIO
+  MINIO_ENDPOINT: "minio:9000"
+  MINIO_BUCKET: "images"
+  MINIO_SECURE: "false"
+  
+  # Backend App
+  API_V1_PREFIX: "/api/v1"
+  PROJECT_NAME: "Proveo API"
+  DEBUG: "false"
+  ALLOWED_ORIGINS: "http://localhost,http://localhost:80"
+  
+  # Database Connection
+  DB_POOL_MIN_SIZE: "5"
+  DB_POOL_MAX_SIZE: "20"
+  DB_POOL_MAX_QUERIES: "50000"
+  DB_POOL_MAX_INACTIVE: "300.0"
+  DB_TIMEOUT: "30"
+  DB_COMMAND_TIMEOUT: "60"
+  DB_SERVER_TIMEOUT: "60"
+  DB_SSL_MODE: "require"
+  
+  # Redis
+  REDIS_TIMEOUT: "5"
+  CACHE_TTL: "3600"
+  REDIS_SSL: "false"
+  
+  # Image Service
+  IMAGE_SERVICE_URL: "http://image-service:8080"
+  REQUEST_TIMEOUT: "30.0"
+  CONNECTION_TIMEOUT: "5.0"
+  MAX_RETRIES: "3"
+  MAX_CONNECTIONS: "100"
+  MAX_KEEPALIVE_CONNECTIONS: "20"
+  
+  # Validation
+  MAX_NAME_LENGTH: "100"
+  MAX_EMAIL_LENGTH: "100"
+  MAX_DESCRIPTION_LENGTH: "500"
+  MAX_ADDRESS_LENGTH: "200"
+  MAX_PHONE_LENGTH: "20"
+  MIN_PASSWORD_LENGTH: "8"
+  MAX_PASSWORD_LENGTH: "100"
+  
+  # Email
+  VERIFICATION_TOKEN_EMAIL_TIME: "30"
+  EMAIL_FROM: "noreply@proveo.com"
+  
+  # JWT
+  ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "120"
