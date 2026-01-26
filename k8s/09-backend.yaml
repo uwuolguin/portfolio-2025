@@ -37,20 +37,9 @@ spec:
         app: backend
     spec:
       initContainers:
-        # Run database migrations
-        - name: migrate
-          image: your-registry/backend:latest  # UPDATE THIS
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for postgres-primary..."
-              until pg_isready -h postgres-primary -U $POSTGRES_USER; do
-                sleep 2
-              done
-              echo "Running Alembic migrations..."
-              alembic upgrade head
-              echo "Migrations complete"
+        # Wait for primary database and run migrations
+        - name: wait-for-db
+          image: postgres:16-alpine
           env:
             - name: POSTGRES_USER
               valueFrom:
@@ -62,6 +51,57 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: portfolio-config
+                  key: POSTGRES_DB
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for postgres-primary to be ready..."
+              until PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h postgres-primary -U $POSTGRES_USER -d $POSTGRES_DB; do
+                echo "Primary database not ready, waiting..."
+                sleep 5
+              done
+              echo "Primary database is ready!"
+              
+              # Optional: Wait for replica (with timeout)
+              echo "Checking if replica is available..."
+              REPLICA_TIMEOUT=60
+              COUNTER=0
+              while [ $COUNTER -lt $REPLICA_TIMEOUT ]; do
+                if PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h postgres-replica -U $POSTGRES_USER 2>/dev/null; then
+                  # Check if it's actually in recovery mode
+                  IS_REPLICA=$(PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-replica -U $POSTGRES_USER -d postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "f")
+                  if [ "$IS_REPLICA" = "t" ]; then
+                    echo "Replica is ready and in recovery mode!"
+                    break
+                  fi
+                fi
+                echo "Replica not ready yet ($COUNTER/$REPLICA_TIMEOUT)..."
+                sleep 2
+                COUNTER=$((COUNTER + 2))
+              done
+              
+              if [ $COUNTER -ge $REPLICA_TIMEOUT ]; then
+                echo "WARNING: Replica not available, backend will use primary for reads"
+              fi
+              
+              echo "Database check complete!"
+        
+        # Run database migrations (always against primary)
+        - name: migrate
+          image: your-registry/backend:latest  # UPDATE THIS
+          command:
+            - sh
+            - -c
+            - |
+              echo "Running Alembic migrations against primary..."
+              alembic upgrade head
+              echo "Migrations complete!"
+          env:
             - name: ALEMBIC_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -86,6 +126,30 @@ spec:
             - "0.0.0.0"
             - --port
             - "8000"
+            - --workers
+            - "2"
+          env:
+            # Explicitly set database URLs for read/write splitting
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: DATABASE_URL
+            - name: DATABASE_URL_PRIMARY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: DATABASE_URL_PRIMARY
+            - name: DATABASE_URL_REPLICA
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: DATABASE_URL_REPLICA
+            - name: ALEMBIC_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: ALEMBIC_DATABASE_URL
           envFrom:
             - configMapRef:
                 name: portfolio-config

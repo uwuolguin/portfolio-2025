@@ -1,3 +1,4 @@
+```python
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from fastapi.responses import HTMLResponse
 from typing import List
@@ -6,7 +7,7 @@ from datetime import timedelta
 from uuid import UUID
 import structlog
 
-from app.database.connection import get_db
+from app.database.connection import get_db_read, get_db_write
 from app.database.transactions import DB
 from app.schemas.users import (
     UserSignup, UserResponse, UserLogin, LoginResponse, AdminUserResponse
@@ -27,12 +28,10 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-
-
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def signup(
     user_data: UserSignup,
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
 ):
     try:
         user = await DB.create_user(
@@ -69,7 +68,7 @@ async def signup(
 
 
 @router.get("/verify-email/{token}", response_class=HTMLResponse)
-async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db)):
+async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db_write)):
     """Verify user email with token from email link - returns HTML page"""
     try:
         user = await DB.verify_email(conn=db, token=token)
@@ -84,7 +83,7 @@ async def verify_email(token: str, db: asyncpg.Connection = Depends(get_db)):
 @router.post("/resend-verification")
 async def resend_verification(
     email: str,
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(
                 rate_limit(
                     route_name="resend_verification",
@@ -116,11 +115,12 @@ async def resend_verification(
             detail="Failed to resend verification email"
         )
 
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     user_data: UserLogin, 
     response: Response, 
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db_write)
 ):
     user = await DB.get_user_by_email(conn=db, email=user_data.email)
     
@@ -198,7 +198,7 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
 async def delete_me(
     response: Response, 
     current_user: dict = Depends(get_current_user), 
-    db: asyncpg.Connection = Depends(get_db), 
+    db: asyncpg.Connection = Depends(get_db_write), 
     _: None = Depends(verify_csrf)
 ):
     user_uuid = current_user["sub"]
@@ -236,7 +236,7 @@ async def get_all_users(
     limit: int = Query(100, ge=1, le=500), 
     offset: int = Query(0, ge=0), 
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db_read)
 ):
     try:
         users = await DB.get_all_users_admin(conn=db, limit=limit, offset=offset)
@@ -256,7 +256,7 @@ async def get_all_users(
 async def admin_delete_user(
     user_uuid: UUID, 
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db), 
+    db: asyncpg.Connection = Depends(get_db_write), 
     _: None = Depends(verify_csrf)
 ):
     try:
@@ -296,3 +296,4 @@ async def admin_delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Failed to delete user"
         )
+```

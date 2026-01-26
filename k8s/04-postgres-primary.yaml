@@ -6,6 +6,7 @@ metadata:
   namespace: portfolio
   labels:
     app: postgres-primary
+    role: primary
 spec:
   type: ClusterIP
   ports:
@@ -15,6 +16,45 @@ spec:
       name: postgres
   selector:
     app: postgres-primary
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-primary-init
+  namespace: portfolio
+data:
+  # Initialize replication user and extensions
+  init-primary.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "=== PostgreSQL Primary Initialization ==="
+    
+    # Wait for PostgreSQL to be ready
+    until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+      echo "Waiting for PostgreSQL..."
+      sleep 2
+    done
+    
+    echo "Creating replication slot if not exists..."
+    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+      SELECT pg_create_physical_replication_slot('replica_slot_1')
+      WHERE NOT EXISTS (
+        SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot_1'
+      );
+    " || echo "Replication slot may already exist"
+    
+    echo "Creating pg_cron extension..."
+    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+      CREATE EXTENSION IF NOT EXISTS pg_cron;
+    " || echo "pg_cron extension may already exist"
+    
+    echo "Creating pg_trgm extension..."
+    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+      CREATE EXTENSION IF NOT EXISTS pg_trgm;
+    " || echo "pg_trgm extension may already exist"
+    
+    echo "=== Primary initialization complete ==="
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -46,7 +86,7 @@ spec:
               if [ ! -f /certs/server.crt ]; then
                 echo "Generating PostgreSQL SSL certificates"
                 openssl req -new -x509 -nodes -days 3650 \
-                  -subj "/C=CL/ST=NA/L=NA/O=portfolio/CN=postgres" \
+                  -subj "/C=CL/ST=NA/L=NA/O=portfolio/CN=postgres-primary" \
                   -out /certs/server.crt \
                   -keyout /certs/server.key
                 chmod 600 /certs/server.key
@@ -82,6 +122,7 @@ spec:
               value: /var/lib/postgresql/data/pgdata
           args:
             - "postgres"
+            # SSL Configuration
             - "-c"
             - "ssl=on"
             - "-c"
@@ -90,6 +131,7 @@ spec:
             - "ssl_key_file=/var/lib/postgresql/certs/server.key"
             - "-c"
             - "ssl_min_protocol_version=TLSv1.2"
+            # Extensions
             - "-c"
             - "shared_preload_libraries=pg_cron"
             - "-c"
@@ -98,22 +140,42 @@ spec:
             - "cron.use_background_workers=on"
             - "-c"
             - "max_worker_processes=10"
+            # Authentication
             - "-c"
             - "password_encryption=scram-sha-256"
+            # Replication settings (PRIMARY)
             - "-c"
             - "wal_level=replica"
             - "-c"
-            - "max_wal_senders=3"
+            - "max_wal_senders=5"
             - "-c"
-            - "max_replication_slots=3"
+            - "max_replication_slots=5"
+            - "-c"
+            - "wal_keep_size=1GB"
             - "-c"
             - "hot_standby=on"
+            # Performance
+            - "-c"
+            - "shared_buffers=256MB"
+            - "-c"
+            - "effective_cache_size=768MB"
+            - "-c"
+            - "maintenance_work_mem=64MB"
+            - "-c"
+            - "work_mem=4MB"
+            # Logging
+            - "-c"
+            - "log_statement=ddl"
+            - "-c"
+            - "log_min_duration_statement=1000"
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
             - name: postgres-certs
               mountPath: /var/lib/postgresql/certs
               readOnly: true
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
           livenessProbe:
             exec:
               command:
@@ -146,3 +208,7 @@ spec:
             claimName: postgres-primary-data
         - name: postgres-certs
           emptyDir: {}
+        - name: init-scripts
+          configMap:
+            name: postgres-primary-init
+            defaultMode: 0755

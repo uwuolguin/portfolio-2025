@@ -1,3 +1,16 @@
+"""
+Database Transactions Module with Read/Write Splitting
+
+This module provides transaction management with automatic routing:
+- Write operations (INSERT, UPDATE, DELETE) -> Primary database
+- Read operations (SELECT) -> Replica database (with fallback to primary)
+
+Key changes from original:
+- Added `readonly` parameter to transaction() context manager
+- Read-only transactions automatically use replica pool
+- Write transactions always use primary pool
+"""
+
 import asyncpg
 import structlog
 from contextlib import asynccontextmanager
@@ -5,7 +18,7 @@ from typing import AsyncGenerator, Optional, List
 from enum import Enum
 from uuid import UUID
 from app.database.db_retry import db_retry
-from app.schemas.users import UserRecord,UserRecordHash,UserDeletionResponse,AdminUserResponse
+from app.schemas.users import UserRecord, UserRecordHash, UserDeletionResponse, AdminUserResponse
 from app.schemas.communes import CommuneRecord
 from app.schemas.products import ProductRecord
 from app.auth.jwt import get_password_hash
@@ -24,10 +37,12 @@ from app.schemas.companies import (
 
 logger = structlog.get_logger(__name__)
 
+
 class IsolationLevel(Enum):
     READ_COMMITTED = "READ COMMITTED"
     REPEATABLE_READ = "REPEATABLE READ"
     SERIALIZABLE = "SERIALIZABLE"
+
 
 @asynccontextmanager
 async def transaction(
@@ -40,10 +55,13 @@ async def transaction(
     Clean asyncpg transaction wrapper with accurate commit/rollback logging.
     
     Args:
-        conn: Database connection
+        conn: Database connection (from write or read pool)
         isolation: Transaction isolation level
-        readonly: If True, transaction is read-only
+        readonly: If True, transaction is read-only (uses replica if available)
         force_rollback: If True, always rollback instead of commit (for testing)
+    
+    Note: The `readonly` flag is informational for logging. The actual
+    read/write routing is done at the pool level via get_db_read/get_db_write.
     """
     iso_mapping = {
         IsolationLevel.READ_COMMITTED: "read_committed",
@@ -89,8 +107,23 @@ async def transaction(
         )
         raise
 
-class DB:
 
+class DB:
+    """
+    Database operations class with read/write separation.
+    
+    Convention:
+    - Methods that only SELECT data use `readonly=True` in transaction
+    - Methods that INSERT/UPDATE/DELETE use `readonly=False` (default)
+    
+    The actual pool selection (primary vs replica) is done in the router
+    layer using get_db_read() or get_db_write() dependencies.
+    """
+
+    # =========================================================================
+    # USER OPERATIONS
+    # =========================================================================
+    
     @staticmethod
     @db_retry()
     async def create_user(
@@ -100,12 +133,13 @@ class DB:
         password: str,
         force_rollback: bool = False,
     ) -> UserRecord:
+        """Create a new user (WRITE operation - uses primary)"""
         hashed_password = get_password_hash(password)
         user_uuid = uuid.uuid4()
         verification_token = generate_csrf_token()
         token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_email_time)
 
-        async with transaction(conn, force_rollback=force_rollback):
+        async with transaction(conn, readonly=False, force_rollback=force_rollback):
             query = """
                 INSERT INTO proveo.users 
                     (uuid, name, email, hashed_password, role, verification_token, verification_token_expires)
@@ -123,6 +157,7 @@ class DB:
     @staticmethod
     @db_retry()
     async def get_user_by_email(conn: asyncpg.Connection, email: str) -> Optional[UserRecordHash]:
+        """Get user by email (READ operation - can use replica)"""
         async with transaction(conn, readonly=True):
             query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
@@ -135,7 +170,8 @@ class DB:
     @staticmethod
     @db_retry()
     async def verify_email(conn: asyncpg.Connection, token: str) -> UserRecord:
-        async with transaction(conn):
+        """Verify email with token (WRITE operation - uses primary)"""
+        async with transaction(conn, readonly=False):
             query = """
                 SELECT uuid, name, email, verification_token_expires
                 FROM proveo.users
@@ -162,9 +198,8 @@ class DB:
     @staticmethod
     @db_retry()
     async def resend_verification_email(conn: asyncpg.Connection, email: str) -> UserRecord:
-
-
-        async with transaction(conn):
+        """Resend verification email (WRITE operation - uses primary)"""
+        async with transaction(conn, readonly=False):
             query = "SELECT uuid, name, email, email_verified FROM proveo.users WHERE email = $1"
             user = await conn.fetchrow(query, email)
             if not user:
@@ -187,10 +222,11 @@ class DB:
     @staticmethod
     @db_retry()
     async def delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> UserDeletionResponse:
+        """Delete user and cascade (WRITE operation - uses primary)"""
         company_uuid: Optional[str] = None
         deleted_image: Optional[str] = None
 
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
             user_query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
@@ -272,6 +308,7 @@ class DB:
     @staticmethod
     @db_retry()
     async def get_all_users_admin(conn: asyncpg.Connection, limit: int = 100, offset: int = 0) -> List[AdminUserResponse]:
+        """Get all users for admin (READ operation - can use replica)"""
         async with transaction(conn, readonly=True):
             query = """
                 SELECT u.uuid, u.name, u.email, u.role, u.email_verified, u.created_at,
@@ -288,10 +325,11 @@ class DB:
     @staticmethod
     @db_retry()
     async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> UserDeletionResponse:
+        """Admin delete user (WRITE operation - uses primary)"""
         deleted_image_path: Optional[str] = None
         company_uuid: Optional[str] = None
 
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
             user_query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
@@ -391,18 +429,15 @@ class DB:
             company_deleted=1 if company else 0,
             image_deleted=1 if deleted_image_path else 0
         )
-             
+
+    # =========================================================================
+    # PRODUCT OPERATIONS
+    # =========================================================================
+    
     @staticmethod
     @db_retry()
     async def get_all_products(conn: asyncpg.Connection) -> List[ProductRecord]:
-        """
-        Get all products ordered by English name
-        
-        Returns:
-            List of ProductRecord objects (not Dict)
-        
-        Note: Matches communes pattern for consistency
-        """
+        """Get all products (READ operation - can use replica)"""
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT uuid, name_es, name_en, created_at
@@ -414,11 +449,12 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str,force_rollback: bool = False) -> ProductRecord:
+    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str, force_rollback: bool = False) -> ProductRecord:
+        """Create a product (WRITE operation - uses primary)"""
         product_uuid = str(uuid.uuid4())
 
         try:
-            async with transaction(conn,force_rollback=force_rollback):
+            async with transaction(conn, readonly=False, force_rollback=force_rollback):
                 row = await conn.fetchrow(
                     """
                     INSERT INTO proveo.products (uuid, name_es, name_en)
@@ -444,8 +480,8 @@ class DB:
         name_es: str,
         name_en: str,
     ) -> ProductRecord:
-
-        async with transaction(conn):
+        """Update a product (WRITE operation - uses primary)"""
+        async with transaction(conn, readonly=False):
             existing = await conn.fetchval(
                 "SELECT 1 FROM proveo.products WHERE uuid=$1",
                 product_uuid,
@@ -488,29 +524,14 @@ class DB:
             logger.info("product_updated", product_uuid=str(product_uuid))
             return ProductRecord(**dict(row))
 
-
     @staticmethod
     @db_retry()
     async def delete_product_by_uuid(
         conn: asyncpg.Connection, 
         product_uuid: UUID
     ) -> ProductRecord:
-        """
-        Delete product by UUID (soft delete to products_deleted table)
-        
-        Args:
-            conn: Database connection
-            product_uuid: Product UUID to delete
-        
-        Returns:
-            ProductRecord object (the deleted product)
-        
-        Raises:
-            ValueError: If product not found or still in use by companies
-        
-        Note: Admin validation must be done in router layer
-        """
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+        """Delete product (WRITE operation - uses primary)"""
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
             product_query = """
                 SELECT uuid, name_es, name_en, created_at 
                 FROM proveo.products 
@@ -550,9 +571,14 @@ class DB:
             
             return ProductRecord(**dict(product))
 
+    # =========================================================================
+    # COMMUNE OPERATIONS
+    # =========================================================================
+    
     @staticmethod
     @db_retry()
     async def get_all_communes(conn: asyncpg.Connection) -> List[CommuneRecord]:
+        """Get all communes (READ operation - can use replica)"""
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT uuid, name, created_at
@@ -564,9 +590,10 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_commune(conn: asyncpg.Connection, name: str,force_rollback: bool = False) -> CommuneRecord:        
+    async def create_commune(conn: asyncpg.Connection, name: str, force_rollback: bool = False) -> CommuneRecord:
+        """Create a commune (WRITE operation - uses primary)"""
         commune_uuid = str(uuid.uuid4())
-        async with transaction(conn,force_rollback=force_rollback):
+        async with transaction(conn, readonly=False, force_rollback=force_rollback):
             insert_query = """
                 INSERT INTO proveo.communes (name,uuid) 
                 VALUES ($1,$2) 
@@ -583,8 +610,9 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: str) -> CommuneRecord:        
-        async with transaction(conn):
+    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: str) -> CommuneRecord:
+        """Update a commune (WRITE operation - uses primary)"""
+        async with transaction(conn, readonly=False):
             existing = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
             if not existing:
                 raise ValueError(f"Commune with UUID {commune_uuid} not found")
@@ -607,7 +635,8 @@ class DB:
     @staticmethod
     @db_retry()
     async def delete_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID) -> CommuneRecord:
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+        """Delete commune (WRITE operation - uses primary)"""
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
             commune_query = """
                 SELECT uuid, name, created_at
                 FROM proveo.communes
@@ -646,22 +675,17 @@ class DB:
                 created_at=commune["created_at"]
             )
 
+    # =========================================================================
+    # COMPANY OPERATIONS
+    # =========================================================================
+    
     @staticmethod
     @db_retry()
     async def get_company_by_uuid(
         conn: asyncpg.Connection, 
         company_uuid: UUID
     ) -> Optional[CompanyWithRelations]:
-        """
-        Get a single company by UUID with all related data.
-        
-        Args:
-            conn: Database connection
-            company_uuid: Company UUID
-            
-        Returns:
-            CompanyWithRelations if found, None otherwise
-        """
+        """Get company by UUID (READ operation - can use replica)"""
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT 
@@ -692,17 +716,7 @@ class DB:
         limit: int = 50, 
         offset: int = 0
     ) -> List[CompanyWithRelations]:
-        """
-        Get all companies with pagination.
-        
-        Args:
-            conn: Database connection
-            limit: Number of companies to return
-            offset: Number of companies to skip
-            
-        Returns:
-            List of CompanyWithRelations
-        """
+        """Get all companies (READ operation - can use replica)"""
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT 
@@ -729,16 +743,7 @@ class DB:
         conn: asyncpg.Connection, 
         user_uuid: UUID
     ) -> CompanyWithRelations | None:
-        """
-        Get all companies belonging to a specific user.
-        
-        Args:
-            conn: Database connection
-            user_uuid: User UUID
-            
-        Returns:
-            List of CompanyWithRelations (Just one due to business rule)
-        """
+        """Get company by user UUID (READ operation - can use replica)"""
         async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
             query = """
                 SELECT 
@@ -779,32 +784,8 @@ class DB:
         image_extension: str,
         force_rollback: bool = False,
     ) -> CompanyRecord:
-        """
-        Create a new company.
-        
-        Args:
-            conn: Database connection
-            company_uuid: Pre-generated UUID for the company
-            user_uuid: Owner's UUID
-            product_uuid: Product category UUID
-            commune_uuid: Location UUID
-            name: Company name
-            description_es: Spanish description
-            description_en: English description
-            address: Physical address
-            phone: Contact phone
-            email: Contact email
-            image_url: Image identifier (UUID)
-            image_extension: Image file extension (.jpg, .png)
-            force_rollback: If True, rollback transaction (for testing)
-            
-        Returns:
-            CompanyRecord of the created company
-            
-        Raises:
-            ValueError: If business rules violated or foreign keys invalid
-        """
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, force_rollback=force_rollback):
+        """Create a company (WRITE operation - uses primary)"""
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=False, force_rollback=force_rollback):
             existing_company = await conn.fetchval(
                 "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
                 user_uuid
@@ -874,23 +855,8 @@ class DB:
         product_uuid: Optional[UUID] = None,
         commune_uuid: Optional[UUID] = None
     ) -> CompanyRecord:
-        """
-        Update an existing company.
-        
-        Args:
-            conn: Database connection
-            company_uuid: Company UUID to update
-            user_uuid: User UUID (for ownership verification)
-            (all other args): Optional fields to update
-            
-        Returns:
-            CompanyRecord with updated data
-            
-        Raises:
-            ValueError: If company not found or invalid data
-            PermissionError: If user doesn't own the company
-        """
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED):
+        """Update company (WRITE operation - uses primary)"""
+        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=False):
             owner_check = await conn.fetchval(
                 "SELECT user_uuid FROM proveo.companies WHERE uuid=$1", 
                 company_uuid
@@ -992,25 +958,10 @@ class DB:
         company_uuid: UUID, 
         user_uuid: UUID
     ) -> CompanyDeleteResponse:
-        """
-        Delete a company (soft delete to companies_deleted table).
-        Also schedules image deletion from storage.
-        
-        Args:
-            conn: Database connection
-            company_uuid: Company UUID to delete
-            user_uuid: User UUID (for ownership verification)
-            
-        Returns:
-            CompanyDeleteResponse with deletion details
-            
-        Raises:
-            ValueError: If company not found
-            PermissionError: If user doesn't own the company
-        """
+        """Delete company (WRITE operation - uses primary)"""
         deleted_image: str | None = None
         
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
             company_query = """
                 SELECT 
                     uuid, user_uuid, product_uuid, commune_uuid,
@@ -1117,24 +1068,10 @@ class DB:
         conn: asyncpg.Connection, 
         company_uuid: UUID
     ) -> CompanyDeleteResponse:
-        """
-        Admin-level company deletion (bypasses ownership check).
-        
-        Args:
-            conn: Database connection
-            company_uuid: Company UUID to delete
-            
-        Returns:
-            CompanyDeleteResponse with deletion details
-            
-        Raises:
-            ValueError: If company not found
-            
-        Note: Caller must verify admin role before calling this function
-        """
+        """Admin delete company (WRITE operation - uses primary)"""
         deleted_image_path: Optional[str] = None
 
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE):
+        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
             company_query = """
                 SELECT 
                     uuid, user_uuid, product_uuid, commune_uuid,
@@ -1180,9 +1117,8 @@ class DB:
             image_url = company.get("image_url")
             image_ext = company.get("image_extension")
             if image_url and image_ext:
-
                 image_id = image_url.split("/")[-1].replace(image_ext, "")
-                deleted_image_path= f"{image_id}{image_ext}"
+                deleted_image_path = f"{image_id}{image_ext}"
 
         if deleted_image_path:
             try:
@@ -1233,21 +1169,7 @@ class DB:
         limit: int = 20,
         offset: int = 0
     ) -> List[CompanySearchResponse]:
-        """
-        Search companies using materialized view with trigram similarity.
-        
-        Args:
-            conn: Database connection
-            query: Search text
-            lang: Language for response ('es' or 'en')
-            commune: Optional commune filter
-            product: Optional product filter
-            limit: Max results to return
-            offset: Results to skip (pagination)
-            
-        Returns:
-            List of CompanySearchResponse objects
-        """
+        """Search companies (READ operation - can use replica)"""
         search = (query or "").strip().lower()
         params: List = []
 

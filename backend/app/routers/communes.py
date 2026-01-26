@@ -1,11 +1,10 @@
+```python
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from uuid import UUID
-
 import asyncpg
 import structlog
-
-from app.database.connection import get_db
+from app.database.connection import get_db_read, get_db_write
 from app.database.transactions import DB
 from app.auth.dependencies import verify_csrf, require_admin
 from app.schemas.communes import CommuneCreate, CommuneUpdate, CommuneResponse
@@ -23,7 +22,7 @@ router = APIRouter(
 @router.get("/", response_model=List[CommuneResponse])
 @cache_response(key_prefix="communes:all", ttl=259200)
 async def list_communes(
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_read),
 ):
     communes = await DB.get_all_communes(conn=db)
     return communes
@@ -38,7 +37,7 @@ async def list_communes(
 async def create_commune(
     commune_data: CommuneCreate,
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf),
 ):
     try:
@@ -46,14 +45,10 @@ async def create_commune(
             conn=db,
             name=commune_data.name,
         )
-
         await cache_manager.invalidate_communes()
-
         return commune
-
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-
     except Exception as e:
         logger.error("create_commune_error", error=str(e), exc_info=True)
         raise HTTPException(
@@ -71,7 +66,7 @@ async def update_commune(
     commune_uuid: UUID,
     commune_data: CommuneUpdate,
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf),
 ):
     try:
@@ -80,14 +75,10 @@ async def update_commune(
             commune_uuid=commune_uuid,
             name=commune_data.name,
         )
-
         await cache_manager.invalidate_communes()
-
         return commune
-
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
     except Exception as e:
         logger.error("update_commune_error", error=str(e), exc_info=True)
         raise HTTPException(
@@ -104,7 +95,7 @@ async def update_commune(
 async def delete_commune(
     commune_uuid: UUID,
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf),
 ):
     try:
@@ -112,28 +103,24 @@ async def delete_commune(
             conn=db,
             commune_uuid=commune_uuid,
         )
-
         await cache_manager.invalidate_communes()
-
         logger.info(
             "commune_deleted_successfully",
             commune_uuid=str(commune.uuid),
             commune_name=commune.name,
             admin_email=current_user["email"],
         )
-
         return {
             "message": "Commune successfully deleted",
             "uuid": commune.uuid,
             "name": commune.name,
         }
-
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
     except Exception as e:
         logger.error("commune_delete_unexpected_error", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete commune",
         )
+```

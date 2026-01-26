@@ -18,7 +18,7 @@ import uuid
 import structlog
 from io import BytesIO
 
-from app.database.connection import get_db
+from app.database.connection import get_db_read, get_db_write
 from app.database.transactions import DB
 from app.auth.dependencies import (
     require_verified_email,
@@ -150,7 +150,7 @@ async def search_companies(
     lang: str = Query("es", pattern="^(es|en)$", description="Response language"),
     limit: int = Query(20, ge=1, le=100, description="Results per page"),
     offset: int = Query(0, ge=0, description="Results to skip"),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_read),
 ):
     """Search companies with optional filters."""
     try:
@@ -190,7 +190,7 @@ async def search_companies(
 )
 async def get_my_company(
     current_user: dict = Depends(get_current_user),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_read),
 ):
     """Get the current user's company."""
     user_uuid = UUID(current_user["sub"])
@@ -225,7 +225,7 @@ async def get_my_company(
 )
 async def get_company(
     company_uuid: UUID,
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_read),
 ):
     """Get a company by its UUID (public endpoint)."""
     try:
@@ -269,7 +269,7 @@ async def create_company(
     image: UploadFile = File(..., description="Company logo (required)"),
     lang: str = Form("es", description="Primary language"),
     current_user: dict = Depends(require_verified_email),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf),
 ):
     """Create a new company for the current user."""
@@ -396,7 +396,7 @@ async def update_my_company(
     image: Optional[UploadFile] = File(None, description="Company logo"),
     lang: Optional[str] = Form(None, description="Primary language"),
     current_user: dict = Depends(require_verified_email),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf),
 ):
     """Update the current user's company. Only provided fields are updated."""
@@ -575,7 +575,7 @@ async def update_my_company(
 )
 async def delete_my_company(
     current_user: dict = Depends(require_verified_email),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf),
 ):
     """Delete the current user's company."""
@@ -621,7 +621,7 @@ async def admin_list_companies(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_read),
 ):
     """List all companies (Admin only)."""
     try:
@@ -655,7 +655,7 @@ async def admin_list_companies(
 async def admin_delete_company(
     company_uuid: UUID,
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf),
 ):
     """Delete any company by UUID (Admin only)."""

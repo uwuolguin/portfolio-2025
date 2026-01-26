@@ -1,7 +1,9 @@
 #!/bin/bash
 
+# =============================================================================
 # Cleanup script for k3s deployment
 # WARNING: This will delete all data!
+# =============================================================================
 
 echo "=================================="
 echo "Portfolio k3s Cleanup Script"
@@ -22,7 +24,7 @@ fi
 
 echo ""
 echo "Deleting namespace and all resources..."
-kubectl delete namespace portfolio --wait=true
+kubectl delete namespace portfolio --wait=true --timeout=120s || true
 
 echo ""
 echo "Cleanup complete!"

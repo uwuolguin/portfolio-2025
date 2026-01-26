@@ -1,10 +1,11 @@
+```python
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from uuid import UUID
 import asyncpg
 import structlog
 
-from app.database.connection import get_db
+from app.database.connection import get_db_read, get_db_write
 from app.database.transactions import DB
 from app.schemas.products import ProductCreate, ProductUpdate, ProductResponse
 from app.auth.dependencies import require_admin, verify_csrf
@@ -23,7 +24,7 @@ router = APIRouter(
 @router.get("/", response_model=List[ProductResponse])
 @cache_response(key_prefix="products:all", ttl=259200)
 async def list_products(
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db_read)
 ):
     products = await DB.get_all_products(conn=db)
     return products
@@ -38,7 +39,7 @@ async def list_products(
 async def create_product(
     product_data: ProductCreate,
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf)
 ):
     try:
@@ -68,6 +69,7 @@ async def create_product(
             detail="Failed to create product"
         )
 
+
 @router.put(
     "/{product_uuid}/use-postman-or-similar-to-bypass-csrf",
     response_model=ProductResponse,
@@ -77,7 +79,7 @@ async def update_product(
     product_uuid: UUID,
     product_data: ProductUpdate,
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf)
 ):
     try:
@@ -107,6 +109,8 @@ async def update_product(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update product"
         )
+
+
 @router.delete(
     "/{product_uuid}/use-postman-or-similar-to-bypass-csrf",
     status_code=status.HTTP_200_OK,
@@ -115,7 +119,7 @@ async def update_product(
 async def delete_product(
     product_uuid: UUID,
     current_user: dict = Depends(require_admin),
-    db: asyncpg.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db_write),
     _: None = Depends(verify_csrf)
 ):
     try:
@@ -145,3 +149,4 @@ async def delete_product(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete product"
         )
+```

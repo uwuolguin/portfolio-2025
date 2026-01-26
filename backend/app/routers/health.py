@@ -1,11 +1,11 @@
+```python
 from fastapi import APIRouter, Depends, status
 from typing import Any
 from datetime import datetime
 import asyncpg
 import structlog
-
 from app.config import settings
-from app.database.connection import pool_manager, get_db
+from app.database.connection import pool_manager, get_db_read
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/health", tags=["health"])
@@ -26,7 +26,7 @@ async def basic_health() -> dict[str, Any]:
 
 @router.get("/database")
 async def database_health(
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db_read)
 ) -> dict[str, Any]:
     """
     Database health check - verifies connection pool and basic query.
@@ -34,14 +34,16 @@ async def database_health(
     """
     try:
         await db.fetchval("SELECT 1")
-        pool_size = pool_manager.write_pool.get_size() if pool_manager.write_pool else 0
-        
+        write_pool_size = pool_manager.write_pool.get_size() if pool_manager.write_pool else 0
+        read_pool_size = pool_manager.read_pool.get_size() if pool_manager.read_pool else 0
         return {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
             "pool": {
-                "size": pool_size,
-                "max_size": settings.db_pool_max_size
+                "write_size": write_pool_size,
+                "read_size": read_pool_size,
+                "max_size": settings.db_pool_max_size,
+                "replica_available": pool_manager.replica_available
             }
         }
     except Exception as e:
@@ -51,3 +53,4 @@ async def database_health(
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
         }
+```

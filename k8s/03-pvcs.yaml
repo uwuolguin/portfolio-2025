@@ -4,6 +4,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: postgres-primary-data
   namespace: portfolio
+  labels:
+    app: postgres-primary
 spec:
   accessModes:
     - ReadWriteOnce
@@ -17,6 +19,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: postgres-replica-data
   namespace: portfolio
+  labels:
+    app: postgres-replica
 spec:
   accessModes:
     - ReadWriteOnce
@@ -30,6 +34,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: redis-data
   namespace: portfolio
+  labels:
+    app: redis
 spec:
   accessModes:
     - ReadWriteOnce
@@ -43,6 +49,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: minio-data
   namespace: portfolio
+  labels:
+    app: minio
 spec:
   accessModes:
     - ReadWriteOnce

@@ -5,11 +5,13 @@ Centralized settings management using pydantic-settings.
 All sensitive values should be loaded from environment variables.
 
 SECURITY NOTE: Never commit .env files with real credentials!
+
+UPDATED: Added database_url_primary and database_url_replica for read/write splitting
 """
 
 from typing import Optional, List, Dict, Set
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,10 +23,36 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------------
-    # Database
+    # Database - Primary (Writes)
     # ------------------------------------------------------------------------
-    database_url: str
-    alembic_database_url: str
+    database_url: str  # Legacy - used as primary
+    alembic_database_url: str  # For migrations - always points to primary
+    
+    # Optional explicit URLs (if not set, derived from database_url)
+    database_url_primary: Optional[str] = None
+    database_url_replica: Optional[str] = None
+    
+    @computed_field
+    @property
+    def effective_database_url_primary(self) -> str:
+        """Get the primary database URL for writes"""
+        if self.database_url_primary:
+            return self.database_url_primary
+        # Default: use database_url as primary
+        return self.database_url
+    
+    @computed_field  
+    @property
+    def effective_database_url_replica(self) -> str:
+        """Get the replica database URL for reads"""
+        if self.database_url_replica:
+            return self.database_url_replica
+        # Default: derive replica URL from primary by replacing host
+        # This assumes postgres-primary -> postgres-replica naming
+        primary_url = self.effective_database_url_primary
+        return primary_url.replace("postgres-primary", "postgres-replica")
+    
+    # Pool settings
     db_pool_min_size: int = 5
     db_pool_max_size: int = 20
     db_pool_max_queries: int = 50_000
@@ -136,4 +164,19 @@ class Settings(BaseSettings):
     api_base_url: str = "http://localhost"
 
 
-settings = Settings()
+# Create a property-based wrapper for backward compatibility
+class SettingsWrapper:
+    """Wrapper to provide computed properties as regular attributes"""
+    
+    def __init__(self):
+        self._settings = Settings()
+    
+    def __getattr__(self, name):
+        if name == "database_url_primary":
+            return self._settings.effective_database_url_primary
+        elif name == "database_url_replica":
+            return self._settings.effective_database_url_replica
+        return getattr(self._settings, name)
+
+
+settings = SettingsWrapper()
