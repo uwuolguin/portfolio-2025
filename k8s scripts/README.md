@@ -3,13 +3,12 @@
 Complete Kubernetes (k3s) deployment for the Portfolio application with PostgreSQL read replica and load-balanced image service.
 
 ## 🚀 Quick Start
-
 ```bash
-# 1. Build and push images (or use local registry)
-./build-and-push.sh registry.example.com/portfolio
+# 1. Build and import images to k3s (no registry needed)
+./build-and-import-k3s.sh
 
 # 2. Deploy everything
-./deploy.sh registry.example.com/portfolio
+./deploy-k3s-local.sh
 
 # 3. Create admin user
 kubectl exec -n portfolio deployment/backend -- \
@@ -17,8 +16,23 @@ kubectl exec -n portfolio deployment/backend -- \
 
 # 4. Access application
 kubectl get svc nginx -n portfolio
-# Visit http://<LOADBALANCER-IP>
+# Visit http://<NODE-IP>:<NODEPORT>
 ```
+
+## 📦 Local Image Workflow
+
+This deployment uses **local images** imported directly into k3s - no external registry required.
+
+### Images Used
+- **Custom (built locally):**
+  - `portfolio-postgres:latest` - Custom Postgres with SSL & pg_cron
+  - `portfolio-backend:latest` - FastAPI application
+  - `portfolio-image-service:latest` - Image processing service
+  - `portfolio-nginx:latest` - Web server + frontend
+  
+- **Public (pulled automatically):**
+  - `redis:7-alpine`
+  - `minio/minio:latest`
 
 ## 📁 Files Structure
 
