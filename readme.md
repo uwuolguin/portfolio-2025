@@ -106,12 +106,12 @@ docker compose exec backend python -m scripts.database.seed_test_data
 docker compose exec backend pytest app/tests/ -v
 
 # 5. Access application
-# Frontend: http://localhost
+# Frontend: http://localhost/front-page/front-page.html
 # API Docs: http://localhost/docs
 
 
 Kubernetes (Production Deployment)
-See Kubernetes Deployment Guide for full k3s setup, manifests, and production configuration.
+See Kubernetes Deployment Guide for full k3s setup, manifests, and production configuration in the folders k8s/ and k8s scripts/.
 
 ## 🏗️ Architecture
 
@@ -243,7 +243,6 @@ docker compose exec backend pytest app/tests/ -v
 - **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** - Full k8s setup, scaling, monitoring
 - **API Docs (Swagger)**: http://localhost/docs
 - **API Docs (ReDoc)**: http://localhost/redoc
-http://localhost/front-page/front-page.html
 ---
 
 ## 🎓 Learning Highlights
