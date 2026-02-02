@@ -17,6 +17,41 @@
 
 ---
 
+## 🚀 Quick Start
+
+### Docker Compose (Recommended for Demo)
+
+```bash
+# 1. Clone repository at stable commit
+git clone https://github.com/uwuolguin/portfolio-2025.git
+cd proveo
+git checkout 4d5cadd4348797a3d9ee48f6ab2fd3cf08b4794b
+
+# 2. Start all services (wait for image-service to finish loading)
+docker compose up --build
+
+# Wait until you see image-service logs showing "healthy" or repeated output
+# Then in a new terminal:
+
+# 3. Initialize database and seed data
+docker compose exec backend alembic upgrade head
+docker compose exec backend python -m scripts.database.manage_search_refresh_cron
+docker compose exec backend python -m scripts.database.seed_test_data
+
+# 4. Verify with tests (optional)
+docker compose exec backend pytest app/tests/ -v
+
+# 5. Access application
+# Frontend: http://localhost/front-page/front-page.html
+# API Docs: http://localhost/docs
+```
+
+### Kubernetes (Production Deployment)
+
+See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s setup, manifests, and production configuration in the folders `k8s/` and `k8s scripts/`.
+
+---
+
 ## ✨ Key Technical Achievements
 
 ### 🏗️ **Architecture & Infrastructure**
@@ -51,7 +86,7 @@
 - **NSFW detection** - OpenNSFW2 model (TensorFlow 2.15)
 - **Image validation** - Format, size, dimension checks
 - **Automatic translation** - Google Translate API with fallback
-- **NSFW detection** - AI/ML-powered content moderation (blocks uploads on model failure)
+- **Content moderation** - AI-powered blocking on model failure (fail-closed)
 
 ---
 
@@ -83,35 +118,7 @@
 - **LocalStorage** - Client-side state
 - **Responsive CSS** - Mobile-first design
 
-🚀 Quick Start
-
-Docker Compose (Recommended for Demo)
-bash# 1. Clone repository at stable commit
-git clone https://github.com/uwuolguin/portfolio-2025.git
-cd proveo
-git checkout 4d5cadd4348797a3d9ee48f6ab2fd3cf08b4794b
-
-# 2. Start all services (wait for image-service to finish loading)
-docker compose up --build
-
-# Wait until you see image-service logs showing "healthy" or repeated output
-# Then in a new terminal:
-
-# 3. Initialize database and seed data
-docker compose exec backend alembic upgrade head
-docker compose exec backend python -m scripts.database.manage_search_refresh_cron
-docker compose exec backend python -m scripts.database.seed_test_data
-
-# 4. Verify with tests (optional)
-docker compose exec backend pytest app/tests/ -v
-
-# 5. Access application
-# Frontend: http://localhost/front-page/front-page.html
-# API Docs: http://localhost/docs
-
-
-Kubernetes (Production Deployment)
-See Kubernetes Deployment Guide for full k3s setup, manifests, and production configuration in the folders k8s/ and k8s scripts/.
+---
 
 ## 🏗️ Architecture
 
@@ -128,34 +135,6 @@ Internet → Load Balancer (nginx)
 PostgreSQL  Redis        MinIO    pg_cron
 Primary/Replica
 ```
-
-### Database Read/Write Splitting
-```python
-# Automatic routing based on operation type
-from app.database.connection import get_db_read, get_db_write
-
-# READ operations → Replica (fallback to Primary)
-@router.get("/items")
-async def list_items(db = Depends(get_db_read)):
-    return await DB.get_all_items(conn=db)
-
-# WRITE operations → Primary only
-@router.post("/items")
-async def create_item(db = Depends(get_db_write)):
-    return await DB.create_item(conn=db, ...)
-```
-
-### Kubernetes Resource Distribution
-| Service | Replicas | CPU | Memory | Storage |
-|---------|----------|-----|--------|---------|
-| Nginx | 1 | 100m | 128Mi | - |
-| Backend | 2 | 250m | 512Mi | - |
-| Image Service | 2 | 500m | 1Gi | - |
-| PostgreSQL Primary | 1 | 500m | 512Mi | 10Gi |
-| PostgreSQL Replica | 1 | 250m | 512Mi | 10Gi |
-| Redis | 1 | 100m | 128Mi | 1Gi |
-| MinIO | 1 | 250m | 256Mi | 20Gi |
-| **Total** | **9 pods** | **2.2 cores** | **4.5GB** | **41GB** |
 
 ---
 
@@ -194,46 +173,59 @@ async def create_item(db = Depends(get_db_write)):
 
 ```
 proveo/
-├── backend/               # FastAPI application
+├── backend/                      # FastAPI application
 │   ├── app/
-│   │   ├── database/     # Read/write pools, transactions
-│   │   ├── routers/      # API endpoints
-│   │   ├── auth/         # JWT + CSRF
-│   │   ├── services/     # Image processing, email
-│   │   └── schemas/      # Pydantic models
-│   ├── alembic/          # Database migrations
-│   └── scripts/          # Admin tools, seeding
+│   │   ├── database/            # Read/write pools, transactions
+│   │   ├── routers/             # API endpoints
+│   │   ├── auth/                # JWT + CSRF
+│   │   ├── services/            # Image processing, email
+│   │   ├── schemas/             # Pydantic models
+│   │   ├── middleware/          # CORS, logging, security
+│   │   ├── redis/               # Cache, rate limiting
+│   │   ├── templates/           # Email HTML templates
+│   │   ├── utils/               # Validators, exceptions
+│   │   └── tests/               # Pytest test suite
+│   ├── alembic/                 # Database migrations
+│   └── scripts/                 # Admin tools, seeding, maintenance
 │
-├── image-service/        # NSFW detection microservice
-│   ├── main.py           # FastAPI + TensorFlow
-│   └── image_validator.py
+├── image-service/               # NSFW detection microservice
+│   ├── main.py                  # FastAPI + TensorFlow
+│   ├── image_validator.py       # Image processing logic
+│   └── config.py                # Service configuration
 │
-├── k8s/                  # Kubernetes manifests
+├── k8s/                         # Kubernetes manifests
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-secrets.yaml
+│   ├── 03-pvcs.yaml
 │   ├── 04-postgres-primary.yaml
 │   ├── 05-postgres-replica.yaml
-│   ├── 08-image-service.yaml (2 replicas)
-│   └── 09-backend.yaml (2 replicas)
+│   ├── 06-redis.yaml
+│   ├── 07-minio.yaml
+│   ├── 08-image-service.yaml    # 2 replicas
+│   ├── 09-backend.yaml          # 2 replicas
+│   └── 10-nginx.yaml
 │
-├── nginx/                # Reverse proxy + frontend
-├── postgres/             # Custom PostgreSQL image
-└── docker-compose.yml    # Local development
-```
-
----
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-docker compose exec backend pytest app/tests/ -v
-
-# Key test suites:
-# - User authentication flow
-# - Company CRUD operations
-# - Database replication verification
-# - Image upload with NSFW detection
-# - Materialized view refresh
-# - Orphan image cleanup
+├── k8s scripts/                 # Deployment automation
+│   ├── build-and-import-k3s.sh
+│   ├── deploy-k8s-local.sh
+│   ├── cleanup.sh
+│   └── README.md                # K8s deployment guide
+│
+├── nginx/                       # Reverse proxy + frontend
+│   ├── nginx.conf
+│   ├── Dockerfile
+│   └── frontend/                # Static files
+│
+├── postgres/                    # Custom PostgreSQL image
+│   ├── Dockerfile
+│   ├── init-db.sh
+│   ├── init-ssl.sh
+│   └── init-pgpass.sh
+│
+├── docker-compose.yml           # Local development
+├── .env.example                 # Environment template
+└── README.md                    # This file
 ```
 
 ---
@@ -243,6 +235,7 @@ docker compose exec backend pytest app/tests/ -v
 - **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** - Full k8s setup, scaling, monitoring
 - **API Docs (Swagger)**: http://localhost/docs
 - **API Docs (ReDoc)**: http://localhost/redoc
+
 ---
 
 ## 🎓 Learning Highlights
@@ -263,9 +256,9 @@ This project demonstrates:
 ## 🤝 Contact
 
 **Andrés Olguín**  
-Email: your.email@example.com  
-LinkedIn: [linkedin.com/in/yourprofile](#)  
-GitHub: [github.com/yourusername](#)
+Email: acos2014600836@gmail.com  
+LinkedIn: https://www.linkedin.com/in/uwuolguin/  
+GitHub: https://github.com/uwuolguin/
 
 ---
 
