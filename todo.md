@@ -1,7 +1,5 @@
-Kubernetes deployment: create manifests/helm, test in k8s
-
-README: update to reflect final deployment and operation details, and more importantly,add a coment at the start remembering the reader that they have to DELETE THE ADMIN BYPASS LOGIC IN THE CSRF TOKEN VERIFICATION PROCESS IN ANY PRODUCTION IMPLEMENTATION THIS COULD BE USED.
-
+read for the last time the k8s and k8s/Scripts files, and also the connection.py, the transactions.py and the routers.
+test the k8s deployments in the same way you tested the docker compose
 
 Record a pitch
 
