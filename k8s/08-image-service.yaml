@@ -39,8 +39,8 @@ spec:
     spec:
       containers:
         - name: image-service
-          image: your-registry/image-service:latest  # UPDATE THIS
-          imagePullPolicy: Always
+          image: portfolio-image-service:latest
+          imagePullPolicy: Never  # Use locally imported image
           ports:
             - containerPort: 8080
               name: http

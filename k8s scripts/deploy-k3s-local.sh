@@ -2,13 +2,11 @@
 set -e
 
 # =============================================================================
-# Portfolio k3s Deployment Script
+# Portfolio k3s Deployment Script (Local Images)
 # =============================================================================
-# Usage: ./deploy.sh [registry-prefix]
-# Example: ./deploy.sh registry.example.com/portfolio
+# Prerequisites: Run ./build-and-import-k3s.sh first
 # =============================================================================
 
-REGISTRY_PREFIX="${1:-your-registry}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 K8S_DIR="${SCRIPT_DIR}/k8s"
 
@@ -16,7 +14,7 @@ echo "=================================="
 echo "Portfolio k3s Deployment Script"
 echo "=================================="
 echo ""
-echo "Registry prefix: $REGISTRY_PREFIX"
+echo "Using locally imported images"
 echo "K8s manifests: $K8S_DIR"
 echo ""
 
@@ -51,20 +49,26 @@ if ! kubectl cluster-info &> /dev/null; then
     exit 1
 fi
 
-log_success "Prerequisites OK"
-echo ""
-
-# Update image references in manifests
-log_info "Updating image references in manifests..."
-cd "$K8S_DIR"
-for file in 08-image-service.yaml 09-backend.yaml 10-nginx.yaml; do
-    if [ -f "$file" ]; then
-        sed -i.bak "s|your-registry/|${REGISTRY_PREFIX}/|g" "$file"
-        rm -f "${file}.bak"
-        log_success "Updated $file"
+# Verify images are imported
+log_info "Verifying images are imported to k3s..."
+MISSING_IMAGES=()
+for img in portfolio-backend:latest portfolio-image-service:latest portfolio-nginx:latest; do
+    if ! sudo k3s ctr images ls | grep -q "$img"; then
+        MISSING_IMAGES+=("$img")
     fi
 done
-cd "$SCRIPT_DIR"
+
+if [ ${#MISSING_IMAGES[@]} -gt 0 ]; then
+    log_error "Missing images in k3s:"
+    for img in "${MISSING_IMAGES[@]}"; do
+        echo "  - $img"
+    done
+    echo ""
+    log_error "Run './build-and-import-k3s.sh' first to import images"
+    exit 1
+fi
+
+log_success "All required images found in k3s"
 echo ""
 
 # Generate secure secrets

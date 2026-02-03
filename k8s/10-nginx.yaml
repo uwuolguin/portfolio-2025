@@ -195,8 +195,8 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: your-registry/nginx:latest  # UPDATE THIS - nginx with frontend built in
-          imagePullPolicy: Always
+          image: portfolio-nginx:latest
+          imagePullPolicy: Never  # Use locally imported image
           ports:
             - containerPort: 80
               name: http

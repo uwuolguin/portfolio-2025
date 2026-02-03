@@ -277,7 +277,7 @@ kubectl delete namespace portfolio
 
 ---
 
-## 🎓 Learning Points
+## 🎓 Learning Highlights
 
 1. **StatefulSets**: Used for postgres-primary and postgres-replica (stable network identity)
 2. **Deployments**: Used for stateless services (backend, image-service)

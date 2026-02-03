@@ -93,7 +93,8 @@ spec:
         
         # Run database migrations (always against primary)
         - name: migrate
-          image: your-registry/backend:latest  # UPDATE THIS
+          image: portfolio-backend:latest
+          imagePullPolicy: Never  # Use locally imported image
           command:
             - sh
             - -c
@@ -114,8 +115,8 @@ spec:
                 name: portfolio-secrets
       containers:
         - name: backend
-          image: your-registry/backend:latest  # UPDATE THIS
-          imagePullPolicy: Always
+          image: portfolio-backend:latest
+          imagePullPolicy: Never  # Use locally imported image
           ports:
             - containerPort: 8000
               name: http
