@@ -25,10 +25,22 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_info() {
+  printf '%b\n' "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+  printf '%b\n' "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warn() {
+  printf '%b\n' "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+  printf '%b\n' "${RED}[ERROR]${NC} $1"
+}
+
 
 # Check prerequisites
 log_info "Checking prerequisites..."
