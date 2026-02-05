@@ -8,7 +8,7 @@ set -e
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-K8S_DIR="${SCRIPT_DIR}/k8s"
+K8S_DIR="$(dirname "$SCRIPT_DIR")/k8s"
 
 echo "=================================="
 echo "Portfolio k3s Deployment Script"
