@@ -11,6 +11,11 @@ Everything runs locally on k3s with no external registry needed.
 ## 🚀 Quick Start
 
 ```bash
+# 0. Install k3s (first time only)
+cd "k8s scripts"
+chmod +x 00-install-k3s.sh
+./00-install-k3s.sh
+
 # 1. Build and import images to k3s
 ./build-and-import-k3s.sh
 
