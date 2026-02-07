@@ -11,7 +11,6 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 K8S_DIR="$(dirname "$SCRIPT_DIR")/k8s"
-CLUSTER_NAME="portfolio-k3s"
 
 echo "=================================="
 echo "Portfolio k3s Deployment Script"
@@ -19,7 +18,6 @@ echo "=================================="
 echo ""
 echo "Using locally imported images"
 echo "K8s manifests: $K8S_DIR"
-echo "Target cluster: $CLUSTER_NAME"
 echo ""
 
 # Colors
@@ -146,7 +144,7 @@ if ! command -v openssl &> /dev/null; then
     exit 1
 fi
 
-# Check k3s connectivity and cluster name
+# Check k3s connectivity
 log_info "Verifying Kubernetes cluster connection..."
 
 if ! kubectl cluster-info &> /dev/null; then
@@ -156,20 +154,8 @@ if ! kubectl cluster-info &> /dev/null; then
     exit 1
 fi
 
-# Verify we're connected to the right cluster
 CURRENT_CLUSTER=$(kubectl config current-context 2>/dev/null || echo "unknown")
-if [ "$CURRENT_CLUSTER" != "$CLUSTER_NAME" ]; then
-    log_warn "Connected to cluster: $CURRENT_CLUSTER"
-    log_warn "Expected cluster: $CLUSTER_NAME"
-    echo ""
-    read -p "Continue anyway? (yes/no): " confirm
-    if [ "$confirm" != "yes" ]; then
-        echo "Deployment cancelled"
-        exit 1
-    fi
-else
-    log_success "Connected to cluster: $CURRENT_CLUSTER"
-fi
+log_success "Connected to cluster: $CURRENT_CLUSTER"
 echo ""
 
 # Verify images are imported
