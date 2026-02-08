@@ -14,7 +14,7 @@ A Kubernetes (k3s) deployment showcasing:
 - **CPU**: 2 AMD CPUs
 - **Disk**: 60 GB NVMe SSD
 - **Transfer**: 3 TB
-- **OS**: Ubuntu 24.04 (recommended)
+- **OS**: Ubuntu 24.04 (recommended — many DigitalOcean Marketplace 1-Click Apps are built on Ubuntu, and for a simple app like this, Ubuntu is widespread and low-friction. [Reference](https://docs.digitalocean.com/products/marketplace/droplet-1-click-apps/))
 
 ---
 
