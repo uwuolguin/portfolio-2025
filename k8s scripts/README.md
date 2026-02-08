@@ -1,35 +1,160 @@
-# Portfolio K8s Demo - PostgreSQL Replica + Load-Balanced Image Service
+# Portfolio K8s - DigitalOcean Droplet Deployment
 
-A minimal Kubernetes (k3s) demo showcasing:
-- **PostgreSQL Primary + Read Replica** - Demonstrates database replication
-- **2x Image Service Instances** - Shows load balancing with NSFW detection
+A Kubernetes (k3s) deployment showcasing:
+- **PostgreSQL Primary + Read Replica** — Demonstrates database replication
+- **Image Service with NSFW Detection** — TensorFlow-based content moderation
+- **Full stack on a $21/mo droplet** — 2GB RAM + swap, all features enabled
 
-Everything runs locally on k3s with no external registry needed.
+---
+
+## Droplet Specs
+
+- **Plan**: Premium AMD $21/mo
+- **RAM**: 2 GB (+ 2 GB swap added by install script)
+- **CPU**: 2 AMD CPUs
+- **Disk**: 60 GB NVMe SSD
+- **Transfer**: 3 TB
+- **OS**: Ubuntu 24.04 (recommended)
+
+---
+
+## User Setup
+
+All scripts run as a **regular user with sudo privileges** — never as root directly.
+
+```bash
+# If you only have root, create a user first:
+adduser deploy
+usermod -aG sudo deploy
+su - deploy
+```
+
+---
+
+## 📐 Architecture
+
+```
+┌─────────────┐
+│   Nginx     │  ← Single entry point (LoadBalancer)
+│  (1 replica)│
+└──────┬──────┘
+       │
+   ┌───┴────┬─────────┐
+   │        │         │
+┌──▼──┐  ┌─▼──────┐  │
+│Back- │  │Image   │  │
+│end   │  │Service │  │
+│(1x)  │  │(1x)    │  │
+└──┬──┘  └────┬───┘  │
+   │          │      │
+┌──▼──────────▼──┐ ┌─▼────┐
+│PostgreSQL      │ │MinIO │
+│ Primary        │ └──────┘
+└────┬───────────┘
+     │ replication
+┌────▼───────────┐ ┌──────┐
+│PostgreSQL      │ │Redis │
+│ Replica        │ └──────┘
+│ (read-only)    │
+└────────────────┘
+```
+
+**Components:**
+- **Nginx (1x)**: Reverse proxy, static files
+- **Backend (1x)**: FastAPI app, 1 uvicorn worker
+- **Image Service (1x)**: NSFW detection via TensorFlow ⭐
+- **PostgreSQL Primary (1x)**: All writes ⭐
+- **PostgreSQL Replica (1x)**: All reads (streaming replication) ⭐
+- **Redis (1x)**: Cache (64MB maxmemory)
+- **MinIO (1x)**: Object storage for images
+
+---
+
+## What's Different from a Local 4GB+ Setup
+
+| Setting | Local (4GB+) | Droplet (2GB) |
+|---------|-------------|---------------|
+| Backend replicas | 2 | **1** |
+| Image service replicas | 2 | **1** |
+| NSFW detection | Enabled | **Enabled** |
+| Backend workers | 2 | **1** |
+| PG shared_buffers | 256MB | **128MB** |
+| PG replica shared_buffers | 256MB | **64MB** |
+| Redis maxmemory | 256MB | **64MB** |
+| DB pool size | 5-20 | **2-8** |
+| Swap | None | **2GB** |
 
 ---
 
 ## 🚀 Quick Start
 
+### 1. Create Droplet & SSH In
 ```bash
-# 0. Install k3s (first time only)
+ssh deploy@YOUR_DROPLET_IP
+# or ssh root, then create a user (see User Setup above)
+```
+
+### 2. Clone Repo
+```bash
+git clone https://github.com/uwuolguin/portfolio-2025.git
+cd portfolio-2025
+```
+
+### 3. Install k3s + Docker
+```bash
 cd "k8s scripts"
-chmod +x 00-install-k3s.sh
+chmod +x *.sh
 ./00-install-k3s.sh
 
-# 1. Build and import images to k3s
+# After install, activate docker group:
+newgrp docker
+```
+
+### 4. Build Images on Droplet
+```bash
 ./build-and-import-k3s.sh
+```
+> ⚠️ This takes 10-20 min on 2 CPUs. The image-service (TensorFlow wheels) is the slowest.
 
-# 2. Deploy everything
+### 5. Deploy
+```bash
 ./deploy-k3s-local.sh
+```
 
-# 3. Create admin user
-kubectl exec -n portfolio deployment/backend -- \
+### 6. Post-Deploy
+```bash
+# Create admin user
+kubectl exec -it -n portfolio deployment/backend -- \
   python -m scripts.admin.create_admin
 
-# 4. Get access URL
-kubectl get svc nginx -n portfolio
-# Visit http://<NODE-IP>:<NODEPORT>
+# Seed test data (optional)
+kubectl exec -n portfolio deployment/backend -- \
+  python -m scripts.database.seed_test_data
+
+# Setup pg_cron for search refresh
+kubectl exec -n portfolio deployment/backend -- \
+  python -m scripts.database.manage_search_refresh_cron
 ```
+
+### 7. Access
+```
+http://YOUR_DROPLET_IP/front-page/front-page.html
+http://YOUR_DROPLET_IP/docs
+http://YOUR_DROPLET_IP/health
+```
+
+---
+
+## What Needs sudo vs What Doesn't
+
+| Command | sudo needed? | Why |
+|---------|-------------|-----|
+| `kubectl ...` | **No** | kubeconfig copied to ~/.kube/config |
+| `docker build` | **No** | user added to docker group |
+| `sudo k3s ctr images import` | **Yes** | k3s containerd is root-owned |
+| Swap/sysctl/apt | **Yes** | system-level operations |
+
+The scripts handle this automatically — you just need a user with sudo access.
 
 ---
 
@@ -53,57 +178,39 @@ kubectl exec -n portfolio postgres-replica-0 -- \
 # Should return: t (true)
 ```
 
-### 2. Load-Balanced Image Service
-- **2 replicas** running NSFW detection models
-- Automatic load distribution via Kubernetes Service
-- Each replica processes images independently
+### 2. Image Service with NSFW Detection
+- TensorFlow model loaded at startup (~500MB)
+- Automatic content moderation on image uploads
+- Runs within swap on 2GB — functional but not fast
 
 ```bash
-# See both image service instances
-kubectl get pods -n portfolio -l app=image-service
+# Check NSFW model status
+kubectl logs -n portfolio deployment/image-service | grep -i nsfw
 
-# Watch load distribution in logs
-kubectl logs -n portfolio -l app=image-service -f --prefix
+# Watch image processing
+kubectl logs -n portfolio deployment/image-service -f
 ```
 
 ---
 
-## 📐 Architecture
+## Memory Budget (NSFW Enabled)
 
 ```
-┌─────────────┐
-│   Nginx     │  <- Single entry point (NodePort)
-│ (LoadBalancer)
-└──────┬──────┘
-       │
-   ┌───┴────┬─────────┐
-   │        │         │
-┌──▼──┐  ┌─▼──────┐  │
-│Backend│ │Image   │  │
-│ (2x) │ │Service │  │
-└──┬──┘  │ (2x)   │  │
-   │     └────┬───┘  │
-   │          │      │
-┌──▼──────────▼──┐ ┌─▼────┐
-│PostgreSQL      │ │MinIO │
-│ Primary        │ └──────┘
-└────┬───────────┘
-     │ replication
-┌────▼───────────┐ ┌──────┐
-│PostgreSQL      │ │Redis │
-│ Replica        │ └──────┘
-│ (read-only)    │
-└────────────────┘
+Component             Request    Limit
+─────────────────────────────────────
+k3s system            ~300MB     -
+PostgreSQL Primary    192MB      384MB
+PostgreSQL Replica    128MB      256MB
+Redis                 32MB       96MB
+MinIO                 128MB      256MB
+Image Service         384MB      768MB  (TensorFlow NSFW)
+Backend               192MB      512MB
+Nginx                 32MB       128MB
+─────────────────────────────────────
+Total Requests        ~1388MB
+Total Limits          ~2400MB (will use swap)
+Available             2048MB RAM + 2048MB swap
 ```
-
-**Components:**
-- Nginx (1x): Reverse proxy
-- Backend (2x): FastAPI app
-- **Image Service (2x)**: NSFW detection, load balanced ⭐
-- **PostgreSQL Primary (1x)**: Writes ⭐
-- **PostgreSQL Replica (1x)**: Reads ⭐
-- Redis (1x): Cache
-- MinIO (1x): Object storage
 
 ---
 
@@ -114,17 +221,8 @@ kubectl logs -n portfolio -l app=image-service -f --prefix
 # All pods
 kubectl get pods -n portfolio -o wide
 
-# Just the key demo components
+# Key demo components
 kubectl get pods -n portfolio -l 'app in (postgres-primary,postgres-replica,image-service)'
-```
-
-### Scale Image Service
-```bash
-# Scale to 4 replicas to see load balancing
-kubectl scale deployment image-service -n portfolio --replicas=4
-
-# Scale back to 2
-kubectl scale deployment image-service -n portfolio --replicas=2
 ```
 
 ### Check Database Activity
@@ -145,26 +243,27 @@ kubectl exec -n portfolio postgres-primary-0 -- \
 
 ### Monitor Logs
 ```bash
-# Backend logs (watch database queries)
+# Backend logs
 kubectl logs -n portfolio deployment/backend -f
 
-# Image service logs (see load distribution)
-kubectl logs -n portfolio deployment/image-service -f --all-containers
+# Image service logs
+kubectl logs -n portfolio deployment/image-service -f
 ```
 
-### Access Services
+### Access Services via Port-Forward
 ```bash
-# Frontend
-kubectl get svc nginx -n portfolio
-# Visit http://<IP>:<PORT>
-
-# API docs (port-forward)
+# API docs
 kubectl port-forward -n portfolio svc/backend 8000:8000
 # Visit http://localhost:8000/docs
 
-# MinIO console (port-forward)
+# MinIO console
 kubectl port-forward -n portfolio svc/minio 9001:9001
 # Visit http://localhost:9001
+```
+
+### Monitor Memory
+```bash
+watch 'free -h && echo && kubectl top pods -n portfolio 2>/dev/null'
 ```
 
 ---
@@ -174,12 +273,12 @@ kubectl port-forward -n portfolio svc/minio 9001:9001
 ### 1. Test Database Replication
 
 ```bash
-# In one terminal - watch replication status
+# Watch replication status
 watch 'kubectl exec -n portfolio postgres-primary-0 -- \
   psql -U postgres -d portfolio -tAc \
   "SELECT state, replay_lag FROM pg_stat_replication;"'
 
-# In another terminal - create test data
+# Create test data on primary
 kubectl exec -n portfolio postgres-primary-0 -- \
   psql -U postgres -d portfolio -c \
   "CREATE TABLE demo_test (id serial, data text, created_at timestamp default now());"
@@ -188,24 +287,50 @@ kubectl exec -n portfolio postgres-primary-0 -- \
   psql -U postgres -d portfolio -c \
   "INSERT INTO demo_test (data) VALUES ('test1'), ('test2'), ('test3');"
 
-# Verify replica received the data (should see same data)
+# Verify replica received the data
 kubectl exec -n portfolio postgres-replica-0 -- \
   psql -U postgres -d portfolio -c \
   "SELECT * FROM demo_test;"
 ```
 
-### 2. Test Image Service Load Balancing
+### 2. Test Image Upload with NSFW Detection
 
 ```bash
-# Upload images and watch which pod handles them
-kubectl logs -n portfolio -l app=image-service -f --prefix
+# Upload images via the API and watch which pod processes them
+kubectl logs -n portfolio deployment/image-service -f
+```
 
-# Use the API to upload company images - you'll see different pods processing
+---
+
+## Scaling Up Later
+
+If you upgrade to a 4GB+ droplet:
+
+```bash
+# Scale to 2 replicas for load balancing demo
+kubectl scale deployment backend -n portfolio --replicas=2
+kubectl scale deployment image-service -n portfolio --replicas=2
+
+# Verify load distribution
+kubectl logs -n portfolio -l app=image-service -f --prefix
 ```
 
 ---
 
 ## 🛠️ Troubleshooting
+
+### OOM Kills
+```bash
+kubectl get events -n portfolio --sort-by=.lastTimestamp | grep -i oom
+free -h
+swapon --show
+```
+
+### Pod Won't Start
+```bash
+kubectl describe pod <pod-name> -n portfolio
+kubectl logs <pod-name> -n portfolio
+```
 
 ### Replica Not Syncing
 ```bash
@@ -229,69 +354,60 @@ kubectl exec -n portfolio deployment/image-service -- \
 kubectl logs -n portfolio deployment/image-service | grep -i nsfw
 ```
 
-### Database Connection Issues
+### kubectl Permission Denied
 ```bash
-# Test primary connectivity
-kubectl exec -n portfolio deployment/backend -- \
-  pg_isready -h postgres-primary -U postgres
-
-# Test replica connectivity
-kubectl exec -n portfolio deployment/backend -- \
-  pg_isready -h postgres-replica -U postgres
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+export KUBECONFIG=~/.kube/config
 ```
 
----
-
-## 🧹 Cleanup
-
+### Clean Restart
 ```bash
-# Remove everything
 ./cleanup.sh
-
-# Or manually
-kubectl delete namespace portfolio
+./deploy-k3s-local.sh
 ```
 
 ---
 
 ## 📋 What's in the Manifests
 
-**Kubernetes Resources:**
-- `00-namespace.yaml` - Creates `portfolio` namespace
-- `01-configmap.yaml` - App configuration
-- `02-secrets.yaml` - Credentials (auto-generated by deploy script)
-- `03-pvcs.yaml` - Persistent storage claims
-- `04-postgres-primary.yaml` - **Primary database** ⭐
-- `05-postgres-replica.yaml` - **Read replica** ⭐
-- `06-redis.yaml` - Cache
-- `07-minio.yaml` - Object storage
-- `08-image-service.yaml` - **2x NSFW detection service** ⭐
-- `09-backend.yaml` - FastAPI app (2x)
-- `10-nginx.yaml` - Load balancer
-
----
-
-## 💡 Notes
-
-- **Local only**: Uses k3s local-path storage
-- **Self-signed SSL**: PostgreSQL certs auto-generated by initContainer
-- **No external registry**: Custom images imported directly to k3s
-- **Official images**: PostgreSQL, Redis, MinIO pulled automatically from Docker Hub
-- **Auto-generated secrets**: Deploy script creates secure passwords
-- **Minimal config**: Just enough to demonstrate replication and load balancing
+| File | Description |
+|------|-------------|
+| `00-namespace.yaml` | Creates `portfolio` namespace |
+| `01-configmap.yaml` | App configuration (reduced pool sizes for 2GB) |
+| `02-secrets.yaml` | Documentation only — secrets auto-generated by deploy script |
+| `03-pvcs.yaml` | Persistent storage (5GB PG, 10GB MinIO, 512MB Redis) |
+| `04-postgres-primary.yaml` | **Primary database** — writes, replication source ⭐ |
+| `05-postgres-replica.yaml` | **Read replica** — streaming replication ⭐ |
+| `06-redis.yaml` | Cache (64MB maxmemory, LRU eviction) |
+| `07-minio.yaml` | Object storage for images |
+| `08-image-service.yaml` | **NSFW detection service** — TensorFlow model ⭐ |
+| `09-backend.yaml` | FastAPI app (1 worker, migrations via initContainer) |
+| `10-nginx.yaml` | Reverse proxy, gzip, rate limiting, security headers |
 
 ---
 
 ## 🎓 Learning Highlights
 
-1. **StatefulSets**: Used for postgres-primary and postgres-replica (stable network identity)
-2. **Deployments**: Used for stateless services (backend, image-service)
+1. **StatefulSets**: Used for postgres-primary and postgres-replica (stable network identity, ordered startup)
+2. **Deployments**: Used for stateless services (backend, image-service, nginx)
 3. **Services**: ClusterIP for internal communication, LoadBalancer for external access
-4. **InitContainers**: Used to wait for dependencies and run migrations
-5. **ConfigMaps/Secrets**: Separate config from code
-6. **PersistentVolumeClaims**: Survive pod restarts
-7. **Liveness/Readiness Probes**: Auto-healing and zero-downtime deployments
+4. **InitContainers**: Wait for dependencies, run migrations, bootstrap replica from primary
+5. **ConfigMaps/Secrets**: Separate config from code, auto-generated credentials
+6. **PersistentVolumeClaims**: Data survives pod restarts
+7. **Liveness/Readiness Probes**: Auto-healing and traffic gating
+8. **Resource Limits**: Memory budgeting for constrained environments
+9. **Swap Management**: Running production-like workloads on minimal hardware
 
 ---
 
-**This is a demo setup** - simplified to show PostgreSQL replication and service load balancing in the clearest way possible.
+## 💡 Notes
+
+- **All features enabled**: NSFW detection, replication, caching — runs slow but complete
+- **Self-signed SSL**: PostgreSQL certs auto-generated by initContainer
+- **No external registry**: Custom images built on-droplet and imported to k3s
+- **Official images**: PostgreSQL, Redis, MinIO pulled from Docker Hub automatically
+- **Auto-generated secrets**: Deploy script creates secure passwords, saves to `.credentials`
+- **Non-root operation**: All scripts use sudo where needed, kubectl runs as regular user
+- **This is a demo setup**: Optimized to show the full stack on minimal hardware

@@ -341,16 +341,16 @@ log_info "Services:"
 kubectl get svc -n portfolio
 echo ""
 
-NODEPORT=$(kubectl get svc nginx -n portfolio -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "80")
+SVC_PORT=80
 
 echo ""
 echo "============================================"
 echo "  ACCESS YOUR APP"
 echo "============================================"
 echo ""
-echo "  Frontend: http://$DROPLET_IP:$NODEPORT/front-page/front-page.html"
-echo "  API Docs: http://$DROPLET_IP:$NODEPORT/docs"
-echo "  Health:   http://$DROPLET_IP:$NODEPORT/health"
+echo "  Frontend: http://$DROPLET_IP/front-page/front-page.html"
+echo "  API Docs: http://$DROPLET_IP/docs"
+echo "  Health:   http://$DROPLET_IP/health"
 echo ""
 echo "============================================"
 echo "  NEXT STEPS"
