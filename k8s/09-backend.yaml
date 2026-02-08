@@ -22,7 +22,10 @@ metadata:
   name: backend
   namespace: portfolio
 spec:
-  replicas: 2
+  # =========================================================================
+  # 1 replica for 2GB droplet - scale to 2 on 4GB+ droplet
+  # =========================================================================
+  replicas: 1
   selector:
     matchLabels:
       app: backend
@@ -37,7 +40,6 @@ spec:
         app: backend
     spec:
       initContainers:
-        # Wait for primary database and run migrations
         - name: wait-for-db
           image: postgres:16-alpine
           env:
@@ -67,13 +69,11 @@ spec:
               done
               echo "Primary database is ready!"
               
-              # Optional: Wait for replica (with timeout)
               echo "Checking if replica is available..."
               REPLICA_TIMEOUT=60
               COUNTER=0
               while [ $COUNTER -lt $REPLICA_TIMEOUT ]; do
                 if PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h postgres-replica -U $POSTGRES_USER 2>/dev/null; then
-                  # Check if it's actually in recovery mode
                   IS_REPLICA=$(PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-replica -U $POSTGRES_USER -d postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "f")
                   if [ "$IS_REPLICA" = "t" ]; then
                     echo "Replica is ready and in recovery mode!"
@@ -90,11 +90,9 @@ spec:
               fi
               
               echo "Database check complete!"
-        
-        # Run database migrations (always against primary)
         - name: migrate
           image: portfolio-backend:latest
-          imagePullPolicy: Never  # Use locally imported image
+          imagePullPolicy: Never
           command:
             - sh
             - -c
@@ -116,7 +114,7 @@ spec:
       containers:
         - name: backend
           image: portfolio-backend:latest
-          imagePullPolicy: Never  # Use locally imported image
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
               name: http
@@ -127,10 +125,10 @@ spec:
             - "0.0.0.0"
             - --port
             - "8000"
+            # 1 worker for 2GB droplet - use 2 on 4GB+
             - --workers
-            - "2"
+            - "1"
           env:
-            # Explicitly set database URLs for read/write splitting
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -160,22 +158,22 @@ spec:
             httpGet:
               path: /api/v1/health/
               port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
+            initialDelaySeconds: 45
+            periodSeconds: 15
             timeoutSeconds: 5
-            failureThreshold: 3
+            failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /api/v1/health/
               port: 8000
-            initialDelaySeconds: 10
-            periodSeconds: 5
+            initialDelaySeconds: 20
+            periodSeconds: 10
             timeoutSeconds: 3
-            failureThreshold: 2
+            failureThreshold: 3
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
+              memory: "192Mi"
+              cpu: "100m"
             limits:
-              memory: "2Gi"
-              cpu: "1000m"
+              memory: "512Mi"
+              cpu: "500m"

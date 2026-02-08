@@ -7,7 +7,7 @@ metadata:
 data:
   nginx.conf: |
     events {
-        worker_connections 1024;
+        worker_connections 512;
         use epoll;
         multi_accept on;
     }
@@ -53,17 +53,17 @@ data:
 
         upstream backend {
             server backend:8000;
-            keepalive 32;
+            keepalive 16;
         }
 
         upstream image_service {
             server image-service:8080;
-            keepalive 32;
+            keepalive 16;
         }
 
         server {
             listen 80;
-            server_name localhost;
+            server_name _;
 
             limit_conn addr_conn 20;
 
@@ -104,7 +104,6 @@ data:
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
-
                 proxy_connect_timeout 5s;
                 proxy_send_timeout 10s;
                 proxy_read_timeout 30s;
@@ -134,7 +133,6 @@ data:
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
-
                 proxy_read_timeout 300s;
                 client_max_body_size 1M;
             }
@@ -147,7 +145,6 @@ data:
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
-
                 proxy_read_timeout 300s;
                 client_max_body_size 10M;
                 client_body_timeout 10s;
@@ -169,7 +166,7 @@ metadata:
   labels:
     app: nginx
 spec:
-  type: LoadBalancer  # k3s will use ServiceLB
+  type: LoadBalancer
   ports:
     - port: 80
       targetPort: 80
@@ -196,7 +193,7 @@ spec:
       containers:
         - name: nginx
           image: portfolio-nginx:latest
-          imagePullPolicy: Never  # Use locally imported image
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
               name: http
@@ -220,11 +217,11 @@ spec:
             timeoutSeconds: 3
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "100m"
+              memory: "32Mi"
+              cpu: "25m"
             limits:
-              memory: "256Mi"
-              cpu: "500m"
+              memory: "128Mi"
+              cpu: "200m"
       volumes:
         - name: nginx-config
           configMap:

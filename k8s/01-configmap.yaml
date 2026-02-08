@@ -18,9 +18,9 @@ data:
   DEBUG: "false"
   ALLOWED_ORIGINS: "http://localhost,http://localhost:80"
   
-  # Database Connection - Primary (Writes)
-  DB_POOL_MIN_SIZE: "5"
-  DB_POOL_MAX_SIZE: "20"
+  # Database Connection - REDUCED for 2GB droplet
+  DB_POOL_MIN_SIZE: "2"
+  DB_POOL_MAX_SIZE: "8"
   DB_POOL_MAX_QUERIES: "50000"
   DB_POOL_MAX_INACTIVE: "300.0"
   DB_TIMEOUT: "30"
@@ -38,8 +38,8 @@ data:
   REQUEST_TIMEOUT: "30.0"
   CONNECTION_TIMEOUT: "5.0"
   MAX_RETRIES: "3"
-  MAX_CONNECTIONS: "100"
-  MAX_KEEPALIVE_CONNECTIONS: "20"
+  MAX_CONNECTIONS: "50"
+  MAX_KEEPALIVE_CONNECTIONS: "10"
   
   # Validation
   MAX_NAME_LENGTH: "100"

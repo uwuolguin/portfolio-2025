@@ -1,0 +1,189 @@
+# DigitalOcean Droplet Deployment Guide
+
+## Droplet Specs
+- **Plan**: Premium AMD $21/mo
+- **RAM**: 2 GB (+ 2 GB swap added by install script)
+- **CPU**: 2 AMD CPUs
+- **Disk**: 60 GB NVMe SSD
+- **Transfer**: 3 TB
+- **OS**: Ubuntu 24.04 (recommended)
+
+## User Setup
+
+All scripts run as a **regular user with sudo privileges** — never as root directly.
+
+```bash
+# If you only have root, create a user first:
+adduser deploy
+usermod -aG sudo deploy
+su - deploy
+```
+
+## What's Different from Local k3s
+
+| Setting | Local (4GB+) | Droplet (2GB) |
+|---------|-------------|---------------|
+| Backend replicas | 2 | **1** |
+| Image service replicas | 2 | **1** |
+| NSFW detection | Enabled | **Enabled** |
+| Backend workers | 2 | **1** |
+| PG shared_buffers | 256MB | **128MB** |
+| PG replica shared_buffers | 256MB | **64MB** |
+| Redis maxmemory | 256MB | **64MB** |
+| DB pool size | 5-20 | **2-8** |
+| Swap | None | **2GB** |
+
+## Quick Start
+
+### 1. Create Droplet & SSH In
+```bash
+ssh deploy@YOUR_DROPLET_IP
+# or ssh root, then create a user (see User Setup above)
+```
+
+### 2. Clone Repo
+```bash
+git clone https://github.com/uwuolguin/portfolio-2025.git
+cd portfolio-2025
+```
+
+### 3. Copy Droplet Files
+Replace the k8s/ and "k8s scripts/" directories with the optimized versions:
+```bash
+# Back up originals
+cp -r k8s k8s.bak
+cp -r "k8s scripts" "k8s-scripts.bak"
+
+# Copy optimized files
+cp droplet-deploy/k8s/* k8s/
+cp droplet-deploy/k8s-scripts/* "k8s scripts/"
+chmod +x "k8s scripts"/*.sh
+```
+
+### 4. Install k3s + Docker
+```bash
+cd "k8s scripts"
+./00-install-k3s-droplet.sh
+# After install, activate docker group:
+newgrp docker
+```
+
+### 5. Build Images on Droplet
+```bash
+./build-and-import-k3s.sh
+```
+> ⚠️ This takes 10-20 min on 2 CPUs. The image-service (TensorFlow) is the slowest.
+
+### 6. Deploy
+```bash
+./deploy-k3s-droplet.sh
+```
+
+### 7. Post-Deploy
+```bash
+# Create admin
+kubectl exec -it -n portfolio deployment/backend -- \
+  python -m scripts.admin.create_admin
+
+# Seed test data
+kubectl exec -n portfolio deployment/backend -- \
+  python -m scripts.database.seed_test_data
+
+# Setup pg_cron
+kubectl exec -n portfolio deployment/backend -- \
+  python -m scripts.database.manage_search_refresh_cron
+```
+
+### 8. Access
+```
+http://YOUR_DROPLET_IP/front-page/front-page.html
+http://YOUR_DROPLET_IP/docs
+```
+
+## What Needs sudo vs What Doesn't
+
+| Command | sudo needed? | Why |
+|---------|-------------|-----|
+| `kubectl ...` | **No** | kubeconfig copied to ~/.kube/config |
+| `docker build` | **No** | user added to docker group |
+| `sudo k3s ctr images import` | **Yes** | k3s containerd is root-owned |
+| Swap/sysctl/apt | **Yes** | system-level operations |
+
+The scripts handle this automatically — you just need a user with sudo access.
+
+## Memory Budget (NSFW Enabled)
+
+```
+Component             Request    Limit
+─────────────────────────────────────
+k3s system            ~300MB     -
+PostgreSQL Primary    192MB      384MB
+PostgreSQL Replica    128MB      256MB
+Redis                 32MB       96MB
+MinIO                 128MB      256MB
+Image Service         384MB      768MB  (TensorFlow NSFW)
+Backend               192MB      512MB
+Nginx                 32MB       128MB
+─────────────────────────────────────
+Total Requests        ~1388MB
+Total Limits          ~2400MB (will use swap)
+Available             2048MB RAM + 2048MB swap
+```
+
+## Monitoring
+
+```bash
+# Watch memory usage
+watch 'free -h && echo && kubectl top pods -n portfolio 2>/dev/null'
+
+# Check all pods
+kubectl get pods -n portfolio -o wide
+
+# Check replication
+kubectl exec -n portfolio postgres-primary-0 -- \
+  psql -U postgres -d portfolio -c "SELECT state FROM pg_stat_replication;"
+
+# Logs
+kubectl logs -n portfolio deployment/backend -f
+kubectl logs -n portfolio deployment/image-service -f
+```
+
+## Scaling Up Later
+
+If you upgrade to a 4GB+ droplet:
+
+```bash
+# Scale to 2 replicas
+kubectl scale deployment backend -n portfolio --replicas=2
+kubectl scale deployment image-service -n portfolio --replicas=2
+```
+
+## Troubleshooting
+
+### OOM Kills
+```bash
+kubectl get events -n portfolio --sort-by=.lastTimestamp | grep -i oom
+free -h
+swapon --show
+```
+
+### Pod Won't Start
+```bash
+kubectl describe pod <pod-name> -n portfolio
+kubectl logs <pod-name> -n portfolio
+```
+
+### kubectl Permission Denied
+```bash
+# Re-copy kubeconfig
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+export KUBECONFIG=~/.kube/config
+```
+
+### Clean Restart
+```bash
+./cleanup.sh
+./deploy-k3s-droplet.sh
+```

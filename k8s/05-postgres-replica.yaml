@@ -35,7 +35,6 @@ spec:
         role: replica
     spec:
       initContainers:
-        # SSL Certificates
         - name: ssl-certgen
           image: alpine:3.20
           command:
@@ -57,8 +56,6 @@ spec:
           volumeMounts:
             - name: postgres-certs
               mountPath: /certs
-        
-        # Wait for primary to be ready and initialize replica from base backup
         - name: replica-init
           image: postgres:16-alpine
           env:
@@ -79,10 +76,7 @@ spec:
             - -c
             - |
               set -e
-              
               echo "=== PostgreSQL Replica Initialization ==="
-              
-              # Check if already initialized
               if [ -f "$PGDATA/PG_VERSION" ]; then
                 echo "Replica already initialized, checking standby.signal..."
                 if [ -f "$PGDATA/standby.signal" ]; then
@@ -93,16 +87,13 @@ spec:
                   rm -rf "$PGDATA"/*
                 fi
               fi
-              
               echo "Waiting for primary to be ready..."
               until PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h postgres-primary -U $POSTGRES_USER; do
                 echo "Primary not ready, waiting..."
                 sleep 5
               done
-              
               echo "Primary is ready, waiting additional 10s for stability..."
               sleep 10
-              
               echo "Creating replication slot on primary if not exists..."
               PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-primary -U $POSTGRES_USER -d postgres -c "
                 SELECT pg_create_physical_replication_slot('replica_slot_1')
@@ -110,7 +101,6 @@ spec:
                   SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot_1'
                 );
               " 2>/dev/null || echo "Slot may already exist"
-              
               echo "Taking base backup from primary..."
               PGPASSWORD=$POSTGRES_PASSWORD pg_basebackup \
                 -h postgres-primary \
@@ -119,7 +109,6 @@ spec:
                 -Fp -Xs -R -P -v \
                 --checkpoint=fast \
                 --wal-method=stream
-              
               echo "Configuring replica connection..."
               cat >> $PGDATA/postgresql.auto.conf <<EOF
               
@@ -129,13 +118,8 @@ spec:
               primary_slot_name = 'replica_slot_1'
               recovery_target_timeline = 'latest'
               EOF
-              
-              # Ensure standby.signal exists (pg_basebackup -R should create it)
               touch $PGDATA/standby.signal
-              
-              echo "Setting permissions..."
               chmod 700 $PGDATA
-              
               echo "=== Replica initialization complete ==="
           volumeMounts:
             - name: postgres-data
@@ -161,7 +145,6 @@ spec:
               value: /var/lib/postgresql/data/pgdata
           args:
             - "postgres"
-            # SSL Configuration
             - "-c"
             - "ssl=on"
             - "-c"
@@ -170,7 +153,6 @@ spec:
             - "ssl_key_file=/var/lib/postgresql/certs/server.key"
             - "-c"
             - "ssl_min_protocol_version=TLSv1.2"
-            # Replica settings
             - "-c"
             - "hot_standby=on"
             - "-c"
@@ -179,13 +161,13 @@ spec:
             - "max_standby_streaming_delay=30s"
             - "-c"
             - "wal_receiver_status_interval=10s"
-            # Performance (can be lower than primary for read workloads)
+            # REDUCED memory for 2GB droplet
             - "-c"
-            - "shared_buffers=256MB"
+            - "shared_buffers=64MB"
             - "-c"
-            - "effective_cache_size=512MB"
+            - "effective_cache_size=128MB"
             - "-c"
-            - "work_mem=4MB"
+            - "work_mem=2MB"
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
@@ -201,27 +183,26 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 3
+            failureThreshold: 5
           readinessProbe:
             exec:
               command:
                 - sh
                 - -c
                 - |
-                  # Check postgres is ready AND is in recovery mode (replica)
                   pg_isready -U $POSTGRES_USER && \
                   psql -U $POSTGRES_USER -d postgres -tAc "SELECT pg_is_in_recovery();" | grep -q 't'
             initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 3
+            failureThreshold: 5
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
+              memory: "128Mi"
+              cpu: "50m"
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: "256Mi"
+              cpu: "300m"
       volumes:
         - name: postgres-data
           persistentVolumeClaim:

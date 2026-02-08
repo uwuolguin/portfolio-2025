@@ -23,19 +23,14 @@ metadata:
   name: postgres-primary-init
   namespace: portfolio
 data:
-  # Initialize replication user and extensions
   init-primary.sh: |
     #!/bin/bash
     set -e
-    
     echo "=== PostgreSQL Primary Initialization ==="
-    
-    # Wait for PostgreSQL to be ready
     until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
       echo "Waiting for PostgreSQL..."
       sleep 2
     done
-    
     echo "Creating replication slot if not exists..."
     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
       SELECT pg_create_physical_replication_slot('replica_slot_1')
@@ -43,17 +38,14 @@ data:
         SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot_1'
       );
     " || echo "Replication slot may already exist"
-    
     echo "Creating pg_cron extension..."
     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
       CREATE EXTENSION IF NOT EXISTS pg_cron;
     " || echo "pg_cron extension may already exist"
-    
     echo "Creating pg_trgm extension..."
     psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
       CREATE EXTENSION IF NOT EXISTS pg_trgm;
     " || echo "pg_trgm extension may already exist"
-    
     echo "=== Primary initialization complete ==="
 ---
 apiVersion: apps/v1
@@ -74,7 +66,6 @@ spec:
         role: primary
     spec:
       initContainers:
-        # SSL Certificate generation
         - name: ssl-certgen
           image: alpine:3.20
           command:
@@ -122,7 +113,6 @@ spec:
               value: /var/lib/postgresql/data/pgdata
           args:
             - "postgres"
-            # SSL Configuration
             - "-c"
             - "ssl=on"
             - "-c"
@@ -131,7 +121,6 @@ spec:
             - "ssl_key_file=/var/lib/postgresql/certs/server.key"
             - "-c"
             - "ssl_min_protocol_version=TLSv1.2"
-            # Extensions
             - "-c"
             - "shared_preload_libraries=pg_cron"
             - "-c"
@@ -139,30 +128,29 @@ spec:
             - "-c"
             - "cron.use_background_workers=on"
             - "-c"
-            - "max_worker_processes=10"
-            # Authentication
+            - "max_worker_processes=6"
             - "-c"
             - "password_encryption=scram-sha-256"
-            # Replication settings (PRIMARY)
+            # Replication
             - "-c"
             - "wal_level=replica"
             - "-c"
-            - "max_wal_senders=5"
+            - "max_wal_senders=3"
             - "-c"
-            - "max_replication_slots=5"
+            - "max_replication_slots=3"
             - "-c"
-            - "wal_keep_size=1GB"
+            - "wal_keep_size=256MB"
             - "-c"
             - "hot_standby=on"
-            # Performance
+            # REDUCED memory for 2GB droplet
             - "-c"
-            - "shared_buffers=256MB"
+            - "shared_buffers=128MB"
             - "-c"
-            - "effective_cache_size=768MB"
+            - "effective_cache_size=256MB"
             - "-c"
-            - "maintenance_work_mem=64MB"
+            - "maintenance_work_mem=32MB"
             - "-c"
-            - "work_mem=4MB"
+            - "work_mem=2MB"
             # Logging
             - "-c"
             - "log_statement=ddl"
@@ -185,7 +173,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 3
+            failureThreshold: 5
           readinessProbe:
             exec:
               command:
@@ -197,11 +185,11 @@ spec:
             timeoutSeconds: 3
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: "192Mi"
+              cpu: "100m"
             limits:
-              memory: "2Gi"
-              cpu: "2000m"
+              memory: "384Mi"
+              cpu: "500m"
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
