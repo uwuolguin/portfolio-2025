@@ -142,24 +142,6 @@ For deploying to a **DigitalOcean droplet**, see **[DigitalOcean Deployment Guid
 
 ---
 
-## 🏗️ Architecture
-
-### High-Level Overview
-```
-Internet → Nginx (reverse proxy)
-              ↓
-      ┌───────┴──────────┐
-      ↓                  ↓
-   Backend (2x)    Image Service (2x)
-      ↓                  ↓
-   ┌──┴──────┬──────────┴──┐
-   ↓         ↓             ↓
-PostgreSQL  Redis        MinIO
-Primary/Replica
-```
-
----
-
 ## 📚 Key Features
 
 ### User Management

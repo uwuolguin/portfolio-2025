@@ -31,45 +31,6 @@ su - deploy
 
 ---
 
-## 📐 Architecture
-
-```
-┌─────────────┐
-│   Nginx     │  ← Single entry point (LoadBalancer)
-│  (1 replica)│
-└──────┬──────┘
-       │
-   ┌───┴────┬────────┐
-   │        │        │
-┌──▼──┐  ┌─▼──────┐  │
-│Back-│  │Image   │  │
-│end  │  │Service │  │
-│(1x) │  │(1x)    │  │
-└──┬──┘  └────┬───┘  │
-   │          │      │
-┌──▼──────────▼──┐ ┌─▼────┐
-│PostgreSQL      │ │MinIO │
-│ Primary        │ └──────┘
-└────┬───────────┘
-     │ replication
-┌────▼───────────┐ ┌──────┐
-│PostgreSQL      │ │Redis │
-│ Replica        │ └──────┘
-│ (read-only)    │
-└────────────────┘
-```
-
-**Components:**
-- **Nginx (1x)**: Reverse proxy, static files
-- **Backend (1x)**: FastAPI app, 1 uvicorn worker
-- **Image Service (1x)**: NSFW detection via TensorFlow ⭐
-- **PostgreSQL Primary (1x)**: All writes ⭐
-- **PostgreSQL Replica (1x)**: All reads (streaming replication) ⭐
-- **Redis (1x)**: Cache (64MB maxmemory)
-- **MinIO (1x)**: Object storage for images
-
----
-
 ## What's Different from a Local 4GB+ Setup
 
 | Setting | Local (4GB+) | Droplet (2GB) |
