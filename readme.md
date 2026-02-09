@@ -146,15 +146,15 @@ For deploying to a **DigitalOcean droplet**, see **[DigitalOcean Deployment Guid
 
 ### High-Level Overview
 ```
-Internet → Load Balancer (nginx)
+Internet → Nginx (reverse proxy)
               ↓
       ┌───────┴──────────┐
       ↓                  ↓
    Backend (2x)    Image Service (2x)
       ↓                  ↓
-   ┌──┴──────┬──────────┴──┬────────┐
-   ↓         ↓             ↓        ↓
-PostgreSQL  Redis        MinIO    pg_cron
+   ┌──┴──────┬──────────┴──┐
+   ↓         ↓             ↓
+PostgreSQL  Redis        MinIO
 Primary/Replica
 ```
 
