@@ -134,8 +134,11 @@ kubectl exec -n portfolio deployment/backend -- \
 # Setup pg_cron for search refresh
 kubectl exec -n portfolio deployment/backend -- \
   python -m scripts.database.manage_search_refresh_cron
-```
 
+# Pytest testing
+kubectl exec -n portfolio deployment/backend -- \
+  pytest app/tests/ -v
+```
 ### 7. Access
 ```
 http://YOUR_DROPLET_IP/front-page/front-page.html
