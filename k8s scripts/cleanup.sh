@@ -19,7 +19,7 @@ export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
 echo ""
 echo "Deleting namespace..."
-kubectl delete namespace portfolio --wait=true --timeout=120s || true
+kubectl delete namespace portfolio --wait=true --timeout=120s
 
 echo ""
 echo "Cleanup complete!"
