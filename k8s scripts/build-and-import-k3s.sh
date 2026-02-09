@@ -25,16 +25,14 @@ fi
 
 # Detect repo root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ -f "$REPO_ROOT/docker-compose.yml" ]; then
-    cd "$REPO_ROOT"
-elif [ -f "$(dirname "$REPO_ROOT")/docker-compose.yml" ]; then
-    cd "$(dirname "$REPO_ROOT")"
-else
-    echo "ERROR: Cannot find docker-compose.yml. Run from repo root."
+if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
+    log_error "Cannot find docker-compose.yml in repo root: $REPO_ROOT"
     exit 1
 fi
+
+cd "$REPO_ROOT"
 
 echo "=================================="
 echo "Build & Import Images to k3s"
