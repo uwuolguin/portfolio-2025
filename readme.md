@@ -4,6 +4,26 @@
 
 ---
 
+## 🌐 Live Demo
+
+> **⚠️ This demo runs on HTTP (no TLS/HTTPS). Do not enter real credentials or personal information.**
+
+**Live at**: [http://YOUR_DROPLET_IP](http://YOUR_DROPLET_IP)
+
+| URL | What |
+|-----|------|
+| [http://YOUR_DROPLET_IP/front-page/front-page.html](http://YOUR_DROPLET_IP/front-page/front-page.html) | Frontend |
+| [http://YOUR_DROPLET_IP/docs](http://YOUR_DROPLET_IP/docs) | API Docs (Swagger) |
+| [http://YOUR_DROPLET_IP/redoc](http://YOUR_DROPLET_IP/redoc) | API Docs (ReDoc) |
+
+**Before using the demo:**
+- Traffic is **unencrypted** — anyone on the network can see what you send and receive. Use throwaway credentials only (fake email, dummy password).
+- The demo runs on a $21/mo DigitalOcean droplet (2GB RAM). Expect slower responses, especially on image uploads (NSFW detection runs on swap).
+- For the best experience, use a **private/incognito browser window** so nothing gets cached or stored.
+- If you want to be extra cautious, consider connecting from a **disposable VM** (VirtualBox, UTM, or a cloud instance you can delete afterward). Since there's no TLS, a throwaway environment ensures nothing persists on your machine — browser history, cookies, cached responses, DNS cache — all gone when you delete the VM.
+
+---
+
 ## 🎯 Executive Summary
 
 **What**: B2B marketplace connecting businesses with service providers  
@@ -48,7 +68,9 @@ docker compose exec backend pytest app/tests/ -v
 
 ### Kubernetes (Production Deployment)
 
-See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s setup, manifests, and production configuration in the folders `k8s/` and `k8s scripts/`.
+See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s setup with PostgreSQL replication, load balancing, and production configuration.
+
+For deploying to a **DigitalOcean droplet**, see **[DigitalOcean Deployment Guide](./k8s%20scripts/README_DIGITAL_OCEAN.md)** — optimized manifests and scripts for a 2GB RAM droplet with all features enabled.
 
 ---
 
@@ -207,10 +229,12 @@ proveo/
 │   └── 10-nginx.yaml
 │
 ├── k8s scripts/                 # Deployment automation
+│   ├── 00-install-k3s.sh
 │   ├── build-and-import-k3s.sh
-│   ├── deploy-k8s-local.sh
+│   ├── deploy-k3s-local.sh
 │   ├── cleanup.sh
-│   └── README.md                # K8s deployment guide
+│   ├── README.md                # K8s deployment guide
+│   └── README_DIGITAL_OCEAN.md  # DigitalOcean droplet guide
 │
 ├── nginx/                       # Reverse proxy + frontend
 │   ├── nginx.conf
@@ -233,6 +257,7 @@ proveo/
 ## 📖 Documentation
 
 - **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** - Full k8s setup, scaling, monitoring
+- **[DigitalOcean Droplet Guide](./k8s%20scripts/README_DIGITAL_OCEAN.md)** - 2GB droplet deployment with optimized manifests
 - **API Docs (Swagger)**: http://localhost/docs
 - **API Docs (ReDoc)**: http://localhost/redoc
 
