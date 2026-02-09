@@ -8,18 +8,8 @@ set -e
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Look for k8s manifests
-if [ -d "$SCRIPT_DIR/../k8s" ]; then
-    K8S_DIR="$SCRIPT_DIR/../k8s"
-elif [ -d "$(dirname "$SCRIPT_DIR")/k8s" ]; then
-    K8S_DIR="$(dirname "$SCRIPT_DIR")/k8s"
-else
-    echo "ERROR: Cannot find k8s/ directory"
-    exit 1
-fi
-
-K8S_DIR="$(cd "$K8S_DIR" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_DIR")" && pwd)"
+K8S_DIR="$PROJECT_ROOT/k8s"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -169,13 +159,18 @@ JWT_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
 ADMIN_API_KEY=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
 MINIO_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
 
-# Detect droplet public IP
-DROPLET_IP=$(curl -s http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null || \
-             curl -s ifconfig.me 2>/dev/null || \
-             hostname -I | awk '{print $1}')
+# Detect droplet public IP (fail if not detected)
+DROPLET_IP=$(
+  curl -s --max-time 2 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null ||
+  curl -s --max-time 2 ifconfig.me 2>/dev/null
+)
+
+if [[ -z "$DROPLET_IP" ]]; then
+  log_error "Failed to detect droplet public IP via metadata or external service"
+  exit 1
+fi
 
 log_info "Detected droplet IP: $DROPLET_IP"
-echo ""
 
 # =============================================================================
 # Deploy step by step (kubectl uses user's kubeconfig, no sudo needed)
