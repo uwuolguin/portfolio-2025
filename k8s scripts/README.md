@@ -135,7 +135,7 @@ kubectl exec -n portfolio deployment/backend -- \
 kubectl exec -n portfolio deployment/backend -- \
   python -m scripts.database.manage_search_refresh_cron
 
-# Pytest testing
+# Pytest testing if needed
 kubectl exec -n portfolio deployment/backend -- \
   pytest app/tests/ -v
 ```
