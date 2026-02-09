@@ -6,6 +6,21 @@ set -e
 # Run as regular user with sudo privileges
 # =============================================================================
 
+# NOTE:
+# The following commands make system changes persistent across reboots
+# (e.g. /etc/fstab, /etc/sysctl.conf). Persistence is powerful, but dangerous:
+# if this script is executed multiple times without guards, it may append
+# duplicate or conflicting entries, leading to boot warnings, undefined
+# behavior, or hard-to-debug system states.
+#
+# Examples:
+#   - Repeatedly appending swap entries to /etc/fstab
+#   - Duplicating kernel parameters in /etc/sysctl.conf
+#
+# For this reason, persistence-related commands must be written to be
+# idempotent (safe to run multiple times), or explicitly checked before
+# modification.
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -121,7 +136,7 @@ while [ $COUNTER -lt 60 ]; do
         break
     fi
     sleep 2
-    COUNTER=$((COUNTER + 2))
+    COUNTER=$((COUNTER + 1))
 done
 
 echo ""
