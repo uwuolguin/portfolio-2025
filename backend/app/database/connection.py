@@ -53,7 +53,7 @@ class DatabasePoolManager:
         await conn.execute("SET timezone TO 'UTC'")
         await conn.execute(f"SET statement_timeout TO '{settings.db_timeout}s'")
         await conn.execute("SET log_statement_stats TO off")
-        await conn.execute("SET pg_trgm.similarity_threshold = 0.15")
+        await conn.execute("SET pg_trgm.similarity_threshold = 0.1")
 
         if settings.debug:
             await conn.execute(

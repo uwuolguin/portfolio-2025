@@ -1,4 +1,3 @@
-```python
 from fastapi import APIRouter, Depends, status
 from typing import Any
 from datetime import datetime
@@ -53,4 +52,3 @@ async def database_health(
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
         }
-```

@@ -1,4 +1,3 @@
-```python
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from fastapi.responses import HTMLResponse
 from typing import List
@@ -296,4 +295,3 @@ async def admin_delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Failed to delete user"
         )
-```

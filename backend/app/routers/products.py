@@ -1,4 +1,3 @@
-```python
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from uuid import UUID
@@ -149,4 +148,3 @@ async def delete_product(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete product"
         )
-```
