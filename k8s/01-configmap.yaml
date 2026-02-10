@@ -17,10 +17,6 @@ data:
   PROJECT_NAME: "Proveo API"
   DEBUG: "true"
 
-  # MUST be valid JSON (list[str])
-  ALLOWED_ORIGINS: '["http://localhost","http://localhost:80"]' # is overwritten in the deploy.sh, kubectl patch configmap portfolio-config -n portfolio --type merge \ -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"http://${DROPLET_IP}\\\"]\"}}"
-
-
   # Database Connection - REDUCED for 2GB droplet
   DB_POOL_MIN_SIZE: "2"
   DB_POOL_MAX_SIZE: "8"

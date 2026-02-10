@@ -1,5 +1,3 @@
-check allowed origins implications
-
 Correct the three tests that are failing
 
 Perform full end‑to‑end integration test as a real user
