@@ -164,16 +164,11 @@ class DatabasePoolManager:
         if not self.write_pool:
             raise RuntimeError("Write pool not initialized")
 
-        async with self.write_pool.acquire() as conn:
-            try:
-                yield conn
-            except Exception as e:
-                logger.error(
-                    "write_connection_error",
-                    error=str(e),
-                    exc_info=True,
-                )
-                raise
+        conn = await self.write_pool.acquire()
+        try:
+            yield conn
+        finally:
+            await self.write_pool.release(conn)
 
     @asynccontextmanager
     async def acquire_read(self) -> AsyncGenerator[asyncpg.Connection, None]:
@@ -186,8 +181,11 @@ class DatabasePoolManager:
         if not pool:
             raise RuntimeError("No database pool available for reads")
 
-        async with pool.acquire() as conn:
+        conn = await pool.acquire()
+        try:
             yield conn
+        finally:
+            await pool.release(conn)
 
     async def check_replica_health(self) -> bool:
         """
