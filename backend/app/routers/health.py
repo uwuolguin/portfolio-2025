@@ -35,10 +35,12 @@ async def database_health(
         await db.fetchval("SELECT 1")
         write_pool_size = pool_manager.write_pool.get_size() if pool_manager.write_pool else 0
         read_pool_size = pool_manager.read_pool.get_size() if pool_manager.read_pool else 0
+        
         return {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
             "pool": {
+                "size": write_pool_size + read_pool_size,  # Total pool size for backward compatibility
                 "write_size": write_pool_size,
                 "read_size": read_pool_size,
                 "max_size": settings.db_pool_max_size,

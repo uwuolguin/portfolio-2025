@@ -187,25 +187,7 @@ class DatabasePoolManager:
             raise RuntimeError("No database pool available for reads")
 
         async with pool.acquire() as conn:
-            try:
-                yield conn
-            except Exception as e:
-                # If replica fails, try primary
-                if pool == self.read_pool and self.write_pool:
-                    logger.warning(
-                        "read_replica_failed_fallback_to_primary",
-                        error=str(e),
-                    )
-                    self._replica_available = False
-                    async with self.write_pool.acquire() as fallback_conn:
-                        yield fallback_conn
-                else:
-                    logger.error(
-                        "read_connection_error",
-                        error=str(e),
-                        exc_info=True,
-                    )
-                    raise
+            yield conn
 
     async def check_replica_health(self) -> bool:
         """
