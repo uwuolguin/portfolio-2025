@@ -136,7 +136,7 @@ fi
 
 # Verify images (k3s ctr needs sudo)
 MISSING=0
-for img in portfolio-backend:latest portfolio-image-service:latest portfolio-nginx:latest; do
+for img in portfolio-backend:latest portfolio-image-service:latest portfolio-nginx:latest portfolio-postgres:16; do
     if ! sudo k3s ctr images ls | grep -q "$img"; then
         log_error "Missing image: $img"
         MISSING=1
@@ -344,8 +344,6 @@ echo ""
 log_info "Services:"
 kubectl get svc -n portfolio
 echo ""
-
-SVC_PORT=80
 
 echo ""
 echo "============================================"

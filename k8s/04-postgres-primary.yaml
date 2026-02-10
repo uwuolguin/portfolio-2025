@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# RESOURCE 1 OF 3: Service
+# RESOURCE 1 OF 2: Service
 # =============================================================================
 # Creates a stable DNS name "postgres-primary" inside the cluster.
 # Any Pod that needs the database connects to postgres-primary:5432.
@@ -20,90 +20,25 @@ spec:
       targetPort: 5432
       protocol: TCP
       name: postgres
-  # "Find Pods with label app=postgres-primary and route traffic to them"
   selector:
     app: postgres-primary
 
 ---
 # =============================================================================
-# RESOURCE 2 OF 3: Init Script ConfigMap
-# =============================================================================
-# Contains a shell script that runs ONCE on first PostgreSQL boot (empty PGDATA).
-# Mounted at /docker-entrypoint-initdb.d/ — the official postgres image
-# automatically executes all *.sh files in this directory during first init.
-#
-#  IDEMPOTENCY: All commands use IF NOT EXISTS / WHERE NOT EXISTS guards,
-#    so even if you exec this script manually on an existing database, it's safe.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: postgres-primary-init
-  namespace: portfolio
-data:
-  init-primary.sh: |
-    #!/bin/bash
-    set -e
-    echo "=== PostgreSQL Primary Initialization ==="
-
-    # Wait for PostgreSQL to be accepting connections.
-    # This is needed because docker-entrypoint-initdb.d scripts run
-    # while PostgreSQL is still starting up in single-user mode,
-    # but psql commands need the server to be accepting connections.
-    until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
-      echo "Waiting for PostgreSQL..."
-      sleep 2
-    done
-
-    # Create a replication slot for the replica to connect to.
-    # Slots ensure the primary retains WAL (Write-Ahead Log) segments
-    # that the replica hasn't consumed yet, preventing data gaps.
-    #  Idempotent: WHERE NOT EXISTS prevents duplicate creation.
-    echo "Creating replication slot if not exists..."
-    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-      SELECT pg_create_physical_replication_slot('replica_slot_1')
-      WHERE NOT EXISTS (
-        SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot_1'
-      );
-    " || echo "Replication slot may already exist"
-
-    # pg_cron: scheduled jobs inside PostgreSQL (like crontab but for SQL).
-    # Used to periodically refresh materialized views for full-text search.
-    #  Idempotent: IF NOT EXISTS is built into CREATE EXTENSION.
-    echo "Creating pg_cron extension..."
-    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-      CREATE EXTENSION IF NOT EXISTS pg_cron;
-    " || echo "pg_cron extension may already exist"
-
-    # pg_trgm: trigram-based text similarity and search.
-    # Used for fuzzy matching in search queries (e.g., typo-tolerant search).
-    #  Idempotent: IF NOT EXISTS is built into CREATE EXTENSION.
-    echo "Creating pg_trgm extension..."
-    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-      CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    " || echo "pg_trgm extension may already exist"
-
-    echo "=== Primary initialization complete ==="
-
----
-# =============================================================================
-# RESOURCE 3 OF 3: StatefulSet
+# RESOURCE 2 OF 2: StatefulSet
 # =============================================================================
 # StatefulSet (not Deployment) because databases need:
 #   1. Stable Pod name: always "postgres-primary-0" (replica knows this name)
 #   2. Stable storage: same PVC reattaches after restart
 #   3. Ordered startup: primary must start before replica
 #
-# This manifest has 3 volumes and 2 containers (1 init + 1 main).
-# Understanding the volume flow is key — see diagram below.
-#
 # ┌─────────────────────────────────────────────────────────────────────┐
 # │                        VOLUME ARCHITECTURE                         │
 # │                                                                    │
 # │  Volume Name        Type        What It Stores    Survives Restart │
 # │  ─────────────────  ──────────  ────────────────  ──────────────── │
-# │  postgres-data      PVC         Database files     YES (on disk) │
-# │  postgres-certs     emptyDir    SSL cert + key     NO (regen'd)  │
-# │  init-scripts       ConfigMap   init-primary.sh    YES (in K8s)  │
+# │  postgres-data      PVC         Database files    YES (on disk)    │
+# │  postgres-certs     emptyDir    SSL cert + key    NO (regen'd)     │
 # │                                                                    │
 # │  Flow:                                                             │
 # │  ┌──────────────┐         ┌───────────────┐                       │
@@ -117,18 +52,9 @@ data:
 # │  └──────────────┘                                                  │
 # └─────────────────────────────────────────────────────────────────────┘
 #
-# WHY certs are emptyDir (ephemeral) and not PVC:
-#   SSL certs are regenerated every time the Pod starts. This is fine because:
-#   - They're self-signed (not CA-issued), so regenerating is free
-#   - Clients use sslmode=require (encrypt traffic) not sslmode=verify-ca
-#   - No external system depends on the cert fingerprint staying the same
-#   - Saves a PVC allocation for something that takes <1 second to generate
-#
-# WHY postgres-data is PVC (persistent):
-#   This is the actual database — all tables, indexes, WAL.
-#   Losing this = losing all your data. It MUST survive Pod restarts.
-#   With local-path on k3s, the PVC maps to a directory under
-#   /var/lib/rancher/k3s/storage/ on the node's physical disk.
+# Init scripts (SSL config, pg_hba.conf, db creation, pgpass) are baked
+# into the portfolio-postgres:16 Docker image at /docker-entrypoint-initdb.d/.
+# They run automatically on first boot (empty PGDATA) — no ConfigMap needed.
 #
 apiVersion: apps/v1
 kind: StatefulSet
@@ -150,20 +76,9 @@ spec:
       # =====================================================================
       # INIT CONTAINER: ssl-certgen
       # =====================================================================
-      # Runs BEFORE the main postgres container starts.
-      # Generates a self-signed SSL certificate so database connections
-      # are encrypted (even inside the cluster).
-      #
-      # Uses alpine (tiny ~5MB image) because we only need the openssl command.
-      # The cert is written to the "postgres-certs" emptyDir volume,
-      # which the main container then reads from.
-      #
-      #  IDEMPOTENT: The `if [ ! -f /certs/server.crt ]` guard means
-      #    it won't regenerate if certs already exist. However, since
-      #    emptyDir is wiped on every Pod restart, this guard only matters
-      #    if the initContainer somehow runs twice in the same Pod lifecycle
-      #    (rare edge case). In practice, certs are regenerated every restart.
-      #    This is intentional and harmless for self-signed certs.
+      # Generates a self-signed SSL certificate before PostgreSQL starts.
+      # The Docker image's init-ssl.sh expects certs at /var/lib/postgresql/certs/
+      # and configures PostgreSQL to use them (via symlink to custom pg_hba.conf).
       initContainers:
         - name: ssl-certgen
           image: alpine:3.20
@@ -179,28 +94,23 @@ spec:
                   -subj "/C=CL/ST=NA/L=NA/O=portfolio/CN=postgres-primary" \
                   -out /certs/server.crt \
                   -keyout /certs/server.key
-                # 600 = owner read/write only. PostgreSQL REQUIRES the key
-                # to not be world-readable, or it refuses to start.
                 chmod 600 /certs/server.key
                 chmod 644 /certs/server.crt
-                # 999:999 = the "postgres" user inside the portfolio-postgres:16 image.
-                # PostgreSQL runs as UID 999, so it must own the key file.
                 chown 999:999 /certs/server.key /certs/server.crt
               fi
           volumeMounts:
-            # initContainer WRITES certs here ──┐
-            - name: postgres-certs        #      │ Same volume name
-              mountPath: /certs           #      │
-      # =====================================================│================
-      # MAIN CONTAINER: postgres                             │
-      # =====================================================│================
+            - name: postgres-certs
+              mountPath: /certs
+      # =====================================================================
+      # MAIN CONTAINER: postgres
+      # =====================================================================
       containers:
         - name: postgres
           image: portfolio-postgres:16
+          imagePullPolicy: Never
           ports:
             - containerPort: 5432
               name: postgres
-          # ─── Environment Variables ───────────────────────────────────
           env:
             - name: POSTGRES_USER
               valueFrom:
@@ -217,22 +127,15 @@ spec:
                 configMapKeyRef:
                   name: portfolio-config
                   key: POSTGRES_DB
-            # PGDATA tells PostgreSQL where to store data files.
-            # The extra /pgdata subdirectory is important:
-            # PVC mounts at /var/lib/postgresql/data, and PG needs to own
-            # the data directory. If PGDATA = mountPoint directly, PG
-            # complains about "lost+found" directory. The subdirectory avoids this.
+            # Extra /pgdata subdirectory avoids "lost+found" conflict on PVC mount
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
-          # ─── PostgreSQL Server Arguments ─────────────────────────────
-          # These are passed directly to the "postgres" server process, is the way your PostgreSQL container knows exactly how to start after the init scripts have run, the SSL certs exist, and the PVC is mounted.
-          # Each "-c key=value" pair sets a postgresql.conf parameter.
           args:
             - "postgres"
-            # ── SSL Configuration ──────────────────────────────────────
-            # Points to the certs generated by the initContainer above.
-            # The path /var/lib/postgresql/certs/ is where postgres-certs
-            # volume is mounted in THIS container (see volumeMounts below).
+            # ── SSL ────────────────────────────────────────────────────
+            # These are set here AND in init-ssl.sh. The args take precedence
+            # on every startup; init-ssl.sh writes them to postgresql.ssl.conf
+            # which also works. Belt and suspenders — both paths produce SSL.
             - "-c"
             - "ssl=on"
             - "-c"
@@ -241,9 +144,7 @@ spec:
             - "ssl_key_file=/var/lib/postgresql/certs/server.key"
             - "-c"
             - "ssl_min_protocol_version=TLSv1.2"
-            # ── pg_cron Extension ──────────────────────────────────────
-            # Must be loaded at server startup via shared_preload_libraries.
-            # Cannot be loaded later — requires a restart.
+            # ── pg_cron ────────────────────────────────────────────────
             - "-c"
             - "shared_preload_libraries=pg_cron"
             - "-c"
@@ -256,95 +157,45 @@ spec:
             - "-c"
             - "password_encryption=scram-sha-256"
             # ── Replication ────────────────────────────────────────────
-            # These settings enable the replica to connect and stream changes.
             - "-c"
             - "wal_level=replica"
-            # WAL (Write-Ahead Log) is how PostgreSQL records every change.
-            # "replica" level includes enough info for streaming replication.
             - "-c"
             - "max_wal_senders=3"
-            # max_wal_senders: how many replicas can connect simultaneously.
-            # 3 is enough headroom for 1 replica + pg_basebackup operations.
             - "-c"
             - "max_replication_slots=3"
-            # Replication slots prevent the primary from discarding WAL
-            # that the replica hasn't consumed yet.
             - "-c"
             - "wal_keep_size=256MB"
-            # Safety net: keep 256MB of WAL even without slots, in case
-            # the replica disconnects briefly and needs to catch up.
             - "-c"
             - "hot_standby=on"
-            # hot_standby=on allows read queries on replicas while they
-            # replicate. Set on primary too for consistency if it ever
-            # becomes a standby during failover.
             # ── Memory (REDUCED for 2GB droplet) ───────────────────────
             - "-c"
             - "shared_buffers=128MB"
-            # shared_buffers: PostgreSQL's main cache. Typically 25% of
-            # dedicated RAM. 128MB is conservative for a 2GB shared droplet.
             - "-c"
             - "effective_cache_size=256MB"
-            # effective_cache_size: hint to the query planner about how
-            # much total memory is available for caching (OS page cache +
-            # shared_buffers). Doesn't allocate anything, just planning.
             - "-c"
             - "maintenance_work_mem=32MB"
-            # maintenance_work_mem: memory for VACUUM, CREATE INDEX, etc.
             - "-c"
             - "work_mem=2MB"
-            # work_mem: per-operation memory for sorts and joins.
-            # Each query can use this multiple times, so keep it low.
-            # 8 connections × 2 sorts each × 2MB = 32MB worst case.
             # ── Logging ────────────────────────────────────────────────
             - "-c"
             - "log_statement=ddl"
-            # log_statement=ddl: log CREATE/ALTER/DROP statements.
-            # Useful for tracking schema changes without logging every query.
             - "-c"
             - "log_min_duration_statement=1000"
-            # Log any query that takes more than 1000ms (1 second).
-            # Helps find slow queries without verbose logging.
-          # ─── Volume Mounts ───────────────────────────────────────────
-          #
-          # There are 3 volumes mounted into the main container:
-          #
-          #   1. postgres-data → /var/lib/postgresql/data
-          #      The actual database files. Backed by PVC (persistent).
-          #
-          #   2. postgres-certs → /var/lib/postgresql/certs (readOnly)
-          #      The SSL certs. Same emptyDir volume that the initContainer
-          #      wrote to — but mounted at a DIFFERENT PATH and read-only.
-          #      initContainer mounted it at /certs (to write).
-          #      Main container mounts it at /var/lib/postgresql/certs (to read).
-          #
-          #   3. init-scripts → /docker-entrypoint-initdb.d
-          #      The init-primary.sh script from the ConfigMap above.
-          #      PostgreSQL's entrypoint runs these on first boot only.
-          #
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
             - name: postgres-certs
               mountPath: /var/lib/postgresql/certs
               readOnly: true
-            - name: init-scripts
-              mountPath: /docker-entrypoint-initdb.d
-          # ─── Health Checks ───────────────────────────────────────────
           livenessProbe:
             exec:
               command:
                 - sh
                 - -c
                 - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
-            # Wait 30s before first check — PG needs time to:
-            # 1. Init PGDATA (first boot only)
-            # 2. Run init scripts
-            # 3. Start accepting connections
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
-            # 5 consecutive failures = 50 seconds of being dead → restart Pod
             failureThreshold: 5
           readinessProbe:
             exec:
@@ -352,47 +203,19 @@ spec:
                 - sh
                 - -c
                 - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
-            # Readiness checks earlier (10s) than liveness (30s) because
-            # we want to detect "ready to accept traffic" sooner.
-            # Failing readiness doesn't kill the Pod — it just stops
-            # routing traffic to it until it passes again.
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
-          # ─── Resource Limits ─────────────────────────────────────────
           resources:
             requests:
-              # "I need at least this much to be scheduled on a node"
               memory: "192Mi"
-              cpu: "100m"     # 100 millicores = 10% of one CPU core
+              cpu: "100m"
             limits:
-              # "Never use more than this"
-              memory: "384Mi"   # Exceeding this → OOMKilled by K8s
-              cpu: "500m"       # Exceeding this → throttled (slowed), not killed
-              # Budget: shared_buffers (128MB) + connections + overhead ≈ 300MB
-              # 384Mi limit gives ~80MB headroom for spikes.
-      # ─── Volume Definitions ──────────────────────────────────────────
-      # These define the 3 "storage things" that containers mount above.
+              memory: "384Mi"
+              cpu: "500m"
       volumes:
-        # 1. Database files — backed by PVC (PERSISTENT across restarts)
-        #    Data lives at /var/lib/rancher/k3s/storage/<pvc-id> on the node.
-        #     Survives Pod restart, node reboot.
-        #     Does NOT survive node destruction (local-path is not replicated).
         - name: postgres-data
           persistentVolumeClaim:
             claimName: postgres-primary-data
-        # 2. SSL certificates — emptyDir (EPHEMERAL, regenerated each Pod start)
-        #    Created empty when Pod starts → initContainer writes certs →
-        #    main container reads them. Deleted when Pod is removed.
-        #     This is fine: self-signed certs are cheap to regenerate.
-        #    The initContainer takes <1 second to generate new ones.
         - name: postgres-certs
           emptyDir: {}
-        # 3. Init scripts — from ConfigMap (READ-ONLY, managed by K8s)
-        #    The init-primary.sh script defined in the ConfigMap above.
-        #    Mounted at /docker-entrypoint-initdb.d/ so PostgreSQL runs it
-        #    on first boot. defaultMode: 0755 makes it executable.
-        - name: init-scripts
-          configMap:
-            name: postgres-primary-init
-            defaultMode: 0755

@@ -41,9 +41,12 @@ if [ ! -f "$CUSTOM_HBA" ]; then
 local   all   all                         scram-sha-256
 host    all   all   127.0.0.1/32          scram-sha-256
 host    all   all   ::1/128               scram-sha-256
-# SSL-only TCP connections
+# SSL-only TCP connections (backend, image-service, any cluster pod)
 hostssl all   all   0.0.0.0/0             scram-sha-256
 hostssl all   all   ::/0                  scram-sha-256
+# Replication connections (replica pod's pg_basebackup + streaming)
+hostssl replication   all   0.0.0.0/0     scram-sha-256
+hostssl replication   all   ::/0          scram-sha-256
 EOF
     chown postgres:postgres "$CUSTOM_HBA"
 fi

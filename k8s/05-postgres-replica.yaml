@@ -58,6 +58,7 @@ spec:
               mountPath: /certs
         - name: replica-init
           image: portfolio-postgres:16
+          imagePullPolicy: Never
           env:
             - name: POSTGRES_USER
               valueFrom:
@@ -111,7 +112,7 @@ spec:
                 --wal-method=stream
               echo "Configuring replica connection..."
               cat >> $PGDATA/postgresql.auto.conf <<EOF
-              
+
               # Replica Configuration (auto-generated)
               hot_standby = on
               primary_conninfo = 'host=postgres-primary port=5432 user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=require application_name=replica1'
@@ -127,6 +128,7 @@ spec:
       containers:
         - name: postgres
           image: portfolio-postgres:16
+          imagePullPolicy: Never
           ports:
             - containerPort: 5432
               name: postgres

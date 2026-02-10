@@ -24,4 +24,4 @@ kubectl delete namespace portfolio --wait=true --timeout=120s
 echo ""
 echo "Cleanup complete!"
 echo ""
-echo "To redeploy: ./deploy-k3s-droplet.sh"
+echo "To redeploy: ./deploy-k3s-local.sh"
