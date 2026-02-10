@@ -48,5 +48,7 @@ async def test_database_health_endpoint(initialized_app):
 
     if data["status"] == "healthy":
         assert "pool" in data
-        assert "size" in data["pool"]
         assert "max_size" in data["pool"]
+        assert "read_size" in data["pool"]
+        assert "replica_available" in data["pool"]
+        assert "write_size" in data["pool"]
