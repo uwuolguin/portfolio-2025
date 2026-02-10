@@ -4,6 +4,14 @@
  * AND cross-tab state synchronization
  */
 
+// Auto-detect base URL from browser
+export const BASE_URL = window.location.origin;
+
+// Helper function for internal links
+export function getInternalUrl(path) {
+    return `${BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 // ============================================
 // STATE SYNCHRONIZATION SYSTEM
 // ============================================

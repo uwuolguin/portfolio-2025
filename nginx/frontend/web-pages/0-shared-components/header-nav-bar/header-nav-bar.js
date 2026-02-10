@@ -1,4 +1,4 @@
-import { getLoginState, getLanguage, getCompanyPublishState, setLanguage, setLoginState, checkAuthStatus, checkCompanyStatus } from '../utils/shared-functions.js';
+import { getInternalUrl,getLoginState, getLanguage, getCompanyPublishState, setLanguage, setLoginState, checkAuthStatus, checkCompanyStatus } from '../utils/shared-functions.js';
 
 // ============================================
 // ASYNC INITIALIZATION ON PAGE LOAD
@@ -69,7 +69,7 @@ function renderNav() {
     logoContainer.className = 'nav-container-logo-container';
     
     const logoLink = document.createElement('a');
-    logoLink.href = 'http://localhost/front-page/front-page.html';
+    logoLink.href = getInternalUrl('/front-page/front-page.html');
     
     const logoImg = document.createElement('img');
     logoImg.src = '/files/logos/logoSVG.svg';
@@ -88,7 +88,7 @@ function renderNav() {
         const profileLi = document.createElement('li');
         profileLi.className = 'nav-container-li';
         const profileLink = document.createElement('a');
-        profileLink.href = 'http://localhost/profile-view/profile-view.html';
+        profileLink.href = getInternalUrl('/profile-view/profile-view.html');               
         profileLink.className = 'nav-container-a';
         profileLink.textContent = translations[lang].profileView;
         profileLi.appendChild(profileLink);
@@ -99,7 +99,7 @@ function renderNav() {
             const editLi = document.createElement('li');
             editLi.className = 'nav-container-li';
             const editLink = document.createElement('a');
-            editLink.href = 'http://localhost/profile-edit/profile-edit.html';
+            editLink.href = getInternalUrl('/profile-edit/profile-edit.html');
             editLink.className = 'nav-container-a';
             editLink.textContent = translations[lang].companyEdit;
             editLi.appendChild(editLink);
@@ -108,7 +108,7 @@ function renderNav() {
             const publishLi = document.createElement('li');
             publishLi.className = 'nav-container-li';
             const publishLink = document.createElement('a');
-            publishLink.href = 'http://localhost/publish/publish.html';
+            publishLink.href = getInternalUrl('/publish/publish.html');
             publishLink.className = 'nav-container-a';
             publishLink.textContent = translations[lang].publish;
             publishLi.appendChild(publishLink);
@@ -129,7 +129,7 @@ function renderNav() {
         const registerLi = document.createElement('li');
         registerLi.className = 'nav-container-li';
         const registerLink = document.createElement('a');
-        registerLink.href = 'http://localhost/sign-up/sign-up.html';
+        registerLink.href = getInternalUrl('/sign-up/sign-up.html');
         registerLink.className = 'nav-container-a';
         registerLink.textContent = translations[lang].register;
         registerLi.appendChild(registerLink);
@@ -139,7 +139,7 @@ function renderNav() {
         const loginLi = document.createElement('li');
         loginLi.className = 'nav-container-li';
         const loginLink = document.createElement('a');
-        loginLink.href = 'http://localhost/log-in/log-in.html';
+        loginLink.href = getInternalUrl('/log-in/log-in.html');
         loginLink.className = 'nav-container-a';
         loginLink.textContent = translations[lang].login;
         loginLi.appendChild(loginLink);
@@ -201,13 +201,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (response.ok) {
                     // Clear all authentication data
                     setLoginState(false);
-                    window.location.href = '../front-page/front-page.html';
+                    window.location.href = getInternalUrl('/front-page/front-page.html');
                 }
             } catch (error) {
                 console.error('Logout error:', error);
                 // Force logout even if request fails
                 setLoginState(false);
-                window.location.href = '../front-page/front-page.html';
+                window.location.href = getInternalUrl('/front-page/front-page.html');
             }
         }
     });

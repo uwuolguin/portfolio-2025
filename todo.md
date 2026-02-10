@@ -1,6 +1,6 @@
-Correct the three tests that are failing
+check allowed origins implications
 
-Remove hardcoded localhost references from the frontend and replace with environment‑aware base URL (config/env or injected at build/runtime).
+Correct the three tests that are failing
 
 Perform full end‑to‑end integration test as a real user
 
