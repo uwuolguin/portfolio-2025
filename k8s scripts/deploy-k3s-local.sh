@@ -186,6 +186,15 @@ log_info "Creating ConfigMap..."
 kubectl apply -f "$K8S_DIR/01-configmap.yaml"
 echo ""
 
+# Patch ALLOWED_ORIGINS with droplet IP
+CURRENT_ORIGINS=$(kubectl get configmap portfolio-config -n portfolio \
+  -o jsonpath='{.data.ALLOWED_ORIGINS}')
+
+kubectl patch configmap portfolio-config -n portfolio --type merge \
+  -p "{\"data\":{\"ALLOWED_ORIGINS\":\"${CURRENT_ORIGINS},http://${DROPLET_IP}\"}}"
+
+log_info "Patched ALLOWED_ORIGINS with droplet IP: ${DROPLET_IP}"
+
 # Secrets
 log_info "Creating secrets..."
 kubectl create secret generic portfolio-secrets \
