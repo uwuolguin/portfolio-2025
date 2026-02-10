@@ -92,7 +92,7 @@ spec:
               echo "Database check complete!"
         - name: migrate
           image: portfolio-backend:latest
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent 
           command:
             - sh
             - -c
