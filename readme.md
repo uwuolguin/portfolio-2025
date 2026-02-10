@@ -8,13 +8,13 @@
 
 > **⚠️ This demo runs on HTTP (no TLS/HTTPS). Do not enter real credentials or personal information.**
 
-**Live at**: [http://YOUR_DROPLET_IP](http://YOUR_DROPLET_IP)
+**Live at**: [http://134.199.211.67](http://134.199.211.67)
 
 | URL | What |
 |-----|------|
-| [http://YOUR_DROPLET_IP/front-page/front-page.html](http://YOUR_DROPLET_IP/front-page/front-page.html) | Frontend |
-| [http://YOUR_DROPLET_IP/docs](http://YOUR_DROPLET_IP/docs) | API Docs (Swagger) |
-| [http://YOUR_DROPLET_IP/redoc](http://YOUR_DROPLET_IP/redoc) | API Docs (ReDoc) |
+| [http://134.199.211.67/front-page/front-page.html](http://134.199.211.67/front-page/front-page.html) | Frontend |
+| [http://134.199.211.67/docs](http://134.199.211.67/docs) | API Docs (Swagger) |
+| [http://134.199.211.67/redoc](http://134.199.211.67/redoc) | API Docs (ReDoc) |
 
 **Before using the demo:**
 - Traffic is **unencrypted** — anyone on the network can see what you send and receive. Use throwaway credentials only (fake email, dummy password).
