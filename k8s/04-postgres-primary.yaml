@@ -32,11 +32,6 @@ spec:
 # Mounted at /docker-entrypoint-initdb.d/ — the official postgres image
 # automatically executes all *.sh files in this directory during first init.
 #
-#  IMPORTANT: This script ONLY runs when PGDATA is empty (first ever boot).
-#    On subsequent Pod restarts with existing data, it does NOT run again.
-#    This is fine because extensions and replication slots persist in the database.
-#    If you need to re-run it: delete the PVC, or exec into the Pod and run manually.
-#
 #  IDEMPOTENCY: All commands use IF NOT EXISTS / WHERE NOT EXISTS guards,
 #    so even if you exec this script manually on an existing database, it's safe.
 apiVersion: v1
@@ -230,7 +225,7 @@ spec:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           # ─── PostgreSQL Server Arguments ─────────────────────────────
-          # These are passed directly to the "postgres" server process.
+          # These are passed directly to the "postgres" server process, is the way your PostgreSQL container knows exactly how to start after the init scripts have run, the SSL certs exist, and the PVC is mounted.
           # Each "-c key=value" pair sets a postgresql.conf parameter.
           args:
             - "postgres"
@@ -312,7 +307,6 @@ spec:
             # Helps find slow queries without verbose logging.
           # ─── Volume Mounts ───────────────────────────────────────────
           #
-          # THIS is where the "certs appear twice" confusion comes from.
           # There are 3 volumes mounted into the main container:
           #
           #   1. postgres-data → /var/lib/postgresql/data
@@ -323,7 +317,6 @@ spec:
           #      wrote to — but mounted at a DIFFERENT PATH and read-only.
           #      initContainer mounted it at /certs (to write).
           #      Main container mounts it at /var/lib/postgresql/certs (to read).
-          #      Same volume, two different mountPaths. That's the "two times."
           #
           #   3. init-scripts → /docker-entrypoint-initdb.d
           #      The init-primary.sh script from the ConfigMap above.
