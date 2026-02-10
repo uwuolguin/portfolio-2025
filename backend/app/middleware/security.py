@@ -63,35 +63,25 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     """
-    Force HTTPS in production.
-    If debug is False, this middleware ensures that requests are served over HTTPS.
+    HTTPS redirect middleware (TEMPORARILY DISABLED).
 
-    Behavior:
-    - In development (settings.debug=True): passthrough, no redirect.
-    - If request is already HTTPS (request.url.scheme == "https"): passthrough.
-    - If behind a reverse proxy that sets X-Forwarded-Proto=https: passthrough.
-    - Otherwise: redirect to the same URL with scheme="https" using a 301.
+    FIXME:
+    This middleware is intentionally disabled because the application is
+    currently running directly inside Kubernetes WITHOUT a TLS-terminating
+    reverse proxy (Ingress).
+
+    Problem:
+    - Kubernetes liveness/readiness probes use HTTP
+    - Internal pod-to-pod traffic uses HTTP
+    - Redirecting these requests causes 301 responses and breaks pod readiness
+
+    Re-enable ONLY when:
+    - An Ingress (Traefik / NGINX / Cloud LB) is added
+    - TLS is terminated at the Ingress
+    - X-Forwarded-Proto=https is correctly set by the proxy
+    - Health probes are explicitly excluded or handled at the Ingress level
     """
-    
+
     async def dispatch(self, request: Request, call_next):
-        from app.config import settings
-        
-        if settings.debug:
-            return await call_next(request)
-        
-        if request.url.scheme == "https":
-            return await call_next(request)
-        
-        forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
-        if forwarded_proto == "https":
-            return await call_next(request)
-        
-        https_url = request.url.replace(scheme="https")
-        logger.warning(
-            "https_redirect",
-            original_url=str(request.url),
-            redirect_url=str(https_url),
-            client_ip=request.client.host if request.client else None
-        )
-        
-        return RedirectResponse(url=str(https_url), status_code=301)
+        # TEMPORARILY DISABLED — pass-through only
+        return await call_next(request)
