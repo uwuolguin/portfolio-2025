@@ -191,7 +191,8 @@ CURRENT_ORIGINS=$(kubectl get configmap portfolio-config -n portfolio \
   -o jsonpath='{.data.ALLOWED_ORIGINS}')
 
 kubectl patch configmap portfolio-config -n portfolio --type merge \
-  -p "{\"data\":{\"ALLOWED_ORIGINS\":\"${CURRENT_ORIGINS},http://${DROPLET_IP}\"}}"
+  -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"http://${DROPLET_IP}\\\"]\"}}"
+
 
 log_info "Patched ALLOWED_ORIGINS with droplet IP: ${DROPLET_IP}"
 
