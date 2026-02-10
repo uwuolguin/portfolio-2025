@@ -209,7 +209,7 @@ kubectl create secret generic portfolio-secrets \
   --from-literal=MINIO_ROOT_PASSWORD="$MINIO_PASSWORD" \
   --from-literal=SECRET_KEY="$JWT_SECRET" \
   --from-literal=ADMIN_API_KEY="$ADMIN_API_KEY" \
-  --from-literal=ADMIN_BYPASS_IPS="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" \
+  --from-literal=ADMIN_BYPASS_IPS='["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]' \
   --from-literal=RESEND_API_KEY="re_YOUR_KEY_HERE" \
   --from-literal=ADMIN_EMAIL="admin@example.com" \
   --from-literal=API_BASE_URL="http://$DROPLET_IP" \
