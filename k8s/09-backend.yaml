@@ -41,7 +41,7 @@ spec:
     spec:
       initContainers:
         - name: wait-for-db
-          image: postgres:16
+          image: portfolio-postgres:16
           env:
             - name: POSTGRES_USER
               valueFrom:

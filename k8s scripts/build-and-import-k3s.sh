@@ -60,12 +60,14 @@ echo ""
 # Build images one at a time to reduce peak memory usage
 # =============================================================================
 
+# -------------------------------------------------------------------------
+# Backend
+# -------------------------------------------------------------------------
 log_info "Building backend image..."
 $DOCKER_CMD build -t portfolio-backend:latest ./backend
 log_success "Backend image built"
 echo ""
 
-# Import immediately and clean up to free memory
 log_info "Importing backend to k3s..."
 $DOCKER_CMD save portfolio-backend:latest | sudo k3s ctr images import -
 log_success "Backend imported"
@@ -73,6 +75,9 @@ echo ""
 
 $DOCKER_CMD builder prune -f --filter "until=1m" 2>/dev/null || true
 
+# -------------------------------------------------------------------------
+# Image service
+# -------------------------------------------------------------------------
 log_info "Building image-service..."
 $DOCKER_CMD build -t portfolio-image-service:latest ./image-service
 log_success "Image service built"
@@ -85,6 +90,24 @@ echo ""
 
 $DOCKER_CMD builder prune -f --filter "until=1m" 2>/dev/null || true
 
+# -------------------------------------------------------------------------
+# PostgreSQL (custom image with pg_cron)
+# -------------------------------------------------------------------------
+log_info "Building postgres image (pg_cron enabled)..."
+$DOCKER_CMD build -t portfolio-postgres:16 ./postgres
+log_success "Postgres image built"
+echo ""
+
+log_info "Importing postgres to k3s..."
+$DOCKER_CMD save portfolio-postgres:16 | sudo k3s ctr images import -
+log_success "Postgres imported"
+echo ""
+
+$DOCKER_CMD builder prune -f --filter "until=1m" 2>/dev/null || true
+
+# -------------------------------------------------------------------------
+# Nginx
+# -------------------------------------------------------------------------
 log_info "Building nginx..."
 $DOCKER_CMD build -t portfolio-nginx:latest ./nginx
 log_success "Nginx built"
@@ -108,7 +131,7 @@ echo ""
 # Verify
 # =============================================================================
 echo "Imported images in k3s:"
-sudo k3s ctr images ls | grep portfolio
+sudo k3s ctr images ls | grep portfolio || true
 echo ""
 
 echo "=================================="

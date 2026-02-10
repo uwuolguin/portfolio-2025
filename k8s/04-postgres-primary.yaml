@@ -183,7 +183,7 @@ spec:
                 # to not be world-readable, or it refuses to start.
                 chmod 600 /certs/server.key
                 chmod 644 /certs/server.crt
-                # 999:999 = the "postgres" user inside the postgres:16 image.
+                # 999:999 = the "postgres" user inside the portfolio-postgres:16 image.
                 # PostgreSQL runs as UID 999, so it must own the key file.
                 chown 999:999 /certs/server.key /certs/server.crt
               fi
@@ -196,7 +196,7 @@ spec:
       # =====================================================│================
       containers:
         - name: postgres
-          image: postgres:16
+          image: portfolio-postgres:16
           ports:
             - containerPort: 5432
               name: postgres
