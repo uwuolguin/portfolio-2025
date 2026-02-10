@@ -44,7 +44,6 @@ spec:
               apk add --no-cache openssl
               mkdir -p /certs
               if [ ! -f /certs/server.crt ]; then
-                echo "Generating PostgreSQL SSL certificates for replica"
                 openssl req -new -x509 -nodes -days 3650 \
                   -subj "/C=CL/ST=NA/L=NA/O=portfolio/CN=postgres-replica" \
                   -out /certs/server.crt \
@@ -56,6 +55,7 @@ spec:
           volumeMounts:
             - name: postgres-certs
               mountPath: /certs
+
         - name: replica-init
           image: portfolio-postgres:16
           imagePullPolicy: Never
@@ -78,133 +78,86 @@ spec:
             - |
               set -e
               echo "=== PostgreSQL Replica Initialization ==="
+
               if [ -f "$PGDATA/PG_VERSION" ]; then
-                echo "Replica already initialized, checking standby.signal..."
                 if [ -f "$PGDATA/standby.signal" ]; then
-                  echo "standby.signal exists, replica ready"
+                  echo "Replica already initialized"
                   exit 0
-                else
-                  echo "WARNING: Data exists but no standby.signal, recreating..."
-                  rm -rf "$PGDATA"/*
                 fi
+                rm -rf "$PGDATA"/*
               fi
-              echo "Waiting for primary to be ready..."
+
               until PGPASSWORD=$POSTGRES_PASSWORD pg_isready -h postgres-primary -U $POSTGRES_USER; do
-                echo "Primary not ready, waiting..."
                 sleep 5
               done
-              echo "Primary is ready, waiting additional 10s for stability..."
-              sleep 10
-              echo "Creating replication slot on primary if not exists..."
+
               PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-primary -U $POSTGRES_USER -d postgres -c "
                 SELECT pg_create_physical_replication_slot('replica_slot_1')
                 WHERE NOT EXISTS (
                   SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot_1'
                 );
-              " 2>/dev/null || echo "Slot may already exist"
-              echo "Taking base backup from primary..."
-              PGPASSWORD=$POSTGRES_PASSWORD pg_basebackup \
+              " 2>/dev/null || true
+
+              pg_basebackup \
                 -h postgres-primary \
                 -U $POSTGRES_USER \
                 -D $PGDATA \
                 -Fp -Xs -R -P -v \
                 --checkpoint=fast \
                 --wal-method=stream
-              echo "Configuring replica connection..."
-              cat >> $PGDATA/postgresql.auto.conf <<EOF
 
-              # Replica Configuration (auto-generated)
+              echo "Recreating pg_hba.conf locally"
+
+              cat > "$PGDATA/pg_hba.conf" <<'EOF'
+              local   all   all                         scram-sha-256
+              host    all   all   127.0.0.1/32          scram-sha-256
+              host    all   all   ::1/128               scram-sha-256
+              hostssl all   all   0.0.0.0/0             scram-sha-256
+              hostssl all   all   ::/0                  scram-sha-256
+              hostssl replication all 0.0.0.0/0         scram-sha-256
+              hostssl replication all ::/0              scram-sha-256
+              EOF
+
+                            chown postgres:postgres "$PGDATA/pg_hba.conf"
+                            chmod 600 "$PGDATA/pg_hba.conf"
+
+                            cat >> "$PGDATA/postgresql.auto.conf" <<EOF
               hot_standby = on
               primary_conninfo = 'host=postgres-primary port=5432 user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=require application_name=replica1'
               primary_slot_name = 'replica_slot_1'
               recovery_target_timeline = 'latest'
               EOF
-              touch $PGDATA/standby.signal
-              chmod 700 $PGDATA
+
+              touch "$PGDATA/standby.signal"
+              chmod 700 "$PGDATA"
+
               echo "=== Replica initialization complete ==="
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+
       containers:
         - name: postgres
           image: portfolio-postgres:16
           imagePullPolicy: Never
-          ports:
-            - containerPort: 5432
-              name: postgres
           env:
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: portfolio-secrets
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: portfolio-secrets
-                  key: POSTGRES_PASSWORD
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           args:
-            - "postgres"
-            - "-c"
-            - "ssl=on"
-            - "-c"
-            - "ssl_cert_file=/var/lib/postgresql/certs/server.crt"
-            - "-c"
-            - "ssl_key_file=/var/lib/postgresql/certs/server.key"
-            - "-c"
-            - "ssl_min_protocol_version=TLSv1.2"
-            - "-c"
-            - "hot_standby=on"
-            - "-c"
-            - "hot_standby_feedback=on"
-            - "-c"
-            - "max_standby_streaming_delay=30s"
-            - "-c"
-            - "wal_receiver_status_interval=10s"
-            # REDUCED memory for 2GB droplet
-            - "-c"
-            - "shared_buffers=64MB"
-            - "-c"
-            - "effective_cache_size=128MB"
-            - "-c"
-            - "work_mem=2MB"
+            - postgres
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/var/lib/postgresql/certs/server.crt
+            - -c
+            - ssl_key_file=/var/lib/postgresql/certs/server.key
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
             - name: postgres-certs
               mountPath: /var/lib/postgresql/certs
               readOnly: true
-          livenessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - pg_isready -U $POSTGRES_USER
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 5
-          readinessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - |
-                  pg_isready -U $POSTGRES_USER && \
-                  psql -U $POSTGRES_USER -d postgres -tAc "SELECT pg_is_in_recovery();" | grep -q 't'
-            initialDelaySeconds: 20
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 5
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "50m"
-            limits:
-              memory: "256Mi"
-              cpu: "300m"
+
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
