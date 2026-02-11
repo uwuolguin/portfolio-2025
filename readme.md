@@ -71,8 +71,6 @@ docker compose exec backend pytest app/tests/ -v
 
 See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s setup with PostgreSQL replication, load balancing, and production configuration.
 
-For deploying to a **DigitalOcean droplet**, see **[DigitalOcean Deployment Guide](./k8s%20scripts/README_DIGITAL_OCEAN.md)** — optimized manifests and scripts for a 2GB RAM droplet with all features enabled.
-
 ---
 
 ## ✨ Key Technical Achievements
