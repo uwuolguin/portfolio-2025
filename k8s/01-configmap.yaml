@@ -51,7 +51,7 @@ data:
 
   # Email
   VERIFICATION_TOKEN_EMAIL_TIME: "30"
-  EMAIL_FROM: "noreply@proveo.com"
+  EMAIL_FROM: "onboarding@resend.dev"
 
   # JWT
   ALGORITHM: "HS256"

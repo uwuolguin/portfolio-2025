@@ -160,7 +160,7 @@ class Settings(BaseSettings):
     verification_token_email_time: int = 30
     admin_email: str
     resend_api_key: str
-    email_from: str = "noreply@proveo.com"
+    email_from: str = "onboarding@resend.dev"
     api_base_url: str = "http://localhost"
 
 
