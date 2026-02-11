@@ -1,7 +1,3 @@
-Perform full end‑to‑end integration test as a real user
-
-Perform equivalent integration flow via Postman to check admin
-
 Review k8s/ and k8s_scripts/ for the last time
 
 To-Do: March- April 2026
