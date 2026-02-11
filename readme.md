@@ -240,7 +240,6 @@ proveo/
 ## 📖 Documentation
 
 - **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** - Full k8s setup, scaling, monitoring
-- **[DigitalOcean Droplet Guide](./k8s%20scripts/README_DIGITAL_OCEAN.md)** - 2GB droplet deployment with optimized manifests
 - **API Docs (Swagger)**: http://localhost/docs
 - **API Docs (ReDoc)**: http://localhost/redoc
 
