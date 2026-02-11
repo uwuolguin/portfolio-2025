@@ -237,13 +237,6 @@ proveo/
 
 ---
 
-## 📖 Documentation
-
-- **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** - Full k8s setup, scaling, monitoring
-- **API Docs (Swagger)**: http://134.199.211.67/docs
-
----
-
 ## 🎓 Learning Highlights
 
 This project demonstrates:
