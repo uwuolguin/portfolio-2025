@@ -77,6 +77,14 @@ newgrp docker
 ```
 > ⚠️ This takes 10-20 min on 2 CPUs. The image-service (TensorFlow wheels) is the slowest.
 
+### 4.5. Resend API Key
+```bash
+./set-resend-key.sh
+# Enter your key
+# Script will ask if you want to update Kubernetes secret
+# Choose "yes" to update immediately
+```
+
 ### 5. Deploy
 ```bash
 ./deploy-k3s-local.sh

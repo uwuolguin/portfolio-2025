@@ -17,6 +17,7 @@
 | [http://134.199.211.67/redoc](http://134.199.211.67/redoc) | API Docs (ReDoc) |
 
 **Before using the demo:**
+- The demo uses the free tier of the Resend API, so you can create users, but verification emails will not be delivered. As a result, posting a company is restricted to admins or users authorized by an admin (currently, the creator is the only admin).
 - Traffic is **unencrypted** — anyone on the network can see what you send and receive. Use throwaway credentials only (fake email, dummy password).
 - The demo runs on a $21/mo DigitalOcean droplet (2GB RAM). Expect slower responses, especially on image uploads (NSFW detection runs on swap).
 - For the best experience, use a **private/incognito browser window** so nothing gets cached or stored.
