@@ -21,7 +21,7 @@
 - Traffic is **unencrypted** — anyone on the network can see what you send and receive. Use throwaway credentials only (fake email, dummy password).
 - The demo runs on a $21/mo DigitalOcean droplet (2GB RAM). Expect slower responses, especially on image uploads (NSFW detection runs on swap).
 - For the best experience, use a **private/incognito browser window** so nothing gets cached or stored.
-- If you want to be extra cautious, consider connecting from a **disposable VM** (VirtualBox, UTM, or a cloud instance you can delete afterward). Since there's no TLS, a throwaway environment ensures nothing persists on your machine — browser history, cookies, cached responses, DNS cache — all gone when you delete the VM.
+- If you want to be extra cautious, consider connecting from a **disposable VM** (VirtualBox, UTM, or a cloud instance you can delete afterward). Since there's no TLS, a throwaway environment ensures nothing persists on your machine: browser history, cookies, cached responses, DNS cache, all gone when you delete the VM.
 
 ---
 
