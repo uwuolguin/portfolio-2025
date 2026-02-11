@@ -5,6 +5,8 @@ set -e
 # Portfolio k3s Deployment Script - DigitalOcean 2GB Droplet
 # Run as regular user with sudo privileges
 # Deploys services SEQUENTIALLY to avoid OOM on 2GB RAM
+# 
+# UPDATED: Now loads Resend API key from .env.secrets
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,30 +55,37 @@ fi
 export KUBECONFIG="$HOME/.kube/config"
 
 # =============================================================================
-# Helper functions (omitted for brevity - copy from original)
+# Helper functions
 # =============================================================================
 wait_for_pods_ready() {
     local label="$1"
     local namespace="$2"
     local timeout="${3:-180}"
     local description="${4:-pods}"
+
     log_info "Waiting for $description (max ${timeout}s)..."
+
     local counter=0
     local interval=5
+
     while [ $counter -lt $timeout ]; do
         local pod_count=$(kubectl get pods -l "$label" -n "$namespace" --no-headers 2>/dev/null | wc -l)
+
         if [ "$pod_count" -gt 0 ]; then
             if kubectl wait --for=condition=ready pod -l "$label" -n "$namespace" --timeout=10s &>/dev/null; then
                 log_success "$description ready"
                 return 0
             fi
         fi
+
         if [ $((counter % 20)) -eq 0 ]; then
             log_info "  Still waiting for $description... (${counter}/${timeout}s)"
         fi
+
         sleep $interval
         counter=$((counter + interval))
     done
+
     log_error "$description failed to start within ${timeout}s"
     kubectl get pods -l "$label" -n "$namespace" 2>/dev/null || true
     return 1
@@ -87,22 +96,29 @@ wait_for_statefulset_ready() {
     local namespace="$2"
     local timeout="${3:-240}"
     local description="${4:-$name}"
+
     log_info "Waiting for $description (max ${timeout}s)..."
+
     local counter=0
     local interval=5
+
     while [ $counter -lt $timeout ]; do
         local ready=$(kubectl get statefulset "$name" -n "$namespace" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
         local desired=$(kubectl get statefulset "$name" -n "$namespace" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+
         if [ "$ready" = "$desired" ] && [ "$ready" != "0" ]; then
             log_success "$description ready ($ready/$desired)"
             return 0
         fi
+
         if [ $((counter % 20)) -eq 0 ]; then
             log_info "  $description: $ready/$desired ready (${counter}/${timeout}s)"
         fi
+
         sleep $interval
         counter=$((counter + interval))
     done
+
     log_error "$description failed within ${timeout}s"
     kubectl describe statefulset "$name" -n "$namespace" 2>/dev/null | tail -20
     return 1
@@ -145,7 +161,9 @@ JWT_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
 ADMIN_API_KEY=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
 MINIO_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
 
-# Load Resend API key from .env.secrets if it exists
+# =============================================================================
+# Load Resend API key from .env.secrets
+# =============================================================================
 if [ -f "${SCRIPT_DIR}/.env.secrets" ]; then
     log_info "Loading Resend API key from .env.secrets"
     source "${SCRIPT_DIR}/.env.secrets"
@@ -198,8 +216,12 @@ kubectl apply -f "$K8S_DIR/01-configmap.yaml"
 echo ""
 
 # Patch ALLOWED_ORIGINS with droplet IP
+CURRENT_ORIGINS=$(kubectl get configmap portfolio-config -n portfolio \
+  -o jsonpath='{.data.ALLOWED_ORIGINS}')
+
 kubectl patch configmap portfolio-config -n portfolio --type merge \
   -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"http://${DROPLET_IP}\\\"]\"}}"
+
 
 log_info "Patched ALLOWED_ORIGINS with droplet IP: ${DROPLET_IP}"
 
@@ -246,7 +268,164 @@ log_info "Creating PVCs..."
 kubectl apply -f "$K8S_DIR/03-pvcs.yaml"
 echo ""
 
+# =============================================================================
+# PostgreSQL Primary
+# =============================================================================
+log_info "Deploying PostgreSQL Primary..."
+kubectl apply -f "$K8S_DIR/04-postgres-primary.yaml"
+
+if ! wait_for_statefulset_ready "postgres-primary" "portfolio" 240 "PostgreSQL Primary"; then
+    log_error "PostgreSQL Primary failed"
+    kubectl logs -n portfolio postgres-primary-0 --tail=30 2>/dev/null || true
+    exit 1
+fi
+
+sleep 5
+kubectl exec -n portfolio postgres-primary-0 -- \
+  psql -U postgres -d portfolio -c \
+  "SELECT pg_create_physical_replication_slot('replica_slot_1') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot_1');" \
+  2>/dev/null || log_warn "Replication slot may already exist"
+
+kubectl exec -n portfolio postgres-primary-0 -- \
+  psql -U postgres -d portfolio -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" 2>/dev/null || true
+
+kubectl exec -n portfolio postgres-primary-0 -- \
+  psql -U postgres -d portfolio -c "CREATE EXTENSION IF NOT EXISTS pg_cron;" 2>/dev/null || true
+
+log_success "PostgreSQL Primary configured"
+echo ""
+
+# =============================================================================
+# PostgreSQL Replica
+# =============================================================================
+log_info "Deploying PostgreSQL Replica..."
+kubectl apply -f "$K8S_DIR/05-postgres-replica.yaml"
+
+if ! wait_for_statefulset_ready "postgres-replica" "portfolio" 300 "PostgreSQL Replica"; then
+    log_warn "Replica not ready - backend will use primary for reads"
+    log_warn "Check: kubectl logs -n portfolio postgres-replica-0"
+fi
+echo ""
+
+# =============================================================================
+# Redis
+# =============================================================================
+log_info "Deploying Redis..."
+kubectl apply -f "$K8S_DIR/06-redis.yaml"
+if ! wait_for_pods_ready "app=redis" "portfolio" 60 "Redis"; then
+    log_error "Redis failed"; exit 1
+fi
+echo ""
+
+# =============================================================================
+# MinIO
+# =============================================================================
+log_info "Deploying MinIO..."
+kubectl apply -f "$K8S_DIR/07-minio.yaml"
+if ! wait_for_pods_ready "app=minio" "portfolio" 90 "MinIO"; then
+    log_error "MinIO failed"; exit 1
+fi
+echo ""
+
+# =============================================================================
+# Image Service
+# =============================================================================
+log_info "Deploying Image Service (1 replica, NSFW enabled - will use swap)..."
+kubectl apply -f "$K8S_DIR/08-image-service.yaml"
+if ! wait_for_pods_ready "app=image-service" "portfolio" 120 "Image Service"; then
+    log_error "Image Service failed"; exit 1
+fi
+echo ""
+
+# =============================================================================
+# Backend
+# =============================================================================
+log_info "Deploying Backend (1 replica)..."
+kubectl apply -f "$K8S_DIR/09-backend.yaml"
+if ! wait_for_pods_ready "app=backend" "portfolio" 300 "Backend"; then
+    log_error "Backend failed"
+    kubectl logs -n portfolio -l app=backend --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
+# Nginx
+# =============================================================================
+log_info "Deploying Nginx..."
+kubectl apply -f "$K8S_DIR/10-nginx.yaml"
+if ! wait_for_pods_ready "app=nginx" "portfolio" 60 "Nginx"; then
+    log_error "Nginx failed"; exit 1
+fi
+echo ""
+
+# =============================================================================
+# Summary
+# =============================================================================
 echo ""
 echo "============================================"
 echo "  DEPLOYMENT COMPLETE!"
+echo "============================================"
+echo ""
+
+log_info "All pods:"
+kubectl get pods -n portfolio -o wide
+echo ""
+
+log_info "Services:"
+kubectl get svc -n portfolio
+echo ""
+
+echo ""
+echo "============================================"
+echo "  ACCESS YOUR APP"
+echo "============================================"
+echo ""
+echo "  Frontend: http://$DROPLET_IP/front-page/front-page.html"
+echo "  API Docs: http://$DROPLET_IP/docs"
+echo "  Health:   http://$DROPLET_IP/health"
+echo ""
+echo "============================================"
+echo "  NEXT STEPS"
+echo "============================================"
+echo ""
+echo "  1. Create admin user:"
+echo "     kubectl exec -it -n portfolio deployment/backend -- \\"
+echo "       python -m scripts.admin.create_admin"
+echo ""
+echo "  2. Seed test data (optional):"
+echo "     kubectl exec -n portfolio deployment/backend -- \\"
+echo "       python -m scripts.database.seed_test_data"
+echo ""
+echo "  3. Setup pg_cron:"
+echo "     kubectl exec -n portfolio deployment/backend -- \\"
+echo "       python -m scripts.database.manage_search_refresh_cron"
+echo ""
+echo "  4. Check replication:"
+echo "     kubectl exec -n portfolio postgres-primary-0 -- \\"
+echo "       psql -U postgres -d portfolio -c \\"
+echo "       'SELECT client_addr, state FROM pg_stat_replication;'"
+echo ""
+echo "  5. Monitor memory:"
+echo "     watch 'free -h && echo && kubectl top pods -n portfolio'"
+echo ""
+echo "  Credentials: ${SCRIPT_DIR}/.credentials"
+echo ""
+echo "============================================"
+echo "  MEMORY BUDGET (2GB droplet + NSFW enabled)"
+echo "============================================"
+echo ""
+echo "  k3s system:        ~300MB"
+echo "  PostgreSQL primary: ~192-384MB"
+echo "  PostgreSQL replica: ~128-256MB"
+echo "  Redis:              ~32-96MB"
+echo "  MinIO:              ~128-256MB"
+echo "  Image Service:      ~384-768MB (TensorFlow NSFW)"
+echo "  Backend:            ~192-512MB"
+echo "  Nginx:              ~32-128MB"
+echo "  Swap:               2GB (safety net)"
+echo ""
+echo "  Total requests:    ~1088MB"
+echo "  Total limits:      ~2400MB (will use swap)"
+echo "  Available:          2048MB + 2048MB swap"
 echo "============================================"
