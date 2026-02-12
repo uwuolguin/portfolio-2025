@@ -8,13 +8,10 @@
 
 > **⚠️ This demo runs on HTTP (no TLS/HTTPS). Do not enter real credentials or personal information.**
 
-**Live at**: [http://134.199.211.67](http://134.199.211.67)
-
 | URL | What |
 |-----|------|
 | [http://134.199.211.67/front-page/front-page.html](http://134.199.211.67/front-page/front-page.html) | Frontend |
 | [http://134.199.211.67/docs](http://134.199.211.67/docs) | API Docs (Swagger) |
-| [http://134.199.211.67/redoc](http://134.199.211.67/redoc) | API Docs (ReDoc) |
 
 **Before using the demo:**
 - The demo uses the free tier of the Resend API, so you can create users, but verification emails will not be delivered. As a result, posting a company is restricted to admins or users authorized by an admin (currently, the creator is the only admin).
