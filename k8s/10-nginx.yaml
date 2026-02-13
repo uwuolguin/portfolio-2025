@@ -1,3 +1,4 @@
+# Only container exposed to the internet, that is why it is the only container with type: LoadBalancer
 ---
 apiVersion: v1
 kind: ConfigMap
