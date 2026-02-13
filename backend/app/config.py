@@ -5,13 +5,10 @@ Centralized settings management using pydantic-settings.
 All sensitive values should be loaded from environment variables.
 
 SECURITY NOTE: Never commit .env files with real credentials!
-
-UPDATED: Added database_url_primary and database_url_replica for read/write splitting
 """
 
-from typing import Optional, List, Dict, Set
-
-from pydantic import Field, field_validator, computed_field
+from typing import List, Dict
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,34 +20,12 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------------
-    # Database - Primary (Writes)
+    # Database
     # ------------------------------------------------------------------------
-    database_url: str  # Legacy - used as primary
-    alembic_database_url: str  # For migrations - always points to primary
-    
-    # Optional explicit URLs (if not set, derived from database_url)
-    database_url_primary: Optional[str] = None
-    database_url_replica: Optional[str] = None
-    
-    @computed_field
-    @property
-    def effective_database_url_primary(self) -> str:
-        """Get the primary database URL for writes"""
-        if self.database_url_primary:
-            return self.database_url_primary
-        # Default: use database_url as primary
-        return self.database_url
-    
-    @computed_field  
-    @property
-    def effective_database_url_replica(self) -> str:
-        """Get the replica database URL for reads"""
-        if self.database_url_replica:
-            return self.database_url_replica
-        # Default: derive replica URL from primary by replacing host
-        # This assumes postgres-primary -> postgres-replica naming
-        primary_url = self.effective_database_url_primary
-        return primary_url.replace("postgres-primary", "postgres-replica")
+    database_url: str  # Points to postgres-primary (legacy, kept for compatibility)
+    database_url_primary: str  # Write operations
+    database_url_replica: str  # Read operations
+    alembic_database_url: str  # Migrations - always primary
     
     # Pool settings
     db_pool_min_size: int = 5
@@ -60,10 +35,7 @@ class Settings(BaseSettings):
     db_timeout: int = 30
     db_command_timeout: int = 60
     db_server_timeout: int = 60
-
     db_ssl_mode: str = "require"
-    db_ssl_cert_path: Optional[str] = None
-    db_ssl_key_path: Optional[str] = None
 
     # ------------------------------------------------------------------------
     # Redis / Cache
@@ -84,24 +56,8 @@ class Settings(BaseSettings):
     # Admin Bypass Security
     # ------------------------------------------------------------------------
     admin_api_key: str
-    admin_bypass_ips: Set[str] = Field(
-        default_factory=set,
-        description="Comma-separated list of IPs/CIDRs allowed for admin bypass"
-    )
-    
-    @field_validator("admin_bypass_ips", mode="before")
-    @classmethod
-    def parse_admin_bypass_ips(cls, v):
-        """Parse comma-separated IP list into a set"""
-        if isinstance(v, set):
-            return v
-        if isinstance(v, str):
-            if not v.strip():
-                return set()
-            return {ip.strip() for ip in v.split(",") if ip.strip()}
-        if isinstance(v, (list, tuple)):
-            return set(v)
-        return set()
+    # K8s provides this as JSON list: ["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]
+    admin_bypass_ips: List[str] = Field(default_factory=list)
 
     # ------------------------------------------------------------------------
     # File uploads / Image processing
@@ -164,19 +120,4 @@ class Settings(BaseSettings):
     api_base_url: str = "http://localhost"
 
 
-# Create a property-based wrapper for backward compatibility
-class SettingsWrapper:
-    """Wrapper to provide computed properties as regular attributes"""
-    
-    def __init__(self):
-        self._settings = Settings()
-    
-    def __getattr__(self, name):
-        if name == "database_url_primary":
-            return self._settings.effective_database_url_primary
-        elif name == "database_url_replica":
-            return self._settings.effective_database_url_replica
-        return getattr(self._settings, name)
-
-
-settings = SettingsWrapper()
+settings = Settings()

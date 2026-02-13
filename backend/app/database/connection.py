@@ -174,46 +174,30 @@ class DatabasePoolManager:
     async def acquire_read(self) -> AsyncGenerator[asyncpg.Connection, None]:
         """
         Acquire a connection for READ operations.
-        Uses replica if available, falls back to primary.
+        Uses replica if available, falls back to primary on any error.
         """
-        pool = self.read_pool if self._replica_available and self.read_pool else self.write_pool
+        # Try replica first
+        if self.read_pool:
+            try:
+                conn = await self.read_pool.acquire()
+                try:
+                    yield conn
+                    return
+                finally:
+                    await self.read_pool.release(conn)
+            except Exception as e:
+                logger.debug("replica_failed_using_primary", error=str(e))
         
-        if not pool:
-            raise RuntimeError("No database pool available for reads")
-
-        conn = await pool.acquire()
+        # Fall back to primary
+        if not self.write_pool:
+            raise RuntimeError("No database pool available")
+        
+        conn = await self.write_pool.acquire()
         try:
             yield conn
         finally:
-            await pool.release(conn)
+            await self.write_pool.release(conn)
 
-    async def check_replica_health(self) -> bool:
-        """
-        Check if replica is healthy and re-enable if it was disabled.
-        Called periodically to restore replica usage after failures.
-        """
-        if self._replica_available:
-            return True
-            
-        if not self.read_pool:
-            return False
-            
-        try:
-            async with self.read_pool.acquire() as conn:
-                is_replica = await conn.fetchval("SELECT pg_is_in_recovery()")
-                if is_replica:
-                    self._replica_available = True
-                    logger.info("read_replica_restored")
-                    return True
-        except Exception as e:
-            logger.debug("replica_health_check_failed", error=str(e))
-            
-        return False
-
-    @property
-    def replica_available(self) -> bool:
-        """Check if replica is currently being used for reads"""
-        return self._replica_available
 
 
 # Global pool manager instance
@@ -255,13 +239,4 @@ async def get_db_read() -> AsyncGenerator[asyncpg.Connection, None]:
             return await db.fetch("SELECT * FROM items")
     """
     async with pool_manager.acquire_read() as conn:
-        yield conn
-
-
-async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
-    """
-    Legacy dependency - routes to WRITE pool for backward compatibility.
-    New code should use get_db_write() or get_db_read() explicitly.
-    """
-    async with pool_manager.acquire_write() as conn:
         yield conn
