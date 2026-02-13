@@ -82,7 +82,7 @@ See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s se
 ## ✨ Key Technical Achievements
 
 ### 🗃️ **Architecture & Infrastructure**
-- **Kubernetes (k3s) deployment** - 9 pods, 2 CPU cores, 2GB RAM (+2GB swap), 60GB storage
+- **Kubernetes (k3s) deployment** - 7 pods, 2 CPU cores, 2GB RAM (+2GB swap), 60GB storage
 - **PostgreSQL streaming replication** - Primary for writes, replica for reads with automatic failback
 - **Microservices** - Separate image processing service with NSFW detection
 - **Zero-downtime deployments** - Rolling updates with health checks
