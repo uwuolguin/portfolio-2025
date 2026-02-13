@@ -172,31 +172,18 @@ class DatabasePoolManager:
 
     @asynccontextmanager
     async def acquire_read(self) -> AsyncGenerator[asyncpg.Connection, None]:
-        """
-        Acquire a connection for READ operations.
-        Uses replica if available, falls back to primary on any error.
-        """
-        # Try replica first
-        if self.read_pool:
+
+        if self._replica_available and self.read_pool:
             try:
-                conn = await self.read_pool.acquire()
-                try:
+                async with self.read_pool.acquire() as conn:
                     yield conn
                     return
-                finally:
-                    await self.read_pool.release(conn)
             except Exception as e:
-                logger.debug("replica_failed_using_primary", error=str(e))
-        
-        # Fall back to primary
-        if not self.write_pool:
-            raise RuntimeError("No database pool available")
-        
-        conn = await self.write_pool.acquire()
-        try:
+                logger.warning("replica_connection_failed_falling_back", error=str(e))
+
+        async with self.acquire_write() as conn:
             yield conn
-        finally:
-            await self.write_pool.release(conn)
+
 
 
 
