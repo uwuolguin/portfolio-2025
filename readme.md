@@ -37,7 +37,7 @@
 
 ## 🚀 Quick Start
 
-### Docker Compose (Recommended for Demo)
+### Docker Compose (Recommended for Local Demo)
 
 ```bash
 # 1. Clone repository at stable commit
