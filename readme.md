@@ -31,7 +31,7 @@
 - AI-powered NSFW detection (TensorFlow + OpenNSFW2)
 - Kubernetes deployment with 7 pods across 7 services (2GB droplet configuration)
 - Bilingual (ES/EN) with automatic translation fallback
-- Zero-downtime deployments with rolling updates
+- Zero-downtime deployments - Rolling updates replace pods one at a time (new pod starts → passes health checks → old pod terminates), ensuring traffic is always served
 
 **Pod Breakdown (2GB Droplet):**
 1. `postgres-primary-0` - StatefulSet from `04-postgres-primary.yaml`
