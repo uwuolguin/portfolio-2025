@@ -29,9 +29,18 @@
 **Highlights**: 
 - Database read/write splitting with streaming replication
 - AI-powered NSFW detection (TensorFlow + OpenNSFW2)
-- Kubernetes deployment with 9 pods across 6 services
+- Kubernetes deployment with 7 pods across 7 services (2GB droplet configuration)
 - Bilingual (ES/EN) with automatic translation fallback
 - Zero-downtime deployments with rolling updates
+
+**Pod Breakdown (2GB Droplet):**
+1. `postgres-primary-0` - StatefulSet from `04-postgres-primary.yaml`
+2. `postgres-replica-0` - StatefulSet from `05-postgres-replica.yaml`
+3. `redis-*` - Deployment from `06-redis.yaml`
+4. `minio-*` - Deployment from `07-minio.yaml`
+5. `image-service-*` - Deployment from `08-image-service.yaml` (1 replica)
+6. `backend-*` - Deployment from `09-backend.yaml` (1 replica)
+7. `nginx-*` - Deployment from `10-nginx.yaml`
 
 ---
 
