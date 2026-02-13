@@ -222,15 +222,15 @@ kubectl logs -n portfolio deployment/backend -f
 kubectl logs -n portfolio deployment/image-service -f
 ```
 
-### Access Services via Port-Forward
+### Access Services via Port-Forward (From inside the Droplet)
 ```bash
 # API docs
 kubectl port-forward -n portfolio svc/backend 8000:8000
-# Visit http://localhost:8000/docs
+# Visit curl http://localhost:8000/docs in another console
 
 # MinIO console
 kubectl port-forward -n portfolio svc/minio 9001:9001
-# Visit http://localhost:9001
+# Visit curl http://localhost:9001 in another console
 ```
 
 ### Monitor Memory
