@@ -161,16 +161,23 @@ kubectl exec -n portfolio postgres-replica-0 -- \
 - TensorFlow model loaded at startup (~500MB)
 - Automatic content moderation on image uploads
 - Runs within swap on 2GB, functional but not fast
-
 ```bash
-# Check NSFW model status
-kubectl logs -n portfolio deployment/image-service | grep -i nsfw
+# Check NSFW model status (verify model is loaded)
+kubectl logs -n portfolio deployment/image-service | grep -i "nsfw\|model\|loaded"
 
-# Watch image processing
+# Check health endpoint (shows full NSFW config)
+# First, check if port 8080 is in use and kill it if needed
+sudo lsof -i :8080
+# If port is in use, kill the process: sudo kill -9 <PID>
+
+kubectl port-forward -n portfolio svc/image-service 8080:8080 &
+sleep 2
+curl http://localhost:8080/health
+# Expected: {"status":"healthy",...,"nsfw":{"enabled":true,"model_loaded":true,...}}
+
+# Watch image processing in real-time
 kubectl logs -n portfolio deployment/image-service -f
 ```
-
----
 
 ## Memory Budget (NSFW Enabled)
 
