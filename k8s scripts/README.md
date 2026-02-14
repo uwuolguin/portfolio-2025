@@ -140,13 +140,13 @@ The scripts handle this automatically , you just need a user with sudo access.
 ```bash
 # Verify replication is working
 kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -c \
-  "SELECT application_name, state, sync_state FROM pg_stat_replication;"
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "SELECT application_name, state, sync_state FROM pg_stat_replication;"'
 
 # Confirm replica is in recovery mode
 kubectl exec -n portfolio postgres-replica-0 -- \
-  psql -U postgres -d postgres -c \
-  "SELECT pg_is_in_recovery();"
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -c \
+  "SELECT pg_is_in_recovery();"'
 # Should return: t (true)
 ```
 
@@ -201,16 +201,16 @@ kubectl get pods -n portfolio -l 'app in (postgres-primary,postgres-replica,imag
 ```bash
 # Connect to primary (writes)
 kubectl exec -it -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio'
 
 # Connect to replica (reads only)
 kubectl exec -it -n portfolio postgres-replica-0 -- \
-  psql -U postgres -d portfolio
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio'
 
 # Check replication lag
 kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -c \
-  "SELECT client_addr, state, replay_lag FROM pg_stat_replication;"
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "SELECT client_addr, state, replay_lag FROM pg_stat_replication;"'
 ```
 
 ### Monitor Logs
@@ -247,22 +247,22 @@ watch 'free -h && echo && kubectl top pods -n portfolio 2>/dev/null'
 ```bash
 # Watch replication status
 watch 'kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -tAc \
-  "SELECT state, replay_lag FROM pg_stat_replication;"'
+  bash -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -U postgres -d portfolio -tAc \
+  \"SELECT state, replay_lag FROM pg_stat_replication;\""'
 
 # Create test data on primary
 kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -c \
-  "CREATE TABLE demo_test (id serial, data text, created_at timestamp default now());"
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "CREATE TABLE demo_test (id serial, data text, created_at timestamp default now());"'
 
 kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -c \
-  "INSERT INTO demo_test (data) VALUES ('test1'), ('test2'), ('test3');"
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "INSERT INTO demo_test (data) VALUES ('"'"'test1'"'"'), ('"'"'test2'"'"'), ('"'"'test3'"'"');"'
 
 # Verify replica received the data
 kubectl exec -n portfolio postgres-replica-0 -- \
-  psql -U postgres -d portfolio -c \
-  "SELECT * FROM demo_test;"
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "SELECT * FROM demo_test;"'
 ```
 
 ### 2. Test Image Upload with NSFW Detection
@@ -308,8 +308,8 @@ kubectl logs <pod-name> -n portfolio
 ```bash
 # Check replication slot exists
 kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -c \
-  "SELECT slot_name, active FROM pg_replication_slots;"
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "SELECT slot_name, active FROM pg_replication_slots;"'
 
 # Recreate replica if needed
 kubectl delete pod -n portfolio postgres-replica-0
@@ -415,7 +415,3 @@ export KUBECONFIG=~/.kube/config
        InitContainers can prepare volumes so main containers start with everything ready.
 
 `
-
-
-
-
