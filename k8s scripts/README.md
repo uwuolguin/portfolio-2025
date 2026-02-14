@@ -139,14 +139,21 @@ The scripts handle this automatically , you just need a user with sudo access.
 
 ```bash
 # Verify replication is working
-kubectl exec -n portfolio postgres-primary-0 -- \
+kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
   "SELECT application_name, state, sync_state FROM pg_stat_replication;"'
 
-# Confirm replica is in recovery mode
+### 2. Confirm replica is in recovery mode
+
+**Note**: The replica uses the official `postgres:16` image (not the custom `portfolio-postgres:16`), 
+so it doesn't have `.pgpass` configured. You need to provide the password explicitly:
+```bash
+# Get the password from Kubernetes secret
+POSTGRES_PASS=$(kubectl get secret portfolio-secrets -n portfolio -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+
+# Check if replica is in recovery mode
 kubectl exec -n portfolio postgres-replica-0 -- \
-  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -c \
-  "SELECT pg_is_in_recovery();"'
+  bash -c "PGPASSWORD='${POSTGRES_PASS}' psql -U postgres -d postgres -c 'SELECT pg_is_in_recovery();'"
 # Should return: t (true)
 ```
 
