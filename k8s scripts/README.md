@@ -376,24 +376,24 @@ export KUBECONFIG=~/.kube/config
   - Recovery process: provision a new node, install k3s, restore from backup, redeploy.
   - Key insight: `local-path` + single-node = convenient for demos, but **not durable for production**.
 
-- ## 🔹 Volume / VolumeMount Order (Kubernetes Note)
+## 🔹 Volume / VolumeMount Order (Kubernetes Note)
 
-  1. **Volumes (`volumes:`)**  
-     - Created or attached **before any container starts**.  
-     - This includes **PVCs**, `emptyDir`, and **ConfigMaps**.
+1. **Volumes (`volumes:`)**  
+   - Created or attached **before any container starts**.  
+   - This includes **PVCs**, `emptyDir`, and **ConfigMaps**.
 
-  2. **InitContainers**  
-     - Run **after volumes exist**.  
-     - Can read/write to the volumes to prepare data, certificates, or scripts.
+2. **VolumeMounts**  
+   - Define **per-container mappings** that specify where a volume appears inside that container.  
+   - Before a container (initContainer or main) starts, Kubernetes **mounts the volumes at the specified paths**.  
+   - This separation explains why Kubernetes requires both `volumes:` (definition) and `volumeMounts:` (container path).
 
-  3. **Main containers**  
-     - Run **after all initContainers complete**.  
-     - See whatever initContainers wrote to the volumes.
+3. **InitContainers**  
+   - Run **after volumes exist and are mounted**.  
+   - Can read/write to the volumes to prepare data, certificates, or scripts.
 
-  4. **VolumeMounts**  
-     - Define **per-container mappings** that specify where a volume appears inside that container.  
-     - Before a container (initContainer or main) starts, Kubernetes **mounts the volumes at the specified paths**.  
-     - This separation explains why Kubernetes requires both `volumes:` (definition) and `volumeMounts:` (container path).  
-       InitContainers can prepare volumes so main containers start with everything ready.
+4. **Main containers**  
+   - Run **after all initContainers complete**.  
+   - See whatever initContainers wrote to the volumes.  
+   - InitContainers can prepare volumes so main containers start with everything ready.
 
 `
