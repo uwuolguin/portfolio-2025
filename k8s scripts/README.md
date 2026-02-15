@@ -256,40 +256,6 @@ watch 'free -h && echo && kubectl top pods -n portfolio 2>/dev/null'
 
 ---
 
-## 🧪 Testing the Demo
-
-### 1. Test Database Replication
-
-```bash
-# Watch replication status
-watch 'kubectl exec -n portfolio postgres-primary-0 -- \
-  bash -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -U postgres -d portfolio -tAc \
-  \"SELECT state, replay_lag FROM pg_stat_replication;\""'
-
-# Create test data on primary
-kubectl exec -n portfolio postgres-primary-0 -- \
-  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
-  "CREATE TABLE demo_test (id serial, data text, created_at timestamp default now());"'
-
-kubectl exec -n portfolio postgres-primary-0 -- \
-  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
-  "INSERT INTO demo_test (data) VALUES ('"'"'test1'"'"'), ('"'"'test2'"'"'), ('"'"'test3'"'"');"'
-
-# Verify replica received the data
-kubectl exec -n portfolio postgres-replica-0 -- \
-  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
-  "SELECT * FROM demo_test;"'
-```
-
-### 2. Test Image Upload with NSFW Detection
-
-```bash
-# Upload images via the API and watch which pod processes them
-kubectl logs -n portfolio deployment/image-service -f
-```
-
----
-
 ## Scaling Up Later
 
 If you upgrade to a 4GB+ droplet:
