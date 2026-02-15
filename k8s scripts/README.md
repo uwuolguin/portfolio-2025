@@ -214,15 +214,17 @@ kubectl get pods -n portfolio -l 'app in (postgres-primary,postgres-replica,imag
 ### Check Database Activity
 ```bash
 # Connect to primary (writes)
-kubectl exec -it -n portfolio postgres-primary-0 -- \
+kubectl exec -it -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio'
 
 # Connect to replica (reads only)
-kubectl exec -it -n portfolio postgres-replica-0 -- \
-  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio'
+# Note: Replica uses official postgres:16 image without .pgpass, so password must be provided explicitly
+POSTGRES_PASS=$(kubectl get secret portfolio-secrets -n portfolio -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+kubectl exec -it -n portfolio -c postgres postgres-replica-0 -- \
+  bash -c "PGPASSWORD='${POSTGRES_PASS}' psql -U postgres -d portfolio"
 
 # Check replication lag
-kubectl exec -n portfolio postgres-primary-0 -- \
+kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
   "SELECT client_addr, state, replay_lag FROM pg_stat_replication;"'
 ```
