@@ -27,6 +27,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Sanity check: docker-compose.yml is a reliable landmark for the repo root, if it exits means we are in the right place, most likely the docker files used in this script will be present.
 if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
     log_error "Cannot find docker-compose.yml in repo root: $REPO_ROOT"
     exit 1
