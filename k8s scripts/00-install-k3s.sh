@@ -76,13 +76,33 @@ echo ""
 # =============================================================================
 # Step 2: Install Docker (needed to build images)
 # =============================================================================
+# -----------------------------------------------------------------------------
+# Docker Installation Note
+# -----------------------------------------------------------------------------
+# The block below downloads the official Docker install script from get.docker.com
+# and saves it to install-docker.sh WITHOUT executing it.
+#
+# Before running this script in a production environment, inspect it first:
+#   less install-docker.sh        # scroll with arrows, search with /, quit with q
+#
+# Once you have reviewed the script and are satisfied, run it manually:
+#   sh install-docker.sh
+#
+# For automated/demo environments the script is executed directly after download.
+# For production, consider installing Docker via apt instead:
+#   https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
+# -----------------------------------------------------------------------------
 if ! command -v docker &> /dev/null; then
     log_info "Installing Docker..."
-    curl -fsSL https://get.docker.com | sudo sh
+    curl -fsSL https://get.docker.com -o install-docker.sh
+    # Show the script so you can review it
+    less install-docker.sh
+    # Pause and wait for user confirmation
+    read -p "Press Enter to continue with Docker installation, or Ctrl+C to cancel..."
+    sh install-docker.sh
     sudo systemctl enable docker
     sudo systemctl start docker
-    # Add current user to docker group
-    sudo usermod -aG docker "$USER"
+    sudo usermod -aG docker "$USER"  
     log_success "Docker installed"
     log_warn "You were added to the 'docker' group."
     log_warn "Run 'newgrp docker' or log out/in for it to take effect."
@@ -93,8 +113,23 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3: Install k3s
+# Step 3: Install k3s (lightweight Kubernetes)
 # =============================================================================
+# -----------------------------------------------------------------------------
+# k3s Installation Note
+# -----------------------------------------------------------------------------
+# The block below downloads the official k3s install script from get.k3s.io
+# and saves it to install-k3s.sh WITHOUT executing it.
+#
+# Before proceeding, inspect it first:
+#   less install-k3s.sh           # scroll with arrows, search with /, quit with q
+#
+# Once you have reviewed the script and are satisfied, press Enter to continue.
+# If you are not satisfied, press Ctrl+C to cancel the installation entirely.
+#
+# For production, consider pinning to a specific k3s version instead:
+#   https://docs.k3s.io/installation/configuration
+# -----------------------------------------------------------------------------
 if command -v k3s &> /dev/null; then
     log_success "k3s already installed"
     k3s --version
@@ -105,12 +140,26 @@ if command -v k3s &> /dev/null; then
     fi
 else
     log_info "Installing k3s..."
-    curl -sfL https://get.k3s.io | sudo sh -s - \
-        --write-kubeconfig-mode 644 \
-        --disable traefik \
-        --kubelet-arg="eviction-hard=memory.available<100Mi" \
-        --kubelet-arg="eviction-soft=memory.available<200Mi" \
-        --kubelet-arg="eviction-soft-grace-period=memory.available=30s"
+
+    curl -sfL https://get.k3s.io -o install-k3s.sh
+
+    less install-k3s.sh
+
+    read -r -p "Press Enter to continue with k3s installation, or Ctrl+C to cancel..."
+
+    sudo INSTALL_K3S_EXEC="\
+--write-kubeconfig-mode 644 \
+--disable traefik \
+--kubelet-arg=eviction-hard=memory.available<100Mi \
+--kubelet-arg=eviction-soft=memory.available<200Mi \
+--kubelet-arg=eviction-soft-grace-period=memory.available=30s" \
+    sh install-k3s.sh
+
+    sudo systemctl is-active --quiet k3s || {
+        log_error "k3s failed to start"
+        exit 1
+    }
+
     log_success "k3s installed"
 fi
 
