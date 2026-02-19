@@ -1,6 +1,6 @@
 # NOTE:
 # I pre-build TensorFlow wheels to drastically reduce build time and startup latency.
-# This significantly increases final image size, from 3.65 GB to 4.85 GB.
+# This significantly increases final image size (Windows OS), from 3.65 GB to 4.85 GB.
 # Acceptable for PoC and frequent rebuilds.
 # Re-evaluate if disk pressure or registry costs become a concern
 FROM python:3.11-slim AS builder
