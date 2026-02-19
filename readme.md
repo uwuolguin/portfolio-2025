@@ -10,8 +10,8 @@
 
 | URL | What |
 |-----|------|
-| [http://134.199.211.67/front-page/front-page.html](http://134.199.211.67/front-page/front-page.html) | Frontend |
-| [http://134.199.211.67/docs](http://134.199.211.67/docs) | API Docs (Swagger) |
+| [http://143.110.154.54/front-page/front-page.html](http://143.110.154.54/front-page/front-page.html) | Frontend |
+| [http://143.110.154.54/docs](http://143.110.154.54/docs) | API Docs (Swagger) |
 
 **Before using the demo:**
 - The demo uses the free tier of the Resend API, so you can create users, but verification emails will not be delivered. As a result, posting a company is restricted to admins or users authorized by an admin (currently, the creator is the only admin).

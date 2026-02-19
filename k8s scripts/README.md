@@ -51,7 +51,7 @@ su - deploy
 
 ### 1. Create Droplet & SSH In
 ```bash
-ssh deploy@134.199.211.67
+ssh deploy@143.110.154.54
 # or ssh root, then create a user (see User Setup above)
 ```
 
@@ -110,9 +110,9 @@ kubectl exec -n portfolio deployment/backend -- \
 ```
 ### 7. Access
 ```
-http://134.199.211.67/front-page/front-page.html
-http://134.199.211.67/docs
-http://134.199.211.67/health
+http://143.110.154.54/front-page/front-page.html
+http://143.110.154.54/docs
+http://143.110.154.54/health
 ```
 
 ---
