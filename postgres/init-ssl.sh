@@ -1,4 +1,6 @@
 #!/bin/bash
+#postgresql.conf supports native includes, so we append an include directive.
+#pg_hba.conf does not, so we replace it entirely via a symlink to our custom version.
 set -e
 
 echo "Starting PostgreSQL SSL bootstrap (config only)..."
