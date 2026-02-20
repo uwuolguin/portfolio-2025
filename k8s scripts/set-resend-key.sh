@@ -72,7 +72,7 @@ echo ""
 
 # Check if key is already in Kubernetes
 if command -v kubectl &> /dev/null; then
-    if kubectl get secret portfolio-secrets -n portfolio &> /dev/null 2>&1; then
+    if kubectl get secret portfolio-secrets -n portfolio &> /dev/null; then
         log_info "Found existing Kubernetes secret"
         echo ""
         read -p "Update Kubernetes secret now? (yes/no): " update_k8s
