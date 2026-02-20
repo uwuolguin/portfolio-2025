@@ -118,7 +118,9 @@ async def resend_verification(
 @router.post("/login", response_model=LoginResponse)
 async def login(
     user_data: UserLogin, 
-    response: Response, 
+    response: Response,
+    # Uses write pool intentionally: guards against replication lag
+    # immediately after signup
     db: asyncpg.Connection = Depends(get_db_write)
 ):
     user = await DB.get_user_by_email(conn=db, email=user_data.email)
