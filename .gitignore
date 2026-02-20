@@ -5,3 +5,4 @@ uploads/
 fastapi-env/
 *.tar.gz
 .env.secrets
+JOB TARGETS*
