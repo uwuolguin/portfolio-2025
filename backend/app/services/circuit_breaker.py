@@ -23,6 +23,7 @@ class CircuitBreaker:
             if self._state == "OPEN":
                 if time.time() - self._last_failure >= self.recovery_timeout:
                     self._state = "HALF_OPEN"
+                    self._failures = 0
                 else:
                     raise CircuitBreakerOpen("Image service circuit is open")
             elif self._state == "HALF_OPEN":
@@ -37,5 +38,5 @@ class CircuitBreaker:
         async with self._lock:
             self._failures += 1
             self._last_failure = time.time()
-            if self._failures >= self.failure_threshold:
+            if self._failures >= self.failure_threshold  or self._state == "HALF_OPEN":
                 self._state = "OPEN"
