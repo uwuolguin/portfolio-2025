@@ -25,6 +25,8 @@ class CircuitBreaker:
                     self._state = "HALF_OPEN"
                 else:
                     raise CircuitBreakerOpen("Image service circuit is open")
+            elif self._state == "HALF_OPEN":
+                raise CircuitBreakerOpen("Circuit recovering, probe in progress")
 
     async def record_success(self):
         async with self._lock:
