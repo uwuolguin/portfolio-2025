@@ -15,6 +15,7 @@ import uuid
 from app.config import settings
 from app.database.transactions import DB
 from app.services.image_service_client import image_service_client
+from app.redis.cache_manager import cache_manager
 
 logger = structlog.get_logger(__name__)
 
@@ -80,7 +81,6 @@ async def seed_test_data() -> None:
                     "SELECT uuid FROM proveo.communes WHERE name = 'Santiago Centro'"
                 )
                 commune_1_uuid = row['uuid']
-
             try:
                 commune_2 = await DB.create_commune(conn, "Providencia")
                 commune_2_uuid = commune_2.uuid
@@ -89,6 +89,7 @@ async def seed_test_data() -> None:
                     "SELECT uuid FROM proveo.communes WHERE name = 'Providencia'"
                 )
                 commune_2_uuid = row['uuid']
+            await cache_manager.invalidate_communes()
 
             # Create or get products
             try:
@@ -108,6 +109,7 @@ async def seed_test_data() -> None:
                     "SELECT uuid FROM proveo.products WHERE name_es = 'Alimentos'"
                 )
                 product_2_uuid = row['uuid']
+            await cache_manager.invalidate_products()
 
             for i, user_data in enumerate(TEST_USERS):
                 try:
