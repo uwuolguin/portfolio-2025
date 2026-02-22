@@ -221,7 +221,6 @@ proveo/
 │   ├── set-resend-key.sh
 │   ├── cleanup.sh
 │   ├── README.md                # K8s deployment guide
-│   └── README_DIGITAL_OCEAN.md  # DigitalOcean droplet guide
 │
 ├── nginx/                       # Reverse proxy + frontend
 │   ├── nginx.conf
