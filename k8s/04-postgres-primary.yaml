@@ -57,6 +57,7 @@ spec:
 # They run automatically on first boot (empty PGDATA) — no ConfigMap needed.
 #
 apiVersion: apps/v1
+#see statefulset as a controller, a K8s process that watches your desired state and makes reality match it.
 kind: StatefulSet
 metadata:
   name: postgres-primary

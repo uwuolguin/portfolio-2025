@@ -137,15 +137,20 @@ The scripts handle this automatically , you just need a user with sudo access.
 - **Replica (reads)**: All SELECT queries (with fallback to primary)
 - Automatic streaming replication with WAL
 
+> **Schema note**: All application tables live in the `proveo` schema (not `public`).
+> Use `\dt proveo.*` to list tables and `SET search_path TO proveo;` to avoid typing the schema prefix.
+> `alembic_version` is the only table in `public`.
+
 ```bash
 # Verify replication is working
 kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
   "SELECT application_name, state, sync_state FROM pg_stat_replication;"'
+```
 
 ### 2. Confirm replica is in recovery mode
 
-**Note**: The replica uses the official `postgres:16` image (not the custom `portfolio-postgres:16`), 
+**Note**: The replica uses the official `postgres:16` image (not the custom `portfolio-postgres:16`),
 so it doesn't have `.pgpass` configured. You need to provide the password explicitly:
 ```bash
 # Get the password from Kubernetes secret
@@ -157,7 +162,7 @@ kubectl exec -n portfolio postgres-replica-0 -- \
 # Should return: t (true)
 ```
 
-### 2. Image Service with NSFW Detection
+### 3. Image Service with NSFW Detection
 - TensorFlow model loaded at startup (~500MB)
 - Automatic content moderation on image uploads
 - Runs within swap on 2GB, functional but not fast
@@ -217,6 +222,12 @@ kubectl get pods -n portfolio -l 'app in (postgres-primary,postgres-replica,imag
 kubectl exec -it -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio'
 
+# Once inside psql, all app tables are in the proveo schema:
+#   \dt proveo.*                        -- list all tables
+#   SET search_path TO proveo;          -- avoid typing proveo. every time
+#   SELECT * FROM proveo.users LIMIT 5;
+#   SELECT * FROM proveo.companies LIMIT 5;
+
 # Connect to replica (reads only)
 # Note: Replica uses official postgres:16 image without .pgpass, so password must be provided explicitly
 POSTGRES_PASS=$(kubectl get secret portfolio-secrets -n portfolio -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
@@ -227,6 +238,15 @@ kubectl exec -it -n portfolio -c postgres postgres-replica-0 -- \
 kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
   "SELECT client_addr, state, replay_lag FROM pg_stat_replication;"'
+
+# Quick table counts (primary)
+kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "SELECT schemaname, tablename, n_live_tup FROM pg_stat_user_tables WHERE schemaname = '"'"'proveo'"'"' ORDER BY n_live_tup DESC;"'
+
+# List all tables in proveo schema
+kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c "\dt proveo.*"'
 ```
 
 ### Monitor Logs
@@ -298,6 +318,18 @@ kubectl delete pod -n portfolio postgres-replica-0
 # StatefulSet will auto-recreate and re-sync
 ```
 
+### Tables Appear Missing (Wrong Schema)
+```bash
+# All app tables are in the proveo schema, NOT public.
+# public only contains alembic_version.
+kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c "\dt proveo.*"'
+
+# List all schemas
+kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
+  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c "\dn"'
+```
+
 ### Image Service Not Starting
 ```bash
 # Check if MinIO is accessible
@@ -365,6 +397,7 @@ export KUBECONFIG=~/.kube/config
 - **Auto-generated secrets**: Deploy script creates secure passwords and saves them to `.credentials`.
 - **Non-root operation**: Scripts use `sudo` only where needed; `kubectl` runs as a regular user.
 - **Demo setup**: Optimized to show the full stack on minimal hardware.
+- **Schema layout**: All application tables live in the `proveo` schema. `public` only contains `alembic_version`. Always use `proveo.*` when querying tables directly.
 - **Node destruction warning / Local-path limitation**:
   - Data is stored on the node's local SSD via `local-path`. If the node is deleted or the SSD fails, the database is lost.
   - For the demo app, the intended strategy is a full restart: run `cleanup.sh` and then `deploy-k3s-local.sh` on a new droplet. Data will be lost, but Alembic migrations recreate the schema and test data can be re-seeded.
@@ -395,5 +428,3 @@ export KUBECONFIG=~/.kube/config
    - Run **after all initContainers complete**.  
    - See whatever initContainers wrote to the volumes.  
    - InitContainers can prepare volumes so main containers start with everything ready.
-
-`

@@ -216,9 +216,6 @@ kubectl apply -f "$K8S_DIR/01-configmap.yaml"
 echo ""
 
 # Patch ALLOWED_ORIGINS with droplet IP
-CURRENT_ORIGINS=$(kubectl get configmap portfolio-config -n portfolio \
-  -o jsonpath='{.data.ALLOWED_ORIGINS}')
-
 kubectl patch configmap portfolio-config -n portfolio --type merge \
   -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"http://${DROPLET_IP}\\\"]\"}}"
 
