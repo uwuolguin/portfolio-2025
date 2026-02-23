@@ -166,8 +166,6 @@ spec:
             - "max_replication_slots=3"
             - "-c"
             - "wal_keep_size=256MB"
-            - "-c"
-            - "hot_standby=on"
             # ── Memory (REDUCED for 2GB droplet) ───────────────────────
             - "-c"
             - "shared_buffers=128MB"
