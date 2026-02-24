@@ -155,6 +155,31 @@ echo ""
 # =============================================================================
 # Generate secrets
 # =============================================================================
+# MINIO_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
+#
+# HOW THIS WORKS:
+#
+# openssl rand -base64 32
+#   → generates 32 raw random bytes (256 bits of entropy)
+#   → encodes them as base64 (~43 characters)
+#   → base64 uses: A-Z, a-z, 0-9, +, /, =
+#   → needs more characters than bytes because:
+#     base64 takes 3 bytes (24 bits) → splits into 4 x 6-bit groups
+#     each 6-bit group maps to one character
+#     so 3 bytes → 4 chars (33% expansion)
+#
+# tr -d '/+='
+#   → tr = translate, not trim
+#   → -d = delete mode, removes every occurrence of /, +, =
+#   → those characters break URLs, shell variables, and config parsers
+#   → result is alphanumeric only, safe anywhere
+#
+# head -c 32
+#   → deleting characters shortened the string unevenly
+#   → head -c 32 guarantees exactly 32 characters output
+#
+# end result: 32 character alphanumeric random password
+#             safe for connection strings, yaml, env vars, anywhere
 log_info "Generating secrets..."
 POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
 JWT_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
@@ -170,8 +195,8 @@ if [ -f "${SCRIPT_DIR}/.env.secrets" ]; then
     RESEND_KEY="${RESEND_API_KEY}"
     log_success "Resend API key loaded"
 else
-    log_error "⚠️  .env.secrets not found!"
-    log_error "⚠️  Email verification will NOT work!"
+    log_error ".env.secrets not found!"
+    log_error "Email verification will NOT work!"
     echo ""
     log_error "To fix this, run: ./set-resend-key.sh"
     echo ""

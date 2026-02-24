@@ -156,7 +156,7 @@ spec:
             claimName: postgres-replica-data
         - name: postgres-certs
           emptyDir: {}
-Here it is with the code inline:
+
 
 # ─── replica-init: what this script does and why ────────────────────────────
 #
