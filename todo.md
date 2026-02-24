@@ -1,3 +1,5 @@
+**Check deploy script once and check the yaml once and you can move on that**
+
 KAFKA + TEMPORAL + REDIS + CHARTJS
 - [ ] Add Kafka (or Redpanda — lighter, same API) K8s deployment + Service
 - [ ] Add Zookeeper deployment if using Kafka (not needed for Redpanda)
