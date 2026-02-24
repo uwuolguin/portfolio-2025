@@ -57,11 +57,11 @@ export KUBECONFIG="$HOME/.kube/config"
 # =============================================================================
 # Helper functions
 # =============================================================================
-wait_for_pods_ready() {
-    local label="$1"
+wait_for_deployment_ready() {
+    local name="$1"
     local namespace="$2"
     local timeout="${3:-180}"
-    local description="${4:-pods}"
+    local description="${4:-$name}"
 
     log_info "Waiting for $description (max ${timeout}s)..."
 
@@ -69,28 +69,31 @@ wait_for_pods_ready() {
     local interval=5
 
     while [ $counter -lt $timeout ]; do
-        local pod_count=$(kubectl get pods -l "$label" -n "$namespace" --no-headers 2>/dev/null | wc -l)
+        local ready=$(kubectl get deployment "$name" -n "$namespace" \
+            -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        local desired=$(kubectl get deployment "$name" -n "$namespace" \
+            -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
 
-        if [ "$pod_count" -gt 0 ]; then
-            if kubectl wait --for=condition=ready pod -l "$label" -n "$namespace" --timeout=10s &>/dev/null; then
-                log_success "$description ready"
-                return 0
-            fi
+        # normalize empty to 0 (readyReplicas is absent when 0, not "0")
+        ready="${ready:-0}"
+
+        if [ "$ready" = "$desired" ] && [ "$ready" != "0" ]; then
+            log_success "$description ready ($ready/$desired)"
+            return 0
         fi
 
         if [ $((counter % 20)) -eq 0 ]; then
-            log_info "  Still waiting for $description... (${counter}/${timeout}s)"
+            log_info "  $description: $ready/$desired ready (${counter}/${timeout}s)"
         fi
 
         sleep $interval
         counter=$((counter + interval))
     done
 
-    log_error "$description failed to start within ${timeout}s"
-    kubectl get pods -l "$label" -n "$namespace" 2>/dev/null || true
+    log_error "$description failed within ${timeout}s"
+    kubectl describe deployment "$name" -n "$namespace" 2>/dev/null | tail -20
     return 1
 }
-
 wait_for_statefulset_ready() {
     local name="$1"
     local namespace="$2"
@@ -155,36 +158,21 @@ echo ""
 # =============================================================================
 # Generate secrets
 # =============================================================================
-# MINIO_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
+#   openssl rand -hex 16
+#   → generates 16 raw random bytes (128 bits of entropy)
+#   → encodes each byte as exactly 2 hex digits (0-9, a-f)
+#   → output is ALWAYS exactly 32 characters, no filtering needed
+#   → hex chars are safe in URLs, shell variables, YAML, and config parsers
+#   → no tr, no head, no probabilistic failure — deterministic by design
 #
-# HOW THIS WORKS:
+#   If you want 64 chars: openssl rand -hex 32
+#   If you want 128 bits of entropy in 32 chars: openssl rand -hex 16  ← used here
 #
-# openssl rand -base64 32
-#   → generates 32 raw random bytes (256 bits of entropy)
-#   → encodes them as base64 (~43 characters)
-#   → base64 uses: A-Z, a-z, 0-9, +, /, =
-#   → needs more characters than bytes because:
-#     base64 takes 3 bytes (24 bits) → splits into 4 x 6-bit groups
-#     each 6-bit group maps to one character
-#     so 3 bytes → 4 chars (33% expansion)
-#
-# tr -d '/+='
-#   → tr = translate, not trim
-#   → -d = delete mode, removes every occurrence of /, +, =
-#   → those characters break URLs, shell variables, and config parsers
-#   → result is alphanumeric only, safe anywhere
-#
-# head -c 32
-#   → deleting characters shortened the string unevenly
-#   → head -c 32 guarantees exactly 32 characters output
-#
-# end result: 32 character alphanumeric random password
-#             safe for connection strings, yaml, env vars, anywhere
 log_info "Generating secrets..."
-POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
-JWT_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
-ADMIN_API_KEY=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
-MINIO_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+JWT_SECRET=$(openssl rand -hex 16)
+ADMIN_API_KEY=$(openssl rand -hex 16)
+MINIO_PASSWORD=$(openssl rand -hex 16)
 
 # =============================================================================
 # Load Resend API key from .env.secrets

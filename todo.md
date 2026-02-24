@@ -46,3 +46,15 @@ HELM / KUSTOMIZE
 - [ ] Refactor sequential bash deploy into Helm chart or Kustomize overlays
         base: current single-droplet setup
         overlay/values: local dev vs droplet (replicas, memory, storage)
+        After deploying Kafka + Temporal + Observability stack:
+        
+Resume (Google Drive):
+
+In Proveo project bullets, add: "Kafka-backed Temporal workflow processing login events through distributed activities; Redis time-series analytics served via FastAPI endpoint with Chart.js visualization"
+Add to Core Technologies: Temporal.io, Kafka (already have Redis)
+Add: Prometheus, Grafana under Observability
+
+LinkedIn:
+
+Mirror the same bullet in the Proveo project section
+Add Kafka, Temporal.io, Prometheus, Grafana to Skills
