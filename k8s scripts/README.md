@@ -110,9 +110,9 @@ kubectl exec -n portfolio deployment/backend -- \
 ```
 ### 7. Access
 ```
-http://143.110.154.54/front-page/front-page.html
-http://143.110.154.54/docs
-http://143.110.154.54/health
+testproveoportfolio.xyz/front-page/front-page.html
+testproveoportfolio.xyz/docs
+testproveoportfolio.xyz/health
 ```
 
 ---
