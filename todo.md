@@ -1,5 +1,3 @@
-**Check deploy script once and check the yaml once and you can move on that**
-
 KAFKA + TEMPORAL + REDIS + CHARTJS
 - [ ] Add Kafka (or Redpanda — lighter, same API) K8s deployment + Service
 - [ ] Add Zookeeper deployment if using Kafka (not needed for Redpanda)
@@ -47,7 +45,7 @@ HELM / KUSTOMIZE
         base: current single-droplet setup
         overlay/values: local dev vs droplet (replicas, memory, storage)
         After deploying Kafka + Temporal + Observability stack:
-        
+
 Resume (Google Drive):
 
 In Proveo project bullets, add: "Kafka-backed Temporal workflow processing login events through distributed activities; Redis time-series analytics served via FastAPI endpoint with Chart.js visualization"

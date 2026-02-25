@@ -39,6 +39,7 @@ spec:
             - --maxmemory
             - "64mb"
             - --maxmemory-policy
+            #LRU is Least Recently Used
             - allkeys-lru
           ports:
             - containerPort: 6379
