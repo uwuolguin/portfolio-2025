@@ -126,6 +126,40 @@ wait_for_statefulset_ready() {
     kubectl describe statefulset "$name" -n "$namespace" 2>/dev/null | tail -20
     return 1
 }
+wait_for_pods_ready() {
+    local selector="$1"
+    local namespace="$2"
+    local timeout="${3:-120}"
+    local description="${4:-$selector}"
+
+    log_info "Waiting for $description (max ${timeout}s)..."
+
+    local counter=0
+    local interval=5
+
+    while [ $counter -lt $timeout ]; do
+        local ready=$(kubectl get pods -n "$namespace" -l "$selector" \
+            -o jsonpath='{.items[*].status.containerStatuses[*].ready}' 2>/dev/null | tr ' ' '\n' | grep -c "true" || echo "0")
+        local total=$(kubectl get pods -n "$namespace" -l "$selector" \
+            --no-headers 2>/dev/null | wc -l | tr -d ' ')
+
+        if [ "$total" -gt "0" ] && [ "$ready" = "$total" ]; then
+            log_success "$description ready ($ready/$total)"
+            return 0
+        fi
+
+        if [ $((counter % 20)) -eq 0 ]; then
+            log_info "  $description: $ready/$total ready (${counter}/${timeout}s)"
+        fi
+
+        sleep $interval
+        counter=$((counter + interval))
+    done
+
+    log_error "$description failed within ${timeout}s"
+    kubectl describe pods -n "$namespace" -l "$selector" 2>/dev/null | tail -20
+    return 1
+}
 
 # =============================================================================
 # Pre-checks
@@ -171,7 +205,6 @@ echo ""
 log_info "Generating secrets..."
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 JWT_SECRET=$(openssl rand -hex 16)
-ADMIN_API_KEY=$(openssl rand -hex 16)
 MINIO_PASSWORD=$(openssl rand -hex 16)
 
 # =============================================================================
@@ -248,8 +281,6 @@ kubectl create secret generic portfolio-secrets \
   --from-literal=MINIO_ROOT_USER=minioadmin \
   --from-literal=MINIO_ROOT_PASSWORD="$MINIO_PASSWORD" \
   --from-literal=SECRET_KEY="$JWT_SECRET" \
-  --from-literal=ADMIN_API_KEY="$ADMIN_API_KEY" \
-  --from-literal=ADMIN_BYPASS_IPS='["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]' \
   --from-literal=RESEND_API_KEY="$RESEND_KEY" \
   --from-literal=ADMIN_EMAIL="admin@example.com" \
   --from-literal=API_BASE_URL="http://$DROPLET_IP" \
@@ -263,7 +294,6 @@ cat > "${SCRIPT_DIR}/.credentials" <<EOF
 DROPLET_IP=$DROPLET_IP
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 JWT_SECRET=$JWT_SECRET
-ADMIN_API_KEY=$ADMIN_API_KEY
 MINIO_PASSWORD=$MINIO_PASSWORD
 RESEND_API_KEY=$RESEND_KEY
 DATABASE_URL_PRIMARY=postgresql://postgres:${POSTGRES_PASSWORD}@postgres-primary:5432/portfolio?sslmode=require

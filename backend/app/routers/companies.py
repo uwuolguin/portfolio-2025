@@ -613,7 +613,7 @@ async def delete_my_company(
 # Admin endpoints
 
 @router.get(
-    "/admin/all-companies/use-postman-or-similar-to-bypass-csrf",
+    "/admin/all-companies",
     response_model=List[CompanyResponse],
     summary="List all companies (Admin)",
 )
@@ -648,7 +648,7 @@ async def admin_list_companies(
 
 
 @router.delete(
-    "/admin/companies/{company_uuid}/use-postman-or-similar-to-bypass-csrf",
+    "/admin/companies/{company_uuid}",
     response_model=CompanyDeleteResponse,
     summary="Delete company (Admin)",
 )

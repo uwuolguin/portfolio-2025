@@ -30,7 +30,7 @@ async def list_products(
 
 
 @router.post(
-    "/use-postman-or-similar-to-bypass-csrf",
+    "/",
     response_model=ProductResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new product (Admin Only)"
@@ -70,7 +70,7 @@ async def create_product(
 
 
 @router.put(
-    "/{product_uuid}/use-postman-or-similar-to-bypass-csrf",
+    "/{product_uuid}",
     response_model=ProductResponse,
     summary="Update a product (Admin Only)"
 )
@@ -111,7 +111,7 @@ async def update_product(
 
 
 @router.delete(
-    "/{product_uuid}/use-postman-or-similar-to-bypass-csrf",
+    "/{product_uuid}",
     status_code=status.HTTP_200_OK,
     summary="Delete a product (Admin Only)"
 )

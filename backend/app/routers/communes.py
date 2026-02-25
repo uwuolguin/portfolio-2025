@@ -28,7 +28,7 @@ async def list_communes(
 
 
 @router.post(
-    "/use-postman-or-similar-to-bypass-csrf",
+    "/",
     response_model=CommuneResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new commune (Admin Only)",
@@ -57,7 +57,7 @@ async def create_commune(
 
 
 @router.put(
-    "/{commune_uuid}/use-postman-or-similar-to-bypass-csrf",
+    "/{commune_uuid}",
     response_model=CommuneResponse,
     summary="Update a commune (Admin Only)",
 )
@@ -87,7 +87,7 @@ async def update_commune(
 
 
 @router.delete(
-    "/{commune_uuid}/use-postman-or-similar-to-bypass-csrf",
+    "/{commune_uuid}",
     status_code=status.HTTP_200_OK,
     summary="Delete a commune (Admin Only)",
 )

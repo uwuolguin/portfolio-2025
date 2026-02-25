@@ -53,13 +53,6 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 120
 
     # ------------------------------------------------------------------------
-    # Admin Bypass Security
-    # ------------------------------------------------------------------------
-    admin_api_key: str
-    # K8s provides this as JSON list: ["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]
-    admin_bypass_ips: List[str] = Field(default_factory=list)
-
-    # ------------------------------------------------------------------------
     # File uploads / Image processing
     # ------------------------------------------------------------------------
     content_type_map: Dict[str, str] = Field(

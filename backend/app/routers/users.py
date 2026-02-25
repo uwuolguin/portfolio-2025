@@ -232,7 +232,7 @@ async def delete_me(
         )
 
 
-@router.get("/admin/all-users/use-postman-or-similar-to-bypass-csrf", response_model=List[AdminUserResponse])
+@router.get("/admin/all-users", response_model=List[AdminUserResponse])
 async def get_all_users(
     limit: int = Query(100, ge=1, le=500), 
     offset: int = Query(0, ge=0), 
@@ -253,7 +253,7 @@ async def get_all_users(
         )
 
 
-@router.delete("/admin/users/{user_uuid}/use-postman-or-similar-to-bypass-csrf", status_code=status.HTTP_200_OK)
+@router.delete("/admin/users/{user_uuid}", status_code=status.HTTP_200_OK)
 async def admin_delete_user(
     user_uuid: UUID, 
     current_user: dict = Depends(require_admin),

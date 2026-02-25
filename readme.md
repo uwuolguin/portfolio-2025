@@ -268,9 +268,3 @@ GitHub: https://github.com/uwuolguin/
 ## 📄 License
 
 Portfolio demonstration project - 2026
-
----
-
-> ⚠️ **SECURITY WARNING - READ BEFORE PRODUCTION DEPLOYMENT**
->
-> This codebase contains a **development-only admin CSRF bypass mechanism** in `backend/app/auth/csrf.py` that **MUST be removed** before any production deployment. Remove the entire admin bypass block, all `ADMIN_BYPASS_IPS` references, and `/use-postman-or-similar-to-bypass-csrf` endpoints. This bypass exists solely for testing purposes and represents a critical security vulnerability if deployed to production.
