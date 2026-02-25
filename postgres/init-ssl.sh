@@ -1,6 +1,27 @@
 #!/bin/bash
-#postgresql.conf supports native includes, so we append an include directive.
-#pg_hba.conf does not, so we replace it entirely via a symlink to our custom version.
+# =============================================================================
+# PostgreSQL SSL Bootstrap - Config Only
+#
+# WHY TWO DIFFERENT APPROACHES FOR THE TWO CONFIG FILES:
+#
+# postgresql.conf — supports native includes via the "include" directive.
+#   This means we can leave the original file untouched and just append
+#   a single line that tells PostgreSQL to also load our ssl config file.
+#   Our custom file (postgresql.ssl.conf) only contains ssl-related settings,
+#   keeping concerns separated and making the original conf easy to diff/audit.
+#   If the include line already exists, we skip it — making this idempotent, the appending happens here:
+#   echo "include = 'postgresql.ssl.conf'" >> "$PGDATA/postgresql.conf"
+#
+# pg_hba.conf — does NOT support includes. It is read top-to-bottom as a single
+#   flat file with no way to compose from multiple sources. This means we cannot
+#   "append" to it safely — order matters (first match wins), and appending ssl
+#   rules after a catch-all "host all all 0.0.0.0/0" would make them unreachable.
+#   So instead, we write our complete authoritative version (pg_hba.ssl.conf)
+#   and replace pg_hba.conf entirely with a symlink pointing to it.
+#   The symlink approach (vs. overwriting) makes it explicit that this file is
+#   managed — ls -la will show exactly where it points, and it survives
+#   scenarios where PostgreSQL or init scripts try to recreate the original.
+# =============================================================================
 set -e
 
 echo "Starting PostgreSQL SSL bootstrap (config only)..."

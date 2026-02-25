@@ -68,7 +68,7 @@ spec:
                 sleep 5
               done
               echo "Primary database is ready!"
-              
+
               echo "Checking if replica is available..."
               REPLICA_TIMEOUT=60
               COUNTER=0
@@ -84,15 +84,42 @@ spec:
                 sleep 2
                 COUNTER=$((COUNTER + 2))
               done
-              
+
               if [ $COUNTER -ge $REPLICA_TIMEOUT ]; then
                 echo "WARNING: Replica not available, backend will use primary for reads"
               fi
-              
+
               echo "Database check complete!"
+          resources:
+            # Pure polling loop: pg_isready + psql pings. No data processing.
+            # 64Mi / 128Mi is more than enough for the postgres:16 client binary
+            # just sending TCP health checks and exiting.
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+
         - name: migrate
+  # =========================================================================
+  # WHY A SEPARATE INITCONTAINER FOR MIGRATIONS (not in the main container):
+  #
+  # If migrations ran inside the main container, every replica would attempt
+  # alembic upgrade head simultaneously on startup. With 1 replica this is
+  # fine, but scaling to 2+ creates a race condition — two processes hitting
+  # the same schema at the same time. Alembic locking is not bulletproof.
+  #
+  # initContainers run ONCE, sequentially, before ANY main container starts.
+  # k8s guarantees migrate completes successfully before uvicorn ever launches,
+  # regardless of replica count. Migrations always run exactly once per deploy.
+  #
+  # Bonus: if the migration fails, the pod never reaches Running state.
+  # Old pods stay up serving traffic. You get a clean error, not a
+  # half-migrated schema with broken uvicorn processes serving on top of it.
+  # =========================================================================
           image: portfolio-backend:latest
-          imagePullPolicy: IfNotPresent 
+          imagePullPolicy: IfNotPresent
           command:
             - sh
             - -c
@@ -111,6 +138,17 @@ spec:
                 name: portfolio-config
             - secretRef:
                 name: portfolio-secrets
+          resources:
+            # Alembic loads the full Python/FastAPI app environment to run migrations.
+            # It doesn't serve traffic, but it does import the entire app and
+            # execute DDL against the database — 256Mi limit is safe headroom.
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "300m"
+
       containers:
         - name: backend
           image: portfolio-backend:latest
