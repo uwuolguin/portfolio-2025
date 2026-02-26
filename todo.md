@@ -1,5 +1,10 @@
-KAFKA + TEMPORAL + REDIS + CHARTJS
-- [ ] Add Kafka (or Redpanda — lighter, same API) K8s deployment + Service
+KAFKA + TEMPORAL + REDIS( chec, in the redis that the combination user id and timestamps in always unique) + CHARTJS
+# TODO: Implement Redis idempotency guard for Temporal activities
+# Use SET NX with composite key (workflow_id + uuid + timestamp) to detect
+# false-positive retries. Return same success shape on duplicate detection
+# so Temporal does not keep retrying. Add deduplicated flag to response
+# for Datadog observability. TTL 24hr to prevent key accumulation.- 
+[ ] Add Kafka (or Redpanda — lighter, same API) K8s deployment + Service
 - [ ] Add Zookeeper deployment if using Kafka (not needed for Redpanda)
 - [ ] Create kafka topic "user-logins"
 - [ ] Backend: publish login event to kafka on successful authentication
