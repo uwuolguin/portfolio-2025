@@ -62,9 +62,31 @@ data:
             keepalive 16;
         }
 
+        # ── HTTP: only used to pass ACME challenges and redirect everything else ──
         server {
             listen 80;
             server_name _;
+
+            location /.well-known/acme-challenge/ {
+                root /var/www/certbot;
+            }
+
+            location / {
+                return 301 https://$host$request_uri;
+            }
+        }
+
+        # ── HTTPS: TLS terminates here, all real traffic is handled here ──
+        server {
+            listen 443 ssl http2;
+            server_name _;
+
+            ssl_certificate     /etc/nginx/certs/tls.crt;
+            ssl_certificate_key /etc/nginx/certs/tls.key;
+            ssl_protocols       TLSv1.2 TLSv1.3;
+            ssl_ciphers         HIGH:!aNULL:!MD5;
+            ssl_session_cache   shared:SSL:10m;
+            ssl_session_timeout 10m;
 
             limit_conn addr_conn 20;
 
@@ -173,6 +195,10 @@ spec:
       targetPort: 80
       protocol: TCP
       name: http
+    - port: 443
+      targetPort: 443
+      protocol: TCP
+      name: https
   selector:
     app: nginx
 ---
@@ -198,10 +224,15 @@ spec:
           ports:
             - containerPort: 80
               name: http
+            - containerPort: 443
+              name: https
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+            - name: tls-certs
+              mountPath: /etc/nginx/certs
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
@@ -227,3 +258,15 @@ spec:
         - name: nginx-config
           configMap:
             name: nginx-config
+        # tls-certs: certbot writes certs to /etc/letsencrypt/live/ (root-only).
+        # We copy them to /home/deploy/certs/, then load into k8s with:
+        #   kubectl create secret tls tls-secret \
+        #     --cert=/home/deploy/certs/fullchain.pem \
+        #     --key=/home/deploy/certs/privkey.pem \
+        #     -n portfolio
+        # Kubernetes then injects the secret as files into the container at
+        # /etc/nginx/certs/ — that is the only way to get files into a running
+        # container without baking them into the image.
+        - name: tls-certs
+          secret:
+            secretName: tls-secret

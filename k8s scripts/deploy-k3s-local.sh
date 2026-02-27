@@ -256,6 +256,24 @@ log_info "Creating namespace..."
 kubectl apply -f "$K8S_DIR/00-namespace.yaml"
 echo ""
 
+# TLS secret — certs must already exist at /home/deploy/certs/ (put there by certbot)
+# See SSL_SETUP.md Step 4 for how to get them there.
+# --dry-run=client -o yaml | kubectl apply -f - makes this idempotent (safe to re-run)
+log_info "Loading TLS certificates into cluster..."
+if [ -f "/home/deploy/certs/fullchain.pem" ] && [ -f "/home/deploy/certs/privkey.pem" ]; then
+    kubectl create secret tls tls-secret \
+        --cert=/home/deploy/certs/fullchain.pem \
+        --key=/home/deploy/certs/privkey.pem \
+        -n portfolio \
+        --dry-run=client -o yaml | kubectl apply -f -
+    log_success "TLS secret loaded"
+else
+    log_error "TLS certs not found at /home/deploy/certs/"
+    log_error "Run certbot first (see SSL_SETUP.md Steps 1-4), then re-run this script"
+    exit 1
+fi
+echo ""
+
 # ConfigMap
 log_info "Creating ConfigMap..."
 kubectl apply -f "$K8S_DIR/01-configmap.yaml"
@@ -263,10 +281,9 @@ echo ""
 
 # Patch ALLOWED_ORIGINS with droplet IP
 kubectl patch configmap portfolio-config -n portfolio --type merge \
-  -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"http://${DROPLET_IP}\\\"]\"}}"
+  -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"https://testproveoportfolio.xyz\\\",\\\"https://www.testproveoportfolio.xyz\\\"]\"}}"
 
-
-log_info "Patched ALLOWED_ORIGINS with droplet IP: ${DROPLET_IP}"
+log_info "Patched ALLOWED_ORIGINS with domain: testproveoportfolio.xyz"
 
 # Secrets
 log_info "Creating secrets..."
@@ -283,7 +300,7 @@ kubectl create secret generic portfolio-secrets \
   --from-literal=SECRET_KEY="$JWT_SECRET" \
   --from-literal=RESEND_API_KEY="$RESEND_KEY" \
   --from-literal=ADMIN_EMAIL="admin@example.com" \
-  --from-literal=API_BASE_URL="http://$DROPLET_IP" \
+  --from-literal=API_BASE_URL="https://testproveoportfolio.xyz" \
   -n portfolio \
   --dry-run=client -o yaml | kubectl apply -f -
 
@@ -421,9 +438,9 @@ echo "============================================"
 echo "  ACCESS YOUR APP"
 echo "============================================"
 echo ""
-echo "  Frontend: http://$DROPLET_IP/front-page/front-page.html"
-echo "  API Docs: http://$DROPLET_IP/docs"
-echo "  Health:   http://$DROPLET_IP/health"
+echo "  Frontend: https://testproveoportfolio.xyz/front-page/front-page.html"
+echo "  API Docs: https://testproveoportfolio.xyz/docs"
+echo "  Health:   https://testproveoportfolio.xyz/health"
 echo ""
 echo "============================================"
 echo "  NEXT STEPS"
