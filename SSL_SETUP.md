@@ -268,7 +268,7 @@ required.**
 | `k8s/10-nginx.yaml` Deployment | **Yes** | Add container port 443, mount `tls-secret` volume |
 | `k8s/01-configmap.yaml` | **Yes** | `DEBUG: "false"` |
 | `deploy-k3s-local.sh` | **Yes** | `API_BASE_URL` and `ALLOWED_ORIGINS` use `https://` |
-| `middleware/security.py` | No | HTTPS redirect and HSTS already conditional on `debug` |
+| `middleware/security.py` | **Yes** | Exempt health endpoints from HTTPS redirect — k8s probes hit backend directly over HTTP and would loop without this |
 | `middleware/cors.py` | No | Origins driven by configmap value — change is in deploy script |
 | `routers/users.py` cookies | No | `secure=not settings.debug` already correct |
 | `main.py` docs | Optional | Docs are disabled when `debug=false` — change if you want them on |
@@ -279,24 +279,69 @@ required.**
 
 ## Step 7 — Auto-Renewal
 
-Certs expire every 90 days. This cron job renews them, copies to the deploy user,
-updates the k8s secret, and reloads nginx:
+Certs expire every 90 days. This cron job renews them automatically.
+
+### Why user context matters here
+
+Three things in this job require elevated privileges:
+- `certbot renew` — must run as root
+- Reading `/etc/letsencrypt/live/` — directory is root-owned, unreadable by other users
+- `cp` from that directory — same reason
+
+`kubectl` commands do **not** need root — they run fine as the deploy user as long as the kubeconfig is reachable.
+
+This means you have two options:
+
+---
+
+### Option A — Root's crontab (recommended)
+
+Root owns certbot and the certs, so no `sudo` needed inside the job. The only
+catch is that root's cron runs in a bare environment with no `$HOME`, so
+`KUBECONFIG` must be set explicitly or kubectl won't find the config.
+
+Open root's crontab:
 
 ```bash
 sudo crontab -e
 ```
 
+Add this line:
+
 ```cron
-0 3 * * * certbot renew --quiet && \
-  cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem /home/deploy/certs/ && \
-  cp /etc/letsencrypt/live/yourdomain.com/privkey.pem /home/deploy/certs/ && \
-  chown -R deploy:deploy /home/deploy/certs/ && \
-  kubectl create secret tls tls-secret \
-    --cert=/home/deploy/certs/fullchain.pem \
-    --key=/home/deploy/certs/privkey.pem \
-    -n portfolio --dry-run=client -o yaml | kubectl apply -f - && \
-  kubectl rollout restart deployment nginx -n portfolio
+
+0 3 * * * certbot renew --quiet && cp /etc/letsencrypt/live/testproveoportfolio.xyz/fullchain.pem /home/deploy/certs/ && cp /etc/letsencrypt/live/testproveoportfolio.xyz/privkey.pem /home/deploy/certs/ && chown -R deploy:deploy /home/deploy/certs/ && KUBECONFIG=/home/deploy/.kube/config kubectl create secret tls tls-secret --cert=/home/deploy/certs/fullchain.pem --key=/home/deploy/certs/privkey.pem -n portfolio --dry-run=client -o yaml | KUBECONFIG=/home/deploy/.kube/config kubectl apply -f - && KUBECONFIG=/home/deploy/.kube/config kubectl rollout restart deployment nginx -n portfolio
+
+
+---
+
+### Option B — Deploy user's crontab
+
+If you prefer the cron to live under the deploy user, the deploy user must have
+passwordless sudo for `cp` and `certbot`. This requires editing `/etc/sudoers`
+which is a larger security decision. Not recommended unless you have a specific
+reason.
+
+---
+
+### Manual one-time run (to test before the cron fires)
+
+Run this as the deploy user to verify the whole chain works:
+
+```bash
+sudo cp /etc/letsencrypt/live/testproveoportfolio.xyz/fullchain.pem /home/deploy/certs/ && \
+sudo cp /etc/letsencrypt/live/testproveoportfolio.xyz/privkey.pem /home/deploy/certs/ && \
+kubectl create secret tls tls-secret \
+  --cert=/home/deploy/certs/fullchain.pem \
+  --key=/home/deploy/certs/privkey.pem \
+  -n portfolio --dry-run=client -o yaml | kubectl apply -f - && \
+kubectl rollout restart deployment nginx -n portfolio
 ```
+
+No `chown` needed here — `sudo cp` as the deploy user lands the files owned by
+root, but the deploy user can still read them for the `kubectl` step. If you want
+deploy to own them add `sudo chown -R deploy:deploy /home/deploy/certs/` after
+the copy.
 
 ---
 
