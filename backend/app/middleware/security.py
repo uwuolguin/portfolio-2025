@@ -5,6 +5,14 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
+# Paths that must never be redirected to HTTPS.
+# k8s liveness/readiness probes hit the backend pod directly over plain HTTP,
+# bypassing nginx entirely — so they never carry X-Forwarded-Proto: https.
+# Without this exemption, DEBUG=false causes the middleware to 301 the probe,
+# Kubernetes sees a redirect instead of 200, marks the pod unhealthy, and
+# restarts it in a loop.
+HTTPS_EXEMPT_PATHS = {"/api/v1/health/", "/health"}
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
@@ -68,6 +76,9 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
 
     Behavior:
     - In development (settings.debug=True): passthrough, no redirect.
+    - If request path is in HTTPS_EXEMPT_PATHS: passthrough.
+      (k8s probes hit the pod directly over HTTP — exempting health endpoints
+      prevents a redirect loop that would cause Kubernetes to restart the pod.)
     - If request is already HTTPS (request.url.scheme == "https"): passthrough.
     - If behind a reverse proxy that sets X-Forwarded-Proto=https: passthrough.
     - Otherwise: redirect to the same URL with scheme="https" using a 301.
@@ -77,6 +88,9 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
         from app.config import settings
         
         if settings.debug:
+            return await call_next(request)
+
+        if request.url.path in HTTPS_EXEMPT_PATHS:
             return await call_next(request)
         
         if request.url.scheme == "https":
