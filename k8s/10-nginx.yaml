@@ -1,4 +1,35 @@
 # Only container exposed to the internet, that is why it is the only container with type: LoadBalancer
+
+# TRAILING SLASH NORMALISATION
+# FastAPI/Starlette routes are defined without trailing slashes
+# (e.g. GET /api/v1/communes, not /api/v1/communes/).
+# When a request arrives with a trailing slash, Starlette's built-in
+# SlashRedirectMiddleware issues a 307 Temporary Redirect to the
+# slash-free URL. That redirect causes the browser to fire a second
+# request and, critically, strips cookies and custom headers
+# (X-CSRF-Token, X-Forwarded-Proto) in the process — so the
+# redirected request arrives unauthenticated and the response is empty.
+#
+# This rewrite intercepts the trailing slash BEFORE the request reaches
+# the backend so Starlette never has a chance to issue the 307.
+# The `last` flag tells nginx to re-evaluate the rewritten URL through
+# its own location blocks and then proxy it — zero client roundtrips,
+# all headers and cookies preserved intact.
+#
+# Without this: GET /api/v1/communes/ → 307 → headers lost → [] returned.
+# With this:    GET /api/v1/communes/ → internal rewrite → 200 with data.
+#
+# REGEX BREAKDOWN: rewrite ^(/api/.*)/$ $1 last;
+#   ()     parentheses create a capture group — whatever matches inside is saved
+#   /api/  literal match
+#   .*     any character, any number of times (the rest of the path)
+#   )/     close group 1, then match a literal slash OUTSIDE the group
+#   $      end of string — the slash must be the very last character
+#   $1     replacement = capture group 1 only — the slash was outside so it
+#          is matched (triggers the rewrite) but not kept (discarded)
+#   last   re-run nginx location matching internally with the new URL,
+#          browser never sees this, zero roundtrip, all headers preserved
+
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -165,37 +196,8 @@ data:
 
             # ── General API: all other /api/ traffic lands here ──
             location /api/ {
-                # TRAILING SLASH NORMALISATION
-                # FastAPI/Starlette routes are defined without trailing slashes
-                # (e.g. GET /api/v1/communes, not /api/v1/communes/).
-                # When a request arrives with a trailing slash, Starlette's built-in
-                # SlashRedirectMiddleware issues a 307 Temporary Redirect to the
-                # slash-free URL. That redirect causes the browser to fire a second
-                # request and, critically, strips cookies and custom headers
-                # (X-CSRF-Token, X-Forwarded-Proto) in the process — so the
-                # redirected request arrives unauthenticated and the response is empty.
-                #
-                # This rewrite intercepts the trailing slash BEFORE the request reaches
-                # the backend so Starlette never has a chance to issue the 307.
-                # The `last` flag tells nginx to re-evaluate the rewritten URL through
-                # its own location blocks and then proxy it — zero client roundtrips,
-                # all headers and cookies preserved intact.
-                #
-                # Without this: GET /api/v1/communes/ → 307 → headers lost → [] returned.
-                # With this:    GET /api/v1/communes/ → internal rewrite → 200 with data.
-                #
-                # REGEX BREAKDOWN: rewrite ^(/api/.*)/$ $1 last;
-                #   ()     parentheses create a capture group — whatever matches inside is saved
-                #   /api/  literal match
-                #   .*     any character, any number of times (the rest of the path)
-                #   )/     close group 1, then match a literal slash OUTSIDE the group
-                #   $      end of string — the slash must be the very last character
-                #   $1     replacement = capture group 1 only — the slash was outside so it
-                #          is matched (triggers the rewrite) but not kept (discarded)
-                #   last   re-run nginx location matching internally with the new URL,
-                #          browser never sees this, zero roundtrip, all headers preserved
-                rewrite ^(/api/.*)/$ $1 last;
 
+                rewrite ^(/api/.*)/$ $1 last;
                 proxy_pass http://backend;
                 proxy_http_version 1.1;
                 proxy_set_header Connection "";
