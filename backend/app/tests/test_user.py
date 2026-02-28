@@ -3,12 +3,6 @@ Users router tests (restored + fixed).
 
 Run with:
     pytest app/tests/test_users.py -v
-
-Assumptions:
-- Admin routes are intentionally obscured with
-  /use-postman-or-similar-to-bypass-csrf
-- Role-based access returns 403
-- Hidden admin routes may return 404 for non-admins
 """
 
 import uuid
@@ -131,6 +125,7 @@ async def test_logout_success(app_client):
     )
     assert response.status_code == 200
 
+
 # =============================================================================
 # ME
 # =============================================================================
@@ -207,10 +202,11 @@ async def test_delete_me_missing_csrf(app_client):
 
 
 # =============================================================================
-# ADMIN
+# ADMIN - GET /api/v1/users/admin/all-users
+#         DELETE /api/v1/users/admin/users/{user_id}
 # =============================================================================
-ADMIN_LIST_PATH = "/api/v1/users/admin/all-users/use-postman-or-similar-to-bypass-csrf"
-ADMIN_DELETE_PATH = "/api/v1/users/admin/{user_id}/use-postman-or-similar-to-bypass-csrf/"
+ADMIN_LIST_PATH = "/api/v1/users/admin/all-users"
+ADMIN_DELETE_PATH = "/api/v1/users/admin/users/{user_id}"
 
 
 @pytest.mark.asyncio
@@ -251,7 +247,7 @@ async def test_admin_delete_user_forbidden_for_regular_user(app_client):
         ADMIN_DELETE_PATH.format(user_id=uuid.uuid4()),
         headers={"X-CSRF-Token": csrf},
     )
-    assert response.status_code in (403, 404)
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

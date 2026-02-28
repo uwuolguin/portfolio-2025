@@ -1,10 +1,6 @@
 """
 Products router tests with rollback for non-persistent test data.
 Run with: pytest app/tests/test_products.py -v
-
-REQUIRES:
-- transaction() function updated with force_rollback parameter
-- DB.create_product updated with force_rollback parameter
 """
 import pytest
 import pytest_asyncio
@@ -19,7 +15,6 @@ import uuid
 
 @pytest_asyncio.fixture
 async def app_client():
-    """Create app and client for tests"""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         transport = ASGITransport(app=fresh_app)
@@ -29,7 +24,6 @@ async def app_client():
 
 @pytest_asyncio.fixture
 async def db_conn():
-    """Get a database connection for direct DB operations"""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         async with pool_manager.write_pool.acquire() as conn:
@@ -37,7 +31,6 @@ async def db_conn():
 
 
 def make_admin_token():
-    """Create admin JWT token"""
     jwt_payload = {
         "sub": str(uuid.uuid4()),
         "name": "Admin",
@@ -50,7 +43,6 @@ def make_admin_token():
 
 
 def make_user_token():
-    """Create regular user JWT token"""
     jwt_payload = {
         "sub": str(uuid.uuid4()),
         "name": "User",
@@ -73,12 +65,12 @@ async def test_list_products(app_client):
 
 
 # =============================================================================
-# CREATE PRODUCT - admin only
+# CREATE PRODUCT - admin only, POST /api/v1/products/
 # =============================================================================
 @pytest.mark.asyncio
 async def test_create_product_unauthenticated(app_client):
     response = await app_client.post(
-        "/api/v1/products/use-postman-or-similar-to-bypass-csrf",
+        "/api/v1/products/",
         json={"name_es": "Producto", "name_en": "Product"},
     )
     assert response.status_code == 401
@@ -93,20 +85,22 @@ async def test_create_product_forbidden_for_user(app_client):
     app_client.cookies.set("csrf_token", csrf)
 
     response = await app_client.post(
-        "/api/v1/products/use-postman-or-similar-to-bypass-csrf",
+        "/api/v1/products/",
         json={"name_es": "Producto", "name_en": "Product"},
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# UPDATE PRODUCT - admin only
+# UPDATE PRODUCT - admin only, PUT /api/v1/products/{product_uuid}
 # =============================================================================
 @pytest.mark.asyncio
 async def test_update_product_unauthenticated(app_client):
     response = await app_client.put(
-        f"/api/v1/products/{uuid.uuid4()}/use-postman-or-similar-to-bypass-csrf",
+        f"/api/v1/products/{uuid.uuid4()}",
         json={"name_es": "Nuevo", "name_en": "New"},
     )
     assert response.status_code == 401
@@ -121,20 +115,22 @@ async def test_update_product_forbidden_for_user(app_client):
     app_client.cookies.set("csrf_token", csrf)
 
     response = await app_client.put(
-        f"/api/v1/products/{uuid.uuid4()}/use-postman-or-similar-to-bypass-csrf",
+        f"/api/v1/products/{uuid.uuid4()}",
         json={"name_es": "Nuevo", "name_en": "New"},
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# DELETE PRODUCT - admin only
+# DELETE PRODUCT - admin only, DELETE /api/v1/products/{product_uuid}
 # =============================================================================
 @pytest.mark.asyncio
 async def test_delete_product_unauthenticated(app_client):
     response = await app_client.delete(
-        f"/api/v1/products/{uuid.uuid4()}/use-postman-or-similar-to-bypass-csrf"
+        f"/api/v1/products/{uuid.uuid4()}"
     )
     assert response.status_code == 401
 
@@ -148,14 +144,16 @@ async def test_delete_product_forbidden_for_user(app_client):
     app_client.cookies.set("csrf_token", csrf)
 
     response = await app_client.delete(
-        f"/api/v1/products/{uuid.uuid4()}/use-postman-or-similar-to-bypass-csrf",
+        f"/api/v1/products/{uuid.uuid4()}",
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# ROLLBACK TEST - Direct DB product creation (does not persist)
+# ROLLBACK TEST
 # =============================================================================
 @pytest.mark.asyncio
 async def test_create_product_with_rollback(db_conn):

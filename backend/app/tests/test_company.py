@@ -1,11 +1,6 @@
 """
 Companies router tests with rollback for non-persistent test data.
 Run with: pytest app/tests/test_companies.py -v
-
-REQUIRES:
-- transaction() function updated with force_rollback parameter
-- DB.create_company updated with force_rollback parameter
-- Seeded data: communes, products, users with companies
 """
 import pytest
 import pytest_asyncio
@@ -20,7 +15,6 @@ import uuid
 
 @pytest_asyncio.fixture
 async def app_client():
-    """Create app and client for tests"""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         transport = ASGITransport(app=fresh_app)
@@ -30,7 +24,6 @@ async def app_client():
 
 @pytest_asyncio.fixture
 async def db_conn():
-    """Get a database connection for direct DB operations"""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         async with pool_manager.write_pool.acquire() as conn:
@@ -38,7 +31,6 @@ async def db_conn():
 
 
 def make_admin_token():
-    """Create admin JWT token"""
     jwt_payload = {
         "sub": str(uuid.uuid4()),
         "name": "Admin",
@@ -51,7 +43,6 @@ def make_admin_token():
 
 
 def make_user_token(user_uuid: str = None, verified: bool = True):
-    """Create regular user JWT token"""
     jwt_payload = {
         "sub": user_uuid or str(uuid.uuid4()),
         "name": "User",
@@ -116,9 +107,11 @@ async def test_get_my_company_not_found(app_client):
     response = await app_client.get("/api/v1/companies/user/my-company")
     assert response.status_code == 404
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# CREATE COMPANY
+# CREATE COMPANY - POST /api/v1/companies
 # =============================================================================
 @pytest.mark.asyncio
 async def test_create_company_unauthenticated(app_client):
@@ -160,9 +153,11 @@ async def test_create_company_unverified_email(app_client):
     )
     assert response.status_code == 403
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# UPDATE MY COMPANY
+# UPDATE MY COMPANY - PATCH /api/v1/companies/user/my-company
 # =============================================================================
 @pytest.mark.asyncio
 async def test_update_my_company_unauthenticated(app_client):
@@ -187,9 +182,11 @@ async def test_update_my_company_unverified_email(app_client):
     )
     assert response.status_code == 403
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# DELETE MY COMPANY
+# DELETE MY COMPANY - DELETE /api/v1/companies/user/my-company
 # =============================================================================
 @pytest.mark.asyncio
 async def test_delete_my_company_unauthenticated(app_client):
@@ -211,15 +208,15 @@ async def test_delete_my_company_unverified_email(app_client):
     )
     assert response.status_code == 403
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# ADMIN LIST COMPANIES
+# ADMIN LIST COMPANIES - GET /api/v1/companies/admin/all-companies
 # =============================================================================
 @pytest.mark.asyncio
 async def test_admin_list_companies_unauthenticated(app_client):
-    response = await app_client.get(
-        "/api/v1/companies/admin/all-companies/use-postman-or-similar-to-bypass-csrf"
-    )
+    response = await app_client.get("/api/v1/companies/admin/all-companies")
     assert response.status_code == 401
 
 
@@ -228,10 +225,10 @@ async def test_admin_list_companies_forbidden_for_user(app_client):
     token = make_user_token()
     app_client.cookies.set("access_token", token)
 
-    response = await app_client.get(
-        "/api/v1/companies/admin/all-companies/use-postman-or-similar-to-bypass-csrf"
-    )
+    response = await app_client.get("/api/v1/companies/admin/all-companies")
     assert response.status_code == 403
+
+    app_client.cookies.clear()
 
 
 @pytest.mark.asyncio
@@ -239,20 +236,20 @@ async def test_admin_list_companies_success(app_client):
     token = make_admin_token()
     app_client.cookies.set("access_token", token)
 
-    response = await app_client.get(
-        "/api/v1/companies/admin/all-companies/use-postman-or-similar-to-bypass-csrf"
-    )
+    response = await app_client.get("/api/v1/companies/admin/all-companies")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
+    app_client.cookies.clear()
+
 
 # =============================================================================
-# ADMIN DELETE COMPANY
+# ADMIN DELETE COMPANY - DELETE /api/v1/companies/admin/companies/{uuid}
 # =============================================================================
 @pytest.mark.asyncio
 async def test_admin_delete_company_unauthenticated(app_client):
     response = await app_client.delete(
-        f"/api/v1/companies/admin/companies/{uuid.uuid4()}/use-postman-or-similar-to-bypass-csrf"
+        f"/api/v1/companies/admin/companies/{uuid.uuid4()}"
     )
     assert response.status_code == 401
 
@@ -266,10 +263,12 @@ async def test_admin_delete_company_forbidden_for_user(app_client):
     app_client.cookies.set("csrf_token", csrf)
 
     response = await app_client.delete(
-        f"/api/v1/companies/admin/companies/{uuid.uuid4()}/use-postman-or-similar-to-bypass-csrf",
+        f"/api/v1/companies/admin/companies/{uuid.uuid4()}",
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
+
+    app_client.cookies.clear()
 
 
 # =============================================================================
