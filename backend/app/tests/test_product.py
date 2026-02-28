@@ -23,7 +23,7 @@ async def app_client():
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         transport = ASGITransport(app=fresh_app)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with AsyncClient(transport=transport, base_url="https://testserver") as client:
             yield client
 
 

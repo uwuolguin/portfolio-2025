@@ -18,7 +18,7 @@ async def test_basic_health_endpoint(initialized_app):
 
     async with AsyncClient(
         transport=transport,
-        base_url="http://testserver",
+        base_url="https://testserver",
     ) as client:
         response = await client.get("/api/v1/health/")
 
@@ -35,7 +35,7 @@ async def test_database_health_endpoint(initialized_app):
 
     async with AsyncClient(
         transport=transport,
-        base_url="http://testserver",
+        base_url="https://testserver",
     ) as client:
         response = await client.get("/api/v1/health/database")
 
