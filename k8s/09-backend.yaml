@@ -194,7 +194,7 @@ spec:
                 name: portfolio-secrets
           livenessProbe:
             httpGet:
-              path: /api/v1/health/
+              path: /api/v1/health
               port: 8000
             initialDelaySeconds: 45
             periodSeconds: 15
@@ -202,7 +202,7 @@ spec:
             failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: /api/v1/health/
+              path: /api/v1/health
               port: 8000
             initialDelaySeconds: 20
             periodSeconds: 10

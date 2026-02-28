@@ -11,7 +11,7 @@ logger = structlog.get_logger(__name__)
 # Without this exemption, DEBUG=false causes the middleware to 301 the probe,
 # Kubernetes sees a redirect instead of 200, marks the pod unhealthy, and
 # restarts it in a loop.
-HTTPS_EXEMPT_PATHS = {"/api/v1/health/", "/health"}
+HTTPS_EXEMPT_PATHS = {"/api/v1/health", "/health"}
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
