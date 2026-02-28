@@ -59,7 +59,7 @@ def make_user_token():
 # =============================================================================
 @pytest.mark.asyncio
 async def test_list_communes(app_client):
-    response = await app_client.get("/api/v1/communes/")
+    response = await app_client.get("/api/v1/communes")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
@@ -71,7 +71,7 @@ async def test_list_communes(app_client):
 async def test_create_commune_unauthenticated(app_client):
     """Test create commune fails without auth - should get 401 or 403 (CSRF missing)"""
     response = await app_client.post(
-        "/api/v1/communes/",
+        "/api/v1/communes",
         json={"name": "Test Commune"}
     )
     # No auth cookie → 401
@@ -88,7 +88,7 @@ async def test_create_commune_forbidden_for_user(app_client):
     app_client.cookies.set("csrf_token", csrf)
 
     response = await app_client.post(
-        "/api/v1/communes/",
+        "/api/v1/communes",
         json={"name": "Test Commune"},
         headers={"X-CSRF-Token": csrf}
     )

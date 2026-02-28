@@ -10,7 +10,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/health", tags=["health"])
 
 
-@router.get("/")
+@router.get("")
 async def basic_health() -> dict[str, Any]:
     """
     Basic health check endpoint for load balancers and monitoring.

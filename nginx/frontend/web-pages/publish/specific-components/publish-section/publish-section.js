@@ -505,7 +505,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const csrfToken = getCSRFToken();
                 const correlationId = `fe_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
                 
-                const response = await fetch('/api/v1/companies/', {
+                const response = await fetch('/api/v1/companies', {
                     method: 'POST',
                     credentials: 'include',
                     headers: {

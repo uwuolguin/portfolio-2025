@@ -18,7 +18,7 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=List[CommuneResponse])
+@router.get("", response_model=List[CommuneResponse])
 @cache_response(key_prefix="communes:all", ttl=259200)
 async def list_communes(
     db: asyncpg.Connection = Depends(get_db_read),
@@ -28,7 +28,7 @@ async def list_communes(
 
 
 @router.post(
-    "/",
+    "",
     response_model=CommuneResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new commune (Admin Only)",

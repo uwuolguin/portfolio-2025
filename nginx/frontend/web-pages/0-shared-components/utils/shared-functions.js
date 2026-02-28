@@ -231,7 +231,7 @@ export async function checkCompanyStatus() {
 
 export async function fetchProducts() {
     try {
-        const response = await apiRequest('/api/v1/products/');
+        const response = await apiRequest('/api/v1/products');
         if (response.ok) {
             return await response.json();
         }
@@ -244,7 +244,7 @@ export async function fetchProducts() {
 
 export async function fetchCommunes() {
     try {
-        const response = await apiRequest('/api/v1/communes/');
+        const response = await apiRequest('/api/v1/communes');
         if (response.ok) {
             return await response.json();
         }

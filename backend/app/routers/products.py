@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=List[ProductResponse])
+@router.get("", response_model=List[ProductResponse])
 @cache_response(key_prefix="products:all", ttl=259200)
 async def list_products(
     db: asyncpg.Connection = Depends(get_db_read)
@@ -30,7 +30,7 @@ async def list_products(
 
 
 @router.post(
-    "/",
+    "",
     response_model=ProductResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new product (Admin Only)"

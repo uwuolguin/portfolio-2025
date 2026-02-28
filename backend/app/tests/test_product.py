@@ -59,7 +59,7 @@ def make_user_token():
 # =============================================================================
 @pytest.mark.asyncio
 async def test_list_products(app_client):
-    response = await app_client.get("/api/v1/products/")
+    response = await app_client.get("/api/v1/products")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
@@ -70,7 +70,7 @@ async def test_list_products(app_client):
 @pytest.mark.asyncio
 async def test_create_product_unauthenticated(app_client):
     response = await app_client.post(
-        "/api/v1/products/",
+        "/api/v1/products",
         json={"name_es": "Producto", "name_en": "Product"},
     )
     assert response.status_code == 401
@@ -85,7 +85,7 @@ async def test_create_product_forbidden_for_user(app_client):
     app_client.cookies.set("csrf_token", csrf)
 
     response = await app_client.post(
-        "/api/v1/products/",
+        "/api/v1/products",
         json={"name_es": "Producto", "name_en": "Product"},
         headers={"X-CSRF-Token": csrf},
     )
