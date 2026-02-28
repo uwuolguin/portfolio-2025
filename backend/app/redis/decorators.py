@@ -133,11 +133,12 @@ def cache_response(key_prefix: str, ttl: int = None):
             else:
                 json_result = result
             
-            await redis_client.set(
-                cache_key, 
-                json.dumps(json_result), 
-                expire=ttl or settings.cache_ttl
-            )
+            if json_result:
+                await redis_client.set(
+                    cache_key, 
+                    json.dumps(json_result), 
+                    expire=ttl or settings.cache_ttl
+                )
             
             return result
 
