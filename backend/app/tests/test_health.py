@@ -20,7 +20,7 @@ async def test_basic_health_endpoint(initialized_app):
         transport=transport,
         base_url="https://testserver",
     ) as client:
-        response = await client.get("/api/v1/health/")
+        response = await client.get("/api/v1/health")
 
     assert response.status_code == 200
     data = response.json()
