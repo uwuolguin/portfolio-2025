@@ -19,10 +19,16 @@ def cache_response(key_prefix: str, ttl: int = None):
             cached = await redis_client.get(cache_key)
             if cached:
                 try:
-                    return json.loads(cached)
+                    data = json.loads(cached)
+                    if data:  # non-empty, return it
+                        return data
+                    else:
+                        # empty list/dict cached — stale, flush and fall through to DB
+                        await redis_client.delete(cache_key)
+                        logger.warning("cache_empty_value_flushed", key=cache_key)
                 except json.JSONDecodeError:
                     logger.warning("cache_json_decode_error", key=cache_key)
-                    pass
+                    await redis_client.delete(cache_key)  # also clean up bad data
 
             result = await func(*args, **kwargs)
             
