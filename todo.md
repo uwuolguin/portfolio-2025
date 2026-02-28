@@ -1,5 +1,3 @@
-Add https and all the implications like modify the modify the middleware.py files, the nginx yaml, everything when certbot is in place
-
 KAFKA + TEMPORAL + REDIS( chec, in the redis that the combination user id and timestamps in always unique) + CHARTJS
 # TODO: Implement Redis idempotency guard for Temporal activities
 # Use SET NX with composite key (workflow_id + uuid + timestamp) to detect
