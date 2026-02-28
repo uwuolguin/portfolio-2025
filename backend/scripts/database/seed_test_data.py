@@ -57,9 +57,9 @@ async def get_conn():
 
 
 async def fetch_test_image_bytes(image_name: str) -> BytesIO:
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         response = await client.get(
-            f"http://nginx/files/test_pictures/{image_name}"
+            f"https://nginx/files/test_pictures/{image_name}"
         )
         response.raise_for_status()
         image_bytes = BytesIO(response.content)
