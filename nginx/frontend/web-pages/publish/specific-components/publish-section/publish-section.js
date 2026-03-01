@@ -308,7 +308,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             const resendButton = document.createElement('button');
             resendButton.type = 'button';
-            resendButton.className = 'resend-verification-button';
+            resendButton.className = 'publish-button';
             resendButton.textContent = t.resendButton;
 
             resendButton.addEventListener('click', async () => {
