@@ -123,10 +123,12 @@ def verification_success_page(email: str) -> str:
         </div>
 
         <script>
-            // Clear the stale JWT cookie (which has email_verified: false baked in).
-            // Without this, the user would get 403 on protected endpoints until
-            // their 120-minute token naturally expired, even though the DB is verified.
-            fetch('/api/v1/users/logout', {{ method: 'POST' }}).catch(() => {{}});
+            // Broadcast to all other open Proveo tabs that email verification succeeded.
+            // Each tab picks this up via initStorageListener() in shared-functions.js
+            // and will call logout + redirect to /log-in automatically.
+            const channel = new BroadcastChannel('auth');
+            channel.postMessage({{ type: 'email_verified' }});
+            channel.close();
         </script>
     </body>
     </html>
