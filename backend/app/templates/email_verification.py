@@ -121,6 +121,13 @@ def verification_success_page(email: str) -> str:
                 <p>You can now close this window and log in to your Proveo account using your credentials.</p>
             </div>
         </div>
+
+        <script>
+            // Clear the stale JWT cookie (which has email_verified: false baked in).
+            // Without this, the user would get 403 on protected endpoints until
+            // their 120-minute token naturally expired, even though the DB is verified.
+            fetch('/api/v1/users/logout', {{ method: 'POST' }}).catch(() => {{}});
+        </script>
     </body>
     </html>
     """
