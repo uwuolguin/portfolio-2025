@@ -1,6 +1,5 @@
 import {
     getLanguage,
-    getLoginState,
     apiRequest,
     fetchProducts,
     fetchCommunes,
