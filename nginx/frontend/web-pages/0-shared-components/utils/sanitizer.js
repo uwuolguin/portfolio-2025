@@ -1,3 +1,9 @@
+// DOMPurify is not currently used anywhere in the frontend.
+// All user input is rendered via textContent which is XSS-safe by default.
+// setHTML() is reserved for future use cases where server-provided HTML
+// needs to be rendered (e.g. rich text company descriptions).
+// If that day comes, purify.min.js must remain in every HTML shell
+// so window.DOMPurify is available when this function is called.
 const SAFE_ATTRS = new Set([
     'class', 'id', 'title', 'role', 'tabindex', 'lang', 'dir',
     'aria-label', 'aria-describedby', 'aria-hidden', 'aria-live',
