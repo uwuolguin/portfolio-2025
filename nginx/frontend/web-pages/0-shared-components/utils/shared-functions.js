@@ -271,7 +271,8 @@ export async function fetchUserCompany() {
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
-
+// Decorator pattern: outer function defines persistent state, inner function
+// closes over it and keeps a live reference to it even after outer has returned
 export function debounce(func, wait = 300) {
     let timeout;
     return function executedFunction(...args) {
