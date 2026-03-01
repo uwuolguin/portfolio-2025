@@ -26,18 +26,17 @@ function notifyStateChange(key) {
 }
 
 /**
- * Initialize storage listeners for cross-tab synchronization.
- * Also listens for BroadcastChannel 'auth' messages (e.g. email_verified)
- * so all open tabs react immediately when verification happens in another tab.
- * Call this once in each page's main JS file.
+ * Initialize storage listeners for cross-tab synchronization
+ * Call this once in each page's main JS file
  */
 export function initStorageListener() {
-    // Listen for localStorage changes from OTHER tabs
+    // Listen for changes from OTHER tabs (storage event only fires cross-tab)
     window.addEventListener('storage', (e) => {
         if (!e.key) return;
         
         console.log(`[Storage Sync] Key changed in another tab: ${e.key}`);
         
+        // Only react to our tracked keys
         switch (e.key) {
             case 'isLoggedIn':
             case 'hasCompany':
@@ -46,19 +45,6 @@ export function initStorageListener() {
                 break;
         }
     });
-
-    // Listen for auth broadcast events from other tabs (e.g. email verification page)
-    const authChannel = new BroadcastChannel('auth');
-    authChannel.onmessage = (event) => {
-        if (event.data.type === 'email_verified') {
-            console.log('[Auth] Email verified in another tab — logging out stale session');
-            fetch('/api/v1/users/logout', { method: 'POST', credentials: 'include' })
-                .finally(() => {
-                    setLoginState(false);
-                    window.location.href = '/log-in/log-in.html';
-                });
-        }
-    };
     
     console.log('[State Sync] Storage listener initialized');
 }

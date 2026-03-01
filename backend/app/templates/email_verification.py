@@ -121,15 +121,6 @@ def verification_success_page(email: str) -> str:
                 <p>You can now close this window and log in to your Proveo account using your credentials.</p>
             </div>
         </div>
-
-        <script>
-            // Broadcast to all other open Proveo tabs that email verification succeeded.
-            // Each tab picks this up via initStorageListener() in shared-functions.js
-            // and will call logout + redirect to /log-in automatically.
-            const channel = new BroadcastChannel('auth');
-            channel.postMessage({{ type: 'email_verified' }});
-            channel.close();
-        </script>
     </body>
     </html>
     """

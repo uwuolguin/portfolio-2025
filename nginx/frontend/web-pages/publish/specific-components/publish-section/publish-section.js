@@ -47,7 +47,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             searchPlaceholder: 'Buscar...',
             requiredField: 'Este campo es requerido',
             invalidEmail: 'Correo electrónico inválido',
-            selectRequired: 'Por favor selecciona una opción'
+            selectRequired: 'Por favor selecciona una opción',
+            notVerifiedTitle: 'Cuenta no verificada',
+            notVerifiedMessage: 'Debes verificar tu correo electrónico para publicar tu empresa. Por favor revisa tu bandeja de entrada y haz clic en el enlace de verificación, luego inicia sesión nuevamente.',
+            resendLabel: '¿No recibiste el correo de verificación?',
+            resendButton: 'Reenviar correo',
+            resendSent: 'Correo de verificación enviado. Revisa tu bandeja de entrada.',
+            resendError: 'Error al reenviar el correo. Intenta nuevamente.',
+            sending: 'Enviando...'
         },
         en: {
             title: 'Publish My Company',
@@ -77,7 +84,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             searchPlaceholder: 'Search...',
             requiredField: 'This field is required',
             invalidEmail: 'Invalid email address',
-            selectRequired: 'Please select an option'
+            selectRequired: 'Please select an option',
+            notVerifiedTitle: 'Account not verified',
+            notVerifiedMessage: 'You must verify your email to publish your company. Please check your inbox and click the verification link, then log in again.',
+            resendLabel: 'Didn\'t receive the verification email?',
+            resendButton: 'Resend email',
+            resendSent: 'Verification email sent. Please check your inbox.',
+            resendError: 'Failed to resend email. Please try again.',
+            sending: 'Sending...'
         }
     };
 
@@ -87,6 +101,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             return response.ok;
         } catch (error) {
             return false;
+        }
+    }
+
+    // Returns full user object if cookie is present, null if no session
+    async function fetchCurrentUser() {
+        try {
+            const response = await apiRequest('/api/v1/users/me');
+            if (response.ok) return await response.json();
+            return null;
+        } catch {
+            return null;
         }
     }
 
@@ -126,28 +151,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const lang = getLanguage();
         options.forEach(option => {
-            // Crash if lang is not properly set
             if (lang !== 'es' && lang !== 'en') {
                 throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
             }
             
-            // Use the exact language for display
             const displayName =
                 lang === 'es'
                     ? (option.name_es || option.name)
                     : (option.name_en || option.name);
 
-            // Use the SAME LANGUAGE for value – with fallback
             const value =
                 lang === 'es'
                     ? (option.name_es || option.name)
                     : (option.name_en || option.name);
             
-            // Crash if the required translation is missing
             if (!displayName || !value) {
                 throw new Error(`Missing ${lang} translation for option: ${JSON.stringify(option)}`);
             }
-            
             
             const optionElement = buildDropdownOption(value, displayName);
             
@@ -166,36 +186,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         searchInput.addEventListener('input', (e) => {
             const searchTerm = e.target.value.toLowerCase();
             const allOptions = optionsList.querySelectorAll('.dropdown-option');
-            
             allOptions.forEach(opt => {
                 const text = opt.textContent.toLowerCase();
                 opt.style.display = text.includes(searchTerm) ? 'block' : 'none';
             });
         });
 
-        searchInput.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
+        searchInput.addEventListener('click', (e) => e.stopPropagation());
 
         selected.addEventListener('click', (e) => {
             e.stopPropagation();
             const isOpen = optionsContainer.style.display === 'block';
-            
-            document.querySelectorAll('.dropdown-options').forEach(opt => {
-                opt.style.display = 'none';
-            });
-            document.querySelectorAll('.input-group').forEach(grp => {
-                grp.classList.remove('dropdown-open');
-            });
-            
+            document.querySelectorAll('.dropdown-options').forEach(opt => opt.style.display = 'none');
+            document.querySelectorAll('.input-group').forEach(grp => grp.classList.remove('dropdown-open'));
             if (!isOpen) {
                 optionsContainer.style.display = 'block';
                 container.classList.add('dropdown-open');
                 searchInput.value = '';
                 searchInput.focus();
-                optionsList.querySelectorAll('.dropdown-option').forEach(opt => {
-                    opt.style.display = 'block';
-                });
+                optionsList.querySelectorAll('.dropdown-option').forEach(opt => opt.style.display = 'block');
             }
         });
 
@@ -210,26 +219,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         const lang = getLanguage();
         const t = translations[lang];
 
-        const isLoggedIn = getLoginState();
-        
-        if (!isLoggedIn) {
+        // ── GATE 1: no cookie at all → show login prompt ──────────────────
+        // We call /me directly instead of trusting localStorage so we always
+        // reflect the real cookie state on page load.
+        const currentUser = await fetchCurrentUser();
+
+        if (!currentUser) {
             clearElement(publishSection);
-            
+
             const container = document.createElement('div');
             container.className = 'publish-container';
-            
+
             const title = document.createElement('h2');
             title.className = 'publish-title';
             title.textContent = t.title;
             container.appendChild(title);
-            
+
             const message = document.createElement('p');
             message.className = 'login-message';
             message.textContent = t.loginRequired;
             message.style.color = 'white';
             message.style.marginBottom = '1.5rem';
             container.appendChild(message);
-            
+
             const loginLink = document.createElement('a');
             loginLink.href = '/log-in/log-in.html';
             loginLink.className = 'publish-button';
@@ -237,45 +249,123 @@ document.addEventListener('DOMContentLoaded', async () => {
             loginLink.style.textDecoration = 'none';
             loginLink.style.display = 'inline-block';
             container.appendChild(loginLink);
-            
+
             const signupSection = document.createElement('div');
             signupSection.style.marginTop = '1.5rem';
             signupSection.style.color = '#ffffff';
-            
             const noAccountText = document.createTextNode(t.noAccount + ' ');
             signupSection.appendChild(noAccountText);
-            
             const signupLink = document.createElement('a');
             signupLink.href = '/sign-up/sign-up.html';
             signupLink.textContent = t.registerHere;
             signupLink.style.color = '#FF9800';
             signupLink.style.textDecoration = 'none';
             signupSection.appendChild(signupLink);
-            
             container.appendChild(signupSection);
+
             publishSection.appendChild(container);
             return;
         }
 
+        // ── GATE 2: cookie present but email_verified false ────────────────
+        // Show blocked message + resend button using email from the JWT/session.
+        // No email input needed — we already know who they are.
+        if (!currentUser.email_verified) {
+            clearElement(publishSection);
+
+            const container = document.createElement('div');
+            container.className = 'publish-container';
+
+            const title = document.createElement('h2');
+            title.className = 'publish-title';
+            title.textContent = t.notVerifiedTitle;
+            container.appendChild(title);
+
+            const message = document.createElement('p');
+            message.style.color = '#a0a0a0';
+            message.style.fontFamily = 'sans-serif';
+            message.style.fontSize = '0.95rem';
+            message.style.lineHeight = '1.6';
+            message.style.marginBottom = '1.5rem';
+            message.textContent = t.notVerifiedMessage;
+            container.appendChild(message);
+
+            // Feedback message (success / error from resend)
+            const statusDiv = document.createElement('div');
+            statusDiv.style.display = 'none';
+            statusDiv.style.fontFamily = 'sans-serif';
+            statusDiv.style.fontSize = '0.9rem';
+            statusDiv.style.marginBottom = '1rem';
+            container.appendChild(statusDiv);
+
+            // Resend section — only visible while not yet sent
+            const resendSection = document.createElement('div');
+            resendSection.className = 'resend-verification-section';
+
+            const resendLabel = document.createElement('p');
+            resendLabel.className = 'resend-verification-text';
+            resendLabel.textContent = t.resendLabel;
+            resendSection.appendChild(resendLabel);
+
+            const resendButton = document.createElement('button');
+            resendButton.type = 'button';
+            resendButton.className = 'resend-verification-button';
+            resendButton.textContent = t.resendButton;
+
+            resendButton.addEventListener('click', async () => {
+                resendButton.disabled = true;
+                resendButton.textContent = t.sending;
+
+                try {
+                    const response = await apiRequest(
+                        `/api/v1/users/resend-verification?email=${encodeURIComponent(currentUser.email)}`,
+                        { method: 'POST' }
+                    );
+
+                    if (response.ok) {
+                        statusDiv.style.color = '#4CAF50';
+                        statusDiv.textContent = t.resendSent;
+                        statusDiv.style.display = 'block';
+                        resendSection.style.display = 'none';
+                    } else {
+                        const error = await response.json();
+                        throw new Error(error.detail || t.resendError);
+                    }
+                } catch (error) {
+                    statusDiv.style.color = '#ff6b6b';
+                    statusDiv.textContent = sanitizeText(error.message) || t.resendError;
+                    statusDiv.style.display = 'block';
+                    resendButton.disabled = false;
+                    resendButton.textContent = t.resendButton;
+                }
+            });
+
+            resendSection.appendChild(resendButton);
+            container.appendChild(resendSection);
+            publishSection.appendChild(container);
+            return;
+        }
+
+        // ── GATE 3: verified but already has a company ─────────────────────
         const hasCompany = await checkExistingCompany();
         if (hasCompany) {
             clearElement(publishSection);
-            
+
             const container = document.createElement('div');
             container.className = 'publish-container';
-            
+
             const title = document.createElement('h2');
             title.className = 'publish-title';
             title.textContent = t.title;
             container.appendChild(title);
-            
+
             const message = document.createElement('p');
             message.className = 'already-published-message';
             message.textContent = t.alreadyPublished;
             message.style.color = 'white';
             message.style.marginBottom = '1.5rem';
             container.appendChild(message);
-            
+
             const viewLink = document.createElement('a');
             viewLink.href = '/profile-view/profile-view.html';
             viewLink.className = 'publish-button';
@@ -283,11 +373,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             viewLink.style.textDecoration = 'none';
             viewLink.style.display = 'inline-block';
             container.appendChild(viewLink);
-            
+
             publishSection.appendChild(container);
             return;
         }
 
+        // ── FORM ───────────────────────────────────────────────────────────
         clearElement(publishSection);
 
         const container = document.createElement('div');
@@ -347,20 +438,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         addressGroup.appendChild(addressInput);
         form.appendChild(addressGroup);
 
-        const communeDropdown = createFilterableDropdown(
-            'commune',
-            communes,
-            t.selectCommune,
-            t.searchPlaceholder
-        );
+        const communeDropdown = createFilterableDropdown('commune', communes, t.selectCommune, t.searchPlaceholder);
         form.appendChild(communeDropdown);
 
-        const productDropdown = createFilterableDropdown(
-            'product',
-            products,
-            t.selectProduct,
-            t.searchPlaceholder
-        );
+        const productDropdown = createFilterableDropdown('product', products, t.selectProduct, t.searchPlaceholder);
         form.appendChild(productDropdown);
 
         const descGroup = document.createElement('div');
@@ -377,10 +458,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const imageGroup = document.createElement('div');
         imageGroup.className = 'input-group';
-        
         const fileWrapper = document.createElement('div');
         fileWrapper.className = 'file-input-wrapper';
-        
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.id = 'company-image';
@@ -388,12 +467,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         fileInput.className = 'file-input-hidden';
         fileInput.accept = 'image/jpeg,image/png';
         fileInput.required = true;
-        
         const fileLabel = document.createElement('label');
         fileLabel.htmlFor = 'company-image';
         fileLabel.className = 'file-input-label';
         fileLabel.textContent = t.selectImage;
-        
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 fileLabel.textContent = sanitizeText(e.target.files[0].name);
@@ -403,7 +480,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 fileLabel.classList.remove('has-file');
             }
         });
-        
         fileWrapper.appendChild(fileInput);
         fileWrapper.appendChild(fileLabel);
         imageGroup.appendChild(fileWrapper);
@@ -451,49 +527,35 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 const communeSelected = communeDropdown.querySelector('.dropdown-selected');
                 const productSelected = productDropdown.querySelector('.dropdown-selected');
-                
                 const communeValue = communeSelected ? communeSelected.dataset.value : '';
                 const productValue = productSelected ? productSelected.dataset.value : '';
 
-                if (!communeValue) {
-                    throw new Error(t.selectCommune);
-                }
-                if (!productValue) {
-                    throw new Error(t.selectProduct);
-                }
+                if (!communeValue) throw new Error(t.selectCommune);
+                if (!productValue) throw new Error(t.selectProduct);
 
                 const sanitizedEmail = sanitizeEmail(emailInput.value);
-                if (!sanitizedEmail) {
-                    throw new Error(t.invalidEmail);
-                }
+                if (!sanitizedEmail) throw new Error(t.invalidEmail);
 
                 const sanitizedName = sanitizeText(nameInput.value.trim());
                 const sanitizedPhone = sanitizePhone(phoneInput.value);
                 const sanitizedAddress = sanitizeText(addressInput.value.trim());
                 const sanitizedDescription = sanitizeText(descTextarea.value.trim());
 
-                if (!sanitizedName) {
-                    throw new Error(t.requiredField);
-                }
-
-                if (!fileInput.files || fileInput.files.length === 0) {
-                    throw new Error(t.selectImage);
-                }
+                if (!sanitizedName) throw new Error(t.requiredField);
+                if (!fileInput.files || fileInput.files.length === 0) throw new Error(t.selectImage);
 
                 const formData = new FormData();
                 formData.append('name', sanitizedName);
                 formData.append('email', sanitizedEmail);
                 formData.append('phone', sanitizedPhone);
                 formData.append('address', sanitizedAddress);
-                
-                // CRITICAL: Send description based on CURRENT language flag
-                // If Spanish flag (es) -> description_es, if English flag (en) -> description_en
+
                 if (lang === 'es') {
                     formData.append('description_es', sanitizedDescription);
                 } else {
                     formData.append('description_en', sanitizedDescription);
                 }
-                
+
                 formData.append('commune_name', communeValue);
                 formData.append('product_name', productValue);
                 formData.append('lang', lang);
@@ -504,7 +566,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 const csrfToken = getCSRFToken();
                 const correlationId = `fe_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
-                
+
                 const response = await fetch('/api/v1/companies', {
                     method: 'POST',
                     credentials: 'include',
@@ -518,7 +580,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (response.ok) {
                     successDiv.textContent = t.success;
                     successDiv.style.display = 'block';
-                    
                     setTimeout(() => {
                         window.location.href = '/profile-view/profile-view.html';
                     }, 2000);
@@ -542,12 +603,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.filterable-dropdown')) {
-            document.querySelectorAll('.dropdown-options').forEach(opt => {
-                opt.style.display = 'none';
-            });
-            document.querySelectorAll('.input-group').forEach(grp => {
-                grp.classList.remove('dropdown-open');
-            });
+            document.querySelectorAll('.dropdown-options').forEach(opt => opt.style.display = 'none');
+            document.querySelectorAll('.input-group').forEach(grp => grp.classList.remove('dropdown-open'));
         }
     });
 
