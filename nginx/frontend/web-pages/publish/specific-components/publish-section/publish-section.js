@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // ── FORM ───────────────────────────────────────────────────────────
+        // ── GATE 4: logged in + verified + no company → show publish form ──────
         clearElement(publishSection);
 
         const container = document.createElement('div');
