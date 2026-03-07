@@ -194,8 +194,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     method: 'POST',
                     credentials: 'include',
                     headers: {
-                        'X-Correlation-ID': `logout_${Date.now()}`
-                    }
+                        'X-Correlation-ID': `logout_${Date.now()}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ lang: getLanguage() })
                 });
                 
                 if (response.ok) {

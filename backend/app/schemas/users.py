@@ -6,7 +6,7 @@ Includes validation rules and examples.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional,Literal
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -105,16 +105,28 @@ class UserResponse(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1, max_length=100)
+    lang: Literal['es', 'en'] = Field(default='en')
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "email": "andres@example.com",
                 "password": "strongpassword123",
+                "lang":"en"
             }
         }
     }
 
+class UserLogout(BaseModel):
+    lang: Literal['es', 'en'] = Field(default='en')
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "lang":"en"
+            }
+        }
+    }
 
 class LoginUserInfo(BaseModel):
     email: EmailStr

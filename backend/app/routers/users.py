@@ -9,7 +9,7 @@ import structlog
 from app.database.connection import get_db_read, get_db_write
 from app.database.transactions import DB
 from app.schemas.users import (
-    UserSignup, UserResponse, UserLogin, LoginResponse, AdminUserResponse
+    UserSignup, UserResponse, UserLogin, UserLogout, LoginResponse, AdminUserResponse
 )
 from app.auth.jwt import verify_password, create_access_token
 from app.auth.csrf import generate_csrf_token
@@ -175,7 +175,7 @@ async def login(
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(response: Response,user_data: UserLogout, ):
     response.delete_cookie(key="access_token", httponly=True, secure=not settings.debug, samesite="lax")
     response.delete_cookie(key="csrf_token", httponly=False, secure=not settings.debug, samesite="lax")
     logger.info("logout_success")
