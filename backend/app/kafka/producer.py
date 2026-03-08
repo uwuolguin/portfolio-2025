@@ -91,7 +91,7 @@ class KafkaProducerClient:
                     # Payload dict → JSON string → bytes.
                     value_serializer=lambda v: json.dumps(v).encode("utf-8"),
 
-                    # Acknowledge on leader write — equivalent to acks="all" with 1 replica.
+                    # Acknowledge on leader write —  it does not wait for other brokers to end writing.
                     acks=1,
 
                     # Fail fast — don't hang login requests waiting for a slow broker.

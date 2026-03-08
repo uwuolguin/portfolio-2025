@@ -20,14 +20,15 @@
 ## 🎯 Executive Summary
 
 **What**: B2B marketplace connecting businesses with service providers  
-**Stack**: FastAPI + PostgreSQL + Redis + MinIO + Kubernetes  
+**Stack**: FastAPI + PostgreSQL + Redis + MinIO + Redpanda + Kubernetes  
 **Highlights**: 
 - Database read/write splitting with streaming replication
 - AI-powered NSFW detection (TensorFlow + OpenNSFW2)
-- Kubernetes deployment with 7 pods across 7 services (2GB droplet configuration)
+- Kubernetes deployment with 9 pods across 9 services (2GB droplet configuration)
 - Bilingual (ES/EN) with automatic translation fallback
 - HTTPS with Let's Encrypt TLS, auto-renewing certificates
 - Zero-downtime deployments — rolling updates replace pods one at a time (new pod starts → passes health checks → old pod terminates), ensuring traffic is always served
+- Event streaming pipeline — login/logout events published to Redpanda, routed to Temporal workers by language partition
 
 **Pod Breakdown (2GB Droplet):**
 1. `postgres-primary-0` - StatefulSet from `04-postgres-primary.yaml`
@@ -37,6 +38,8 @@
 5. `image-service-*` - Deployment from `08-image-service.yaml` (1 replica)
 6. `backend-*` - Deployment from `09-backend.yaml` (1 replica)
 7. `nginx-*` - Deployment from `10-nginx.yaml`
+8. `redpanda-0` - StatefulSet from `11-redpanda.yaml`
+9. `consumer-*` - Deployment from `13-consumer.yaml`
 
 ---
 
@@ -77,7 +80,7 @@ See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s se
 ## ✨ Key Technical Achievements
 
 ### 🗃️ **Architecture & Infrastructure**
-- **Kubernetes (k3s) deployment** - 7 pods, 2 CPU cores, 2GB RAM (+2GB swap), 60GB storage
+- **Kubernetes (k3s) deployment** - 9 pods, 2 CPU cores, 2GB RAM (+2GB swap), 60GB storage
 - **PostgreSQL streaming replication** - Primary for writes, replica for reads with automatic failback
 - **Microservices** - Separate image processing service with NSFW detection
 - **Zero-downtime deployments** - Rolling updates with health checks
@@ -114,6 +117,14 @@ See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s se
 - **Automatic translation** - Google Translate API with fallback
 - **Content moderation** - AI-powered blocking on model failure (fail-closed)
 
+### 📨 **Event Streaming Pipeline**
+- **Redpanda (Kafka-compatible)** - Login and logout events published as JSON to durable topics with 24h retention
+- **Explicit partition routing** - `PARTITION_MAP = {"es": 0, "en": 1}` partition assignment is deterministic and self-documenting
+- **Fire-and-forget publishing** - Auth endpoints never block on Kafka; publish failures are logged and swallowed
+- **Self-healing producer** - `asyncio.Lock` prevents concurrent reconnect races; lazy reconnect in `publish_event()` recovers automatically if Redpanda was down at startup
+- **Graceful degradation** - Redpanda outage has zero user-visible impact; auth continues normally
+- **Init Job pattern** - Topics created by a one-shot Kubernetes Job after the StatefulSet is confirmed healthy
+
 ---
 
 ## 🛠️ Tech Stack
@@ -121,6 +132,7 @@ See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s se
 ### Backend
 - **FastAPI 0.120** - Modern async Python framework
 - **asyncpg 0.30** - High-performance PostgreSQL driver
+- **aiokafka** - Async Kafka producer for Redpanda event publishing
 - **Pydantic v2** - Type-safe validation
 - **Alembic** - Schema migrations
 - **structlog** - Structured JSON logging
@@ -129,6 +141,7 @@ See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s se
 - **PostgreSQL 16** - Primary/replica replication, pg_cron, pg_trgm
 - **Redis 7** - Cache + rate limiting
 - **MinIO** - S3-compatible object storage
+- **Redpanda v24.2** - Kafka-compatible event broker (StatefulSet, persistent storage)
 - **Kubernetes (k3s)** - Container orchestration
 - **Nginx** - Reverse proxy + TLS termination + static file serving
 - **Let's Encrypt** - Automated TLS certificates via certbot
@@ -191,6 +204,7 @@ proveo/
 │   │   ├── schemas/             # Pydantic models
 │   │   ├── middleware/          # CORS, logging, security
 │   │   ├── redis/               # Cache, rate limiting
+│   │   ├── kafka/               # Redpanda producer + consumer worker
 │   │   ├── templates/           # Email HTML templates
 │   │   ├── utils/               # Validators, exceptions
 │   │   └── tests/               # Pytest test suite
@@ -213,7 +227,10 @@ proveo/
 │   ├── 07-minio.yaml
 │   ├── 08-image-service.yaml    # 1 replica (2GB droplet)
 │   ├── 09-backend.yaml          # 1 replica (2GB droplet)
-│   └── 10-nginx.yaml            # TLS termination + HTTP→HTTPS redirect
+│   ├── 10-nginx.yaml            # TLS termination + HTTP→HTTPS redirect
+│   ├── 11-redpanda.yaml         # Kafka-compatible broker (StatefulSet)
+│   ├── 12-redpanda-init.yaml    # One-shot Job — creates topics after broker ready
+│   └── 13-consumer.yaml         # Redpanda consumer worker — routes events to Temporal
 │
 ├── k8s scripts/                 # Deployment automation
 │   ├── 00-install-k3s.sh
@@ -246,14 +263,15 @@ proveo/
 This project demonstrates:
 
 1. **Database Engineering** - Streaming replication, read/write splitting, connection pooling
-2. **Microservices** - Service separation, load balancing, health checks
-3. **Kubernetes** - StatefulSets, Deployments, Services, PVCs, ConfigMaps, Secrets, InitContainers
-4. **Security** - HTTPS/TLS, JWT, CSRF, RBAC, secure cookies, HSTS, CSP, rate limiting
-5. **Performance** - Caching, async I/O, materialized views, image optimization, HTTP/2
-6. **DevOps** - Docker, K8s, certbot, auto-renewal cron, migrations, structured logging
-7. **AI/ML** - TensorFlow model inference, NSFW detection
-8. **Testing** - Pytest, rollback tests, integration tests
-9. **Resource Constraints** - Running production-like workloads on minimal hardware with swap
+2. **Event Streaming** - Redpanda/Kafka producer, explicit partition routing, graceful degradation, Kubernetes Job ordering for broker initialization
+3. **Microservices** - Service separation, load balancing, health checks
+4. **Kubernetes** - StatefulSets, Deployments, Jobs, Services, PVCs, ConfigMaps, Secrets, InitContainers
+5. **Security** - HTTPS/TLS, JWT, CSRF, RBAC, secure cookies, HSTS, CSP, rate limiting
+6. **Performance** - Caching, async I/O, materialized views, image optimization, HTTP/2
+7. **DevOps** - Docker, K8s, certbot, auto-renewal cron, migrations, structured logging
+8. **AI/ML** - TensorFlow model inference, NSFW detection
+9. **Testing** - Pytest, rollback tests, integration tests
+10. **Resource Constraints** - Running production-like workloads on minimal hardware with swap
 
 ---
 

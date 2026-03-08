@@ -64,5 +64,6 @@ data:
   DB_RETRY_WAIT_MULTIPLIER: "0.5"
   DB_RETRY_MAX_WAIT: "5.0"
 
-  # Kafka
+  # Kafka / Temporal
   BOOTSTRAP_SERVERS: "redpanda:9092"
+  TEMPORAL_HOST: "temporal:7233"

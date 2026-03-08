@@ -3,6 +3,7 @@
 A Kubernetes (k3s) deployment showcasing:
 - **PostgreSQL Primary + Read Replica** — Demonstrates database replication
 - **Image Service with NSFW Detection** — TensorFlow-based content moderation
+- **Redpanda Event Streaming** — Kafka-compatible broker with explicit partition routing
 - **Full stack on a $21/mo droplet** — 2GB RAM + swap, all features enabled
 
 ---
@@ -20,7 +21,7 @@ A Kubernetes (k3s) deployment showcasing:
 
 ## User Setup
 
-All scripts run as a **regular user with sudo privileges**  never as root directly.
+All scripts run as a **regular user with sudo privileges** — never as root directly.
 
 ```bash
 # If you only have root, create a user first:
@@ -43,6 +44,7 @@ su - deploy
 | PG replica shared_buffers | 256MB | **64MB** |
 | Redis maxmemory | 256MB | **64MB** |
 | DB pool size | 5-20 | **2-8** |
+| Redpanda memory | 1GB | **512MB** |
 | Swap | None | **2GB** |
 
 ---
@@ -126,7 +128,7 @@ http://143.110.154.54/front-page/health
 | `sudo k3s ctr images import` | **Yes** | k3s containerd is root-owned |
 | Swap/sysctl/apt | **Yes** | system-level operations |
 
-The scripts handle this automatically , you just need a user with sudo access.
+The scripts handle this automatically — you just need a user with sudo access.
 
 ---
 
@@ -184,6 +186,59 @@ curl http://localhost:8080/health
 kubectl logs -n portfolio deployment/image-service -f
 ```
 
+### 4. Redpanda Event Streaming
+- Kafka-compatible broker running as a StatefulSet with persistent storage
+- Every login and logout publishes an event; auth never blocks on Kafka
+- Partition routing is explicit: `es` users → partition 0, `en` users → partition 1
+- Producer self-heals: if Redpanda was down at startup, next publish triggers lazy reconnect
+
+```bash
+# Verify Redpanda broker is healthy
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk cluster health --api-urls=localhost:9644
+# Expected: HEALTHY: true, Controller: redpanda-0
+
+# List all topics and confirm both were created by the init Job
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic list --brokers=localhost:9092
+# Expected:
+#   NAME           PARTITIONS  REPLICAS
+#   user-logins    2           1
+#   user-logouts   2           1
+
+# Inspect partition layout for user-logins
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic describe user-logins --brokers=localhost:9092
+# Shows partition 0 and partition 1, both on broker 0
+
+# Watch events arrive in real time (partition 0 = es users)
+# Keep this running, then trigger a login in another terminal
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic consume user-logins --brokers=localhost:9092 --num=5
+# Each login shows: {"user_uuid":"...","email":"...","lang":"es"} on partition 0
+#                or {"user_uuid":"...","email":"...","lang":"en"} on partition 1
+
+# Confirm message count per partition after a few logins
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic describe user-logins --print-watermarks --brokers=localhost:9092
+# HIGH-WATERMARK column shows how many messages each partition has received
+
+# Check that the producer connected from the backend side
+kubectl logs -n portfolio deployment/backend | grep "kafka_producer_started"
+# Expected: {"event":"kafka_producer_started","brokers":"redpanda:9092",...}
+
+# Verify events are being published (after a login attempt)
+kubectl logs -n portfolio deployment/backend | grep "kafka_event_published"
+# Expected: {"event":"kafka_event_published","topic":"user-logins","key":"en","partition":1,...}
+
+# Check for any producer failures (should be empty in normal operation)
+kubectl logs -n portfolio deployment/backend | grep "kafka_event_failed\|kafka_event_skipped"
+
+# Inspect the init Job logs (available for 5 minutes after completion)
+kubectl logs -n portfolio -l job-name=redpanda-init
+# Shows the rpk topic create commands and final topic list
+```
+
 ## Memory Budget (NSFW Enabled)
 
 ```
@@ -197,9 +252,10 @@ MinIO                 128MB      256MB
 Image Service         384MB      768MB  (TensorFlow NSFW)
 Backend               192MB      512MB
 Nginx                 32MB       128MB
+Redpanda              512MB      768MB
 ─────────────────────────────────────
-Total Requests        ~1388MB
-Total Limits          ~2400MB (will use swap)
+Total Requests        ~1900MB
+Total Limits          ~3168MB (will use swap)
 Available             2048MB RAM + 2048MB swap
 ```
 
@@ -213,7 +269,7 @@ Available             2048MB RAM + 2048MB swap
 kubectl get pods -n portfolio -o wide
 
 # Key demo components
-kubectl get pods -n portfolio -l 'app in (postgres-primary,postgres-replica,image-service)'
+kubectl get pods -n portfolio -l 'app in (postgres-primary,postgres-replica,image-service,redpanda)'
 ```
 
 ### Check Database Activity
@@ -249,13 +305,38 @@ kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c "\dt proveo.*"'
 ```
 
+### Check Redpanda Activity
+```bash
+# Broker health
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk cluster health --api-urls=localhost:9644
+
+# Topic list
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic list --brokers=localhost:9092
+
+# Consume recent events from both topics
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic consume user-logins --brokers=localhost:9092 --num=10
+
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic consume user-logouts --brokers=localhost:9092 --num=10
+
+# Message offsets per partition (shows total event count)
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic describe user-logins --print-watermarks --brokers=localhost:9092
+```
+
 ### Monitor Logs
 ```bash
-# Backend logs
+# Backend logs (includes kafka_event_published entries)
 kubectl logs -n portfolio deployment/backend -f
 
 # Image service logs
 kubectl logs -n portfolio deployment/image-service -f
+
+# Redpanda broker logs
+kubectl logs -n portfolio redpanda-0 -f
 ```
 
 ### Access Services via Port-Forward (From inside the Droplet)
@@ -287,6 +368,11 @@ kubectl scale deployment image-service -n portfolio --replicas=2
 
 # Verify load distribution
 kubectl logs -n portfolio -l app=image-service -f --prefix
+
+# Scale Redpanda to a 3-node cluster (requires rebalancing partitions after)
+kubectl scale statefulset redpanda -n portfolio --replicas=3
+# Then rebalance partition leadership across all brokers:
+kubectl exec -n portfolio redpanda-0 -- rpk cluster rebalance
 ```
 
 ---
@@ -340,6 +426,49 @@ kubectl exec -n portfolio deployment/image-service -- \
 kubectl logs -n portfolio deployment/image-service | grep -i nsfw
 ```
 
+### Redpanda Not Starting or Topics Missing
+```bash
+# Check broker logs for startup errors
+kubectl logs -n portfolio redpanda-0 --tail=50
+
+# Verify the StatefulSet is healthy
+kubectl describe statefulset redpanda -n portfolio
+
+# If the init Job completed but topics are missing, re-run it manually:
+kubectl delete job redpanda-init -n portfolio 2>/dev/null || true
+kubectl apply -f k8s/12-redpanda-init.yaml
+
+# Confirm topic creation
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic list --brokers=localhost:9092
+
+# If the backend shows kafka_producer_start_failed in logs,
+# check that the broker is reachable from the backend pod:
+kubectl exec -n portfolio deployment/backend -- \
+  nc -zv redpanda 9092
+# Expected: Connection to redpanda 9092 port [tcp/*] succeeded!
+```
+
+### Events Not Appearing in Topics
+```bash
+# Check backend logs for publish errors
+kubectl logs -n portfolio deployment/backend | grep -E "kafka_event|kafka_producer"
+
+# Verify PARTITION_MAP keys match what the API sends (es or en only)
+# Any other lang value is silently discarded — check for kafka_event_discarded:
+kubectl logs -n portfolio deployment/backend | grep "kafka_event_discarded"
+
+# Manually publish a test message to verify the broker accepts writes:
+kubectl exec -n portfolio redpanda-0 -- \
+  bash -c 'echo "{\"test\":true}" | rpk topic produce user-logins \
+  --brokers=localhost:9092 --partition=0'
+
+# Then consume it back:
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk topic consume user-logins --brokers=localhost:9092 \
+  --offset=end --num=1
+```
+
 ### kubectl Permission Denied
 ```bash
 mkdir -p ~/.kube
@@ -371,35 +500,40 @@ export KUBECONFIG=~/.kube/config
 | `08-image-service.yaml` | **NSFW detection service** — TensorFlow model ⭐ |
 | `09-backend.yaml` | FastAPI app (1 worker, migrations via initContainer) |
 | `10-nginx.yaml` | Reverse proxy, gzip, rate limiting, security headers |
+| `11-redpanda.yaml` | **Kafka-compatible event broker** — StatefulSet, persistent storage ⭐ |
+| `12-redpanda-init.yaml` | **One-shot Job** — creates topics after broker is confirmed healthy ⭐ |
 
 ---
 
 ## 🎓 Learning Highlights
 
-1. **StatefulSets**: Used for postgres-primary and postgres-replica (stable network identity, ordered startup)
+1. **StatefulSets**: Used for postgres-primary, postgres-replica, and redpanda (stable network identity, ordered startup, per-replica storage)
 2. **Deployments**: Used for stateless services (backend, image-service, nginx)
-3. **Services**: ClusterIP for internal communication, LoadBalancer for external access
-4. **InitContainers**: Wait for dependencies, run migrations, bootstrap replica from primary
-5. **ConfigMaps/Secrets**: Separate config from code, auto-generated credentials
-6. **PersistentVolumeClaims**: Data survives pod restarts
-7. **Liveness/Readiness Probes**: Auto-healing and traffic gating
-8. **Resource Limits**: Memory budgeting for constrained environments
-9. **Swap Management**: Running production-like workloads on minimal hardware
+3. **Jobs**: Used for one-shot configuration tasks (redpanda-init topic creation)
+4. **Services**: ClusterIP for internal communication, LoadBalancer for external access
+5. **InitContainers**: Wait for dependencies, run migrations, bootstrap replica from primary
+6. **ConfigMaps/Secrets**: Separate config from code, auto-generated credentials
+7. **PersistentVolumeClaims**: Data survives pod restarts (volumeClaimTemplates for Redpanda)
+8. **Liveness/Readiness Probes**: Auto-healing and traffic gating
+9. **Resource Limits**: Memory budgeting for constrained environments
+10. **Swap Management**: Running production-like workloads on minimal hardware
+11. **Explicit partition routing**: Bypassing Kafka key hashing with a direct PARTITION_MAP
+12. **Deploy ordering**: StatefulSet wait → Job apply pattern solving the init-container deadlock
 
 ---
 
 ## 💡 General Notes
 
-- **All features enabled**: NSFW detection, replication, caching, runs slow but complete.
+- **All features enabled**: NSFW detection, replication, event streaming, caching, runs slow but complete.
 - **Self-signed SSL**: PostgreSQL certificates are auto-generated by an initContainer.
 - **No external registry**: Custom images are built on-droplet and imported to k3s.
-- **Official images**: PostgreSQL, Redis, and MinIO are pulled from Docker Hub automatically.
+- **Official images**: PostgreSQL, Redis, MinIO, and Redpanda are pulled from their registries automatically.
 - **Auto-generated secrets**: Deploy script creates secure passwords and saves them to `.credentials`.
 - **Non-root operation**: Scripts use `sudo` only where needed; `kubectl` runs as a regular user.
 - **Demo setup**: Optimized to show the full stack on minimal hardware.
 - **Schema layout**: All application tables live in the `proveo` schema. `public` only contains `alembic_version`. Always use `proveo.*` when querying tables directly.
 - **Node destruction warning / Local-path limitation**:
-  - Data is stored on the node's local SSD via `local-path`. If the node is deleted or the SSD fails, the database is lost.
+  - Data is stored on the node's local SSD via `local-path`. If the node is deleted or the SSD fails, the database and Redpanda message logs are lost.
   - For the demo app, the intended strategy is a full restart: run `cleanup.sh` and then `deploy-k3s-local.sh` on a new droplet. Data will be lost, but Alembic migrations recreate the schema and test data can be re-seeded.
   - In production, consider additional durability layers:
     • Scheduled `pg_dump` backups to S3/GCS via a CronJob (e.g., daily)  

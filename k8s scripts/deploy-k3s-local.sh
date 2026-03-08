@@ -449,6 +449,18 @@ log_success "Redpanda topics created"
 echo ""
 
 # =============================================================================
+# Consumer Worker
+# =============================================================================
+log_info "Deploying Consumer worker..."
+kubectl apply -f "$K8S_DIR/13-consumer.yaml"
+if ! wait_for_deployment_ready "consumer" "portfolio" 60 "Consumer"; then
+    log_error "Consumer deployment failed"
+    kubectl logs -n portfolio -l app=consumer --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""
@@ -513,9 +525,10 @@ echo "  Image Service:      ~384-768MB (TensorFlow NSFW)"
 echo "  Backend:            ~192-512MB"
 echo "  Nginx:              ~32-128MB"
 echo "  Redpanda:           ~512-768MB"
+echo "  Consumer:           ~64-128MB"
 echo "  Swap:               2GB (safety net)"
 echo ""
-echo "  Total requests:    ~1600MB"
-echo "  Total limits:      ~3168MB (will use swap)"
+echo "  Total requests:    ~1700MB"
+echo "  Total limits:      ~3296MB (will use swap)"
 echo "  Available:          2048MB + 2048MB swap"
 echo "============================================"

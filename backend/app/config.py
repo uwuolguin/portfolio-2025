@@ -113,9 +113,13 @@ class Settings(BaseSettings):
     api_base_url: str = "http://localhost"
 
     # ------------------------------------------------------------------------
-    # KAFKA
+    # Kafka / Redpanda
     # ------------------------------------------------------------------------
+    bootstrap_servers: str = "redpanda:9092"  # comma-separated for multiple brokers: "b1:9092,b2:9092,b3:9092"
 
-    bootstrap_servers = "redpanda:9092"
+    # ------------------------------------------------------------------------
+    # Temporal
+    # ------------------------------------------------------------------------
+    temporal_host: str = "temporal:7233"
 
 settings = Settings()

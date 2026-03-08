@@ -1,0 +1,81 @@
+# 13-consumer.yaml — Redpanda consumer worker
+# Reuses the backend image. No separate build needed.
+# The only difference from the backend pod is the command: python run_consumer.py
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+  namespace: portfolio
+  labels:
+    app: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consumer
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # briefly runs 2 pods during rollout — Kafka rebalances partitions between them, then reassigns all 4 to the new pod when old one dies
+      maxUnavailable: 0  # old pod stays up until new pod is running — no consumption gap
+
+  template:
+    metadata:
+      labels:
+        app: consumer
+    spec:
+      containers:
+        - name: consumer
+          image: portfolio-backend:latest
+          imagePullPolicy: Never  # built locally and imported into k3s — no registry
+
+          # Override the default CMD from the backend image.
+          # The backend image normally starts uvicorn; here we run the consumer script.
+          command:
+            - python
+            - -m
+            - app.kafka.run_consumer
+
+          env:
+            # Pulled from the shared ConfigMap (01-configmap.yaml)
+            - name: BOOTSTRAP_SERVERS
+              valueFrom:
+                configMapKeyRef:
+                  name: portfolio-config
+                  key: BOOTSTRAP_SERVERS
+
+            # Temporal host — added to ConfigMap when Temporal is deployed.
+            # Placeholder value keeps the pod startable even before Temporal exists;
+            # the consumer will log a connection error and retry rather than crash.
+            - name: TEMPORAL_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: portfolio-config
+                  key: TEMPORAL_HOST
+                  optional: true  # pod starts even if key doesn't exist yet
+
+          resources:
+            requests:
+              # aiokafka consumer is nearly idle between messages — just polling.
+              # 50m CPU and 64Mi RAM is sufficient for steady-state operation.
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              # 200m allows brief spikes during rebalance or burst message arrival.
+              # 128Mi is generous for a pure Python consumer with no ML or image processing.
+              cpu: "200m"
+              memory: "128Mi"
+
+          # No readiness probe needed — this is not a Service, no traffic is routed to it.
+          # No liveness probe either: if the consumer crashes, Kubernetes restarts it
+          # automatically and it resumes from the last committed offset.
+          #
+          # If you want Kubernetes to restart the consumer on a hung poll (not just a crash),
+          # add a liveness probe later that checks a heartbeat file written by the consumer.
+
+      # Restart on failure — the default. Combined with manual offset commits,
+      # this gives at-least-once delivery: a crashed consumer reprocesses the
+      # last uncommitted message on restart rather than skipping it.
+      restartPolicy: Always
