@@ -85,20 +85,10 @@ class KafkaProducerClient:
 
             try:
                 self._producer = AIOKafkaProducer(
-                    # Initial connection point — broker responds with cluster metadata.
                     bootstrap_servers=settings.bootstrap_servers,
-
-                    # Payload dict → JSON string → bytes.
                     value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-
-                    # Acknowledge on leader write —  it does not wait for other brokers to end writing.
                     acks=1,
-
-                    # Fail fast — don't hang login requests waiting for a slow broker.
                     request_timeout_ms=3000,
-
-                    # One retry on transient errors before giving up.
-                    retries=1,
                 )
 
                 # Opens TCP connection, fetches cluster metadata, producer ready to send.
