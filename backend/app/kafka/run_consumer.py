@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.structs import OffsetAndMetadata
@@ -115,6 +116,6 @@ async def run_consumer(bootstrap_servers: str, temporal_host: str) -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-
-    from app.config import settings
-    asyncio.run(run_consumer(settings.bootstrap_servers, settings.temporal_host))
+    bootstrap_servers = os.environ["BOOTSTRAP_SERVERS"]
+    temporal_host = os.environ.get("TEMPORAL_HOST", "temporal:7233")
+    asyncio.run(run_consumer(bootstrap_servers, temporal_host))
