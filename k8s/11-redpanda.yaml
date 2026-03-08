@@ -41,14 +41,13 @@ spec:
           command:
             - redpanda
             - start
-            - --overprovisioned
+            - --mode dev-container
             - --smp=1
             - --memory=512M
-            - --reserve-memory=0M
-            - --kafka-addr=PLAINTEXT://0.0.0.0:9092
-            - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
-            - --pandaproxy-addr=0.0.0.0:8082
-            - --advertise-pandaproxy-addr=redpanda:8082
+            - --kafka-addr internal://0.0.0.0:9092
+            - --advertise-kafka-addr internal://redpanda:9092
+            - --pandaproxy-addr internal://0.0.0.0:8082
+            - --advertise-pandaproxy-addr internal://redpanda:8082
             - --set=redpanda.auto_create_topics_enabled=false
           ports:
             - containerPort: 9092
@@ -248,9 +247,10 @@ spec:
 # 3. Redpanda runtime configuration
 # -----------------------------------------------------------------------------
 #
-#    --overprovisioned
-#        Allows Redpanda to run in containerized environments where hardware
-#        is shared and not tuned for bare metal performance.
+#    --mode dev-container
+#        Replaces --overprovisioned + --reserve-memory in v24.2+. Applies
+#        well-known safe defaults for containerized environments — disables
+#        hardware tuning that assumes bare metal, sets reserve-memory to 0.
 #
 #    --smp=1
 #        Runs a single Seastar shard (1 worker thread). This matches the
@@ -259,8 +259,8 @@ spec:
 #    --memory=512M
 #        Internal Redpanda memory allocator limit.
 #
-#    --reserve-memory=0M
-#        Disables OS memory reservation (needed in small containers).
+#    --reserve-memory (removed)
+#        No longer needed — handled automatically by --mode dev-container.
 #
 #    --node-id (removed)
 #        Was a required flag in older Redpanda versions. Removed in v24.2+
@@ -282,19 +282,14 @@ spec:
 #        The advertise address is what gets sent in step 2.
 #        If it is wrong, the bootstrap succeeds but publishing fails.
 #
-#        --kafka-addr=PLAINTEXT://0.0.0.0:9092
-#            0.0.0.0 means "listen on ALL interfaces inside this container"
-#            (loopback lo + pod eth0, whatever IP Kubernetes assigns).
-#            This is a wildcard — it does not matter what pod IP k8s assigns
-#            on restart, Redpanda will always be listening on it.
-#            You would bind to a specific IP only for security reasons, e.g.
-#            a machine with both a private and a public interface where you
-#            want to reject connections from the public side entirely.
+#        --kafka-addr internal://0.0.0.0:9092
+#            In v24.2+ PLAINTEXT:// was replaced with named listeners.
+#            0.0.0.0 still means listen on all interfaces inside the container.
 #
-#        --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+#        --advertise-kafka-addr internal://redpanda:9092
 #            The stable Kubernetes Service DNS name. Clients receive this
 #            address in metadata responses and use it to reconnect.
-#            Survives pod restarts because the Service IP never changes.
+#            Listener name must match --kafka-addr.
 #
 #        In a real multi-broker cluster on AWS (3 EC2 machines):
 #
@@ -317,7 +312,8 @@ spec:
 #        to itself via the Service DNS name.
 #
 #    --pandaproxy-addr / --advertise-pandaproxy-addr
-#        Same bind vs advertise pattern, applied to the HTTP REST proxy.
+#        Same bind vs advertise pattern and same named-listener syntax
+#        as --kafka-addr. Applied to the HTTP REST proxy.
 #        Not used by the application directly — kept for debugging via curl.
 #
 #    --set=redpanda.auto_create_topics_enabled=false
