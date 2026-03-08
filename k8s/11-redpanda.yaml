@@ -41,9 +41,10 @@ spec:
           command:
             - redpanda
             - start
-            - --mode dev-container
+            - --overprovisioned
             - --smp=1
             - --memory=512M
+            - --reserve-memory=0M
             - --kafka-addr internal://0.0.0.0:9092
             - --advertise-kafka-addr internal://redpanda:9092
             - --pandaproxy-addr internal://0.0.0.0:8082
@@ -259,8 +260,9 @@ spec:
 #    --memory=512M
 #        Internal Redpanda memory allocator limit.
 #
-#    --reserve-memory (removed)
-#        No longer needed — handled automatically by --mode dev-container.
+#    --reserve-memory=0M
+#        Disables OS memory reservation. Required in small containers
+#        where Redpanda would otherwise reserve too much for the OS.
 #
 #    --node-id (removed)
 #        Was a required flag in older Redpanda versions. Removed in v24.2+
