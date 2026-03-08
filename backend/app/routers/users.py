@@ -189,7 +189,7 @@ async def login(
 @router.post("/logout")
 async def logout(
     response: Response,
-    user_data: UserLogout = Body(default_factory=UserLogout),
+    user_data: UserLogout,
 ):
     response.delete_cookie(key="access_token", httponly=True, secure=not settings.debug, samesite="lax")
     response.delete_cookie(key="csrf_token", httponly=False, secure=not settings.debug, samesite="lax")

@@ -105,7 +105,7 @@ class UserResponse(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1, max_length=100)
-    lang: Literal['es', 'en'] = Field(default='en')
+    lang: Literal['es', 'en']
 
     model_config = {
         "json_schema_extra": {
@@ -118,7 +118,7 @@ class UserLogin(BaseModel):
     }
 
 class UserLogout(BaseModel):
-    lang: Literal['es', 'en'] = Field(default='en')
+    lang: Literal['es', 'en']
 
     model_config = {
         "json_schema_extra": {
