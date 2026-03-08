@@ -4,6 +4,7 @@ A Kubernetes (k3s) deployment showcasing:
 - **PostgreSQL Primary + Read Replica** — Demonstrates database replication
 - **Image Service with NSFW Detection** — TensorFlow-based content moderation
 - **Redpanda Event Streaming** — Kafka-compatible broker with explicit partition routing
+- **Consumer Worker** — Redpanda consumer that routes events to Temporal by language partition
 - **Full stack on a $21/mo droplet** — 2GB RAM + swap, all features enabled
 
 ---
@@ -239,6 +240,36 @@ kubectl logs -n portfolio -l job-name=redpanda-init
 # Shows the rpk topic create commands and final topic list
 ```
 
+### 5. Consumer Worker
+- Single-replica Deployment that polls Redpanda and routes events to Temporal
+- Reuses the backend image — no separate build needed
+- Commits offsets only after Temporal confirms the workflow started — at-least-once delivery
+- On restart, picks up from the last committed offset automatically
+
+```bash
+# Verify the consumer pod is running
+kubectl get pods -n portfolio -l app=consumer
+# Expected: consumer-xxxx   1/1   Running
+
+# Check consumer connected to Redpanda successfully
+kubectl logs -n portfolio deployment/consumer | grep "consumer_started"
+# Expected: {"event":"consumer_started","brokers":"redpanda:9092",...}
+
+# Watch workflow routing in real time (trigger a login in another terminal)
+kubectl logs -n portfolio deployment/consumer -f | grep "workflow_started\|workflow_duplicate_skipped\|workflow_start_failed"
+# Expected on login: {"event":"workflow_started","workflow_id":"auth-user-logins-0-3","workflow":"LoginEsWorkflow",...}
+
+# Check for Temporal connection status
+kubectl logs -n portfolio deployment/consumer | grep "temporal_connected\|temporal_unavailable"
+# temporal_connected = Temporal is deployed and reachable
+# temporal_unavailable = Temporal not yet deployed, events are dropped (expected for now)
+
+# Check committed offsets (how far the consumer has processed)
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk group describe auth-event-workers --brokers=localhost:9092
+# Shows CURRENT-OFFSET and LOG-END-OFFSET per partition — gap = messages not yet processed
+```
+
 ## Memory Budget (NSFW Enabled)
 
 ```
@@ -253,8 +284,9 @@ Image Service         384MB      768MB  (TensorFlow NSFW)
 Backend               192MB      512MB
 Nginx                 32MB       128MB
 Redpanda              512MB      768MB
+Consumer               64MB      128MB
 ─────────────────────────────────────
-Total Requests        ~1900MB
+Total Requests        ~1964MB
 Total Limits          ~3168MB (will use swap)
 Available             2048MB RAM + 2048MB swap
 ```
@@ -303,6 +335,19 @@ kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
 # List all tables in proveo schema
 kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c "\dt proveo.*"'
+```
+
+### Check Consumer Activity
+```bash
+# Consumer pod status
+kubectl get pods -n portfolio -l app=consumer
+
+# Consumer logs
+kubectl logs -n portfolio deployment/consumer -f
+
+# Committed offset position per partition
+kubectl exec -n portfolio redpanda-0 -- \
+  rpk group describe auth-event-workers --brokers=localhost:9092
 ```
 
 ### Check Redpanda Activity
@@ -502,6 +547,7 @@ export KUBECONFIG=~/.kube/config
 | `10-nginx.yaml` | Reverse proxy, gzip, rate limiting, security headers |
 | `11-redpanda.yaml` | **Kafka-compatible event broker** — StatefulSet, persistent storage ⭐ |
 | `12-redpanda-init.yaml` | **One-shot Job** — creates topics after broker is confirmed healthy ⭐ |
+| `13-consumer.yaml` | **Consumer worker** — polls Redpanda, routes events to Temporal by partition ⭐ |
 
 ---
 
@@ -519,6 +565,7 @@ export KUBECONFIG=~/.kube/config
 10. **Swap Management**: Running production-like workloads on minimal hardware
 11. **Explicit partition routing**: Bypassing Kafka key hashing with a direct PARTITION_MAP
 12. **Deploy ordering**: StatefulSet wait → Job apply pattern solving the init-container deadlock
+13. **Consumer worker**: Manual offset commits, at-least-once delivery, Temporal deduplication via deterministic workflow IDs
 
 ---
 
