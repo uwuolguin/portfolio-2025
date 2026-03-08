@@ -39,6 +39,7 @@ spec:
         - name: redpanda
           image: docker.redpanda.com/redpandadata/redpanda:v24.2.1
           command:
+            - rpk
             - redpanda
             - start
             - --overprovisioned
