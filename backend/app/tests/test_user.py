@@ -71,7 +71,7 @@ async def test_login_wrong_password(app_client):
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/login",
-        json={"email": "admin_test@mail.com", "password": "wrongpassword"},
+        json={"email": "admin_test@mail.com", "password": "wrongpassword", "lang": "en"},
     )
     assert response.status_code == 401
 
@@ -81,7 +81,7 @@ async def test_login_nonexistent_user(app_client):
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/login",
-        json={"email": "nobody@nowhere.com", "password": "password"},
+        json={"email": "nobody@nowhere.com", "password": "password", "lang": "en"},
     )
     assert response.status_code == 401
 
@@ -91,7 +91,7 @@ async def test_login_success(app_client):
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/login",
-        json={"email": "admin_test@mail.com", "password": "password"},
+        json={"email": "admin_test@mail.com", "password": "password", "lang": "en"},
     )
     assert response.status_code == 200
     assert "access_token" in response.cookies
@@ -122,6 +122,7 @@ async def test_logout_success(app_client):
     response = await client.post(
         "/api/v1/users/logout",
         headers={"X-CSRF-Token": csrf},
+        json={"lang": "es"},
     )
     assert response.status_code == 200
 
