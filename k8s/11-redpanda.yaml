@@ -45,7 +45,6 @@ spec:
             - --smp=1
             - --memory=512M
             - --reserve-memory=0M
-            - --node-id=0
             - --kafka-addr=PLAINTEXT://0.0.0.0:9092
             - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
             - --pandaproxy-addr=0.0.0.0:8082
@@ -263,8 +262,10 @@ spec:
 #    --reserve-memory=0M
 #        Disables OS memory reservation (needed in small containers).
 #
-#    --node-id=0
-#        Unique identifier for this broker. Required in multi-node clusters.
+#    --node-id (removed)
+#        Was a required flag in older Redpanda versions. Removed in v24.2+
+#        — the broker now assigns its own ID automatically from the
+#        StatefulSet ordinal. Passing it explicitly causes a parse error.
 #
 #    --kafka-addr / --advertise-kafka-addr
 #        Two different concerns:
