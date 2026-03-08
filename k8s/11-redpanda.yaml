@@ -45,10 +45,14 @@ spec:
             - --smp=1
             - --memory=512M
             - --reserve-memory=0M
-            - --kafka-addr internal://0.0.0.0:9092
-            - --advertise-kafka-addr internal://redpanda:9092
-            - --pandaproxy-addr internal://0.0.0.0:8082
-            - --advertise-pandaproxy-addr internal://redpanda:8082
+            - --kafka-addr
+            - internal://0.0.0.0:9092
+            - --advertise-kafka-addr
+            - internal://redpanda:9092
+            - --pandaproxy-addr
+            - internal://0.0.0.0:8082
+            - --advertise-pandaproxy-addr
+            - internal://redpanda:8082
             - --set=redpanda.auto_create_topics_enabled=false
           ports:
             - containerPort: 9092
@@ -248,10 +252,12 @@ spec:
 # 3. Redpanda runtime configuration
 # -----------------------------------------------------------------------------
 #
-#    --mode dev-container
-#        Replaces --overprovisioned + --reserve-memory in v24.2+. Applies
-#        well-known safe defaults for containerized environments — disables
-#        hardware tuning that assumes bare metal, sets reserve-memory to 0.
+#    --overprovisioned
+#        Disables hardware tuning (thread affinity, busy-poll, disk I/O poll)
+#        that assumes bare metal. Required in containers where CPU is shared.
+#        NOTE: --mode dev-container is only valid with `rpk redpanda start`.
+#        This manifest calls `redpanda start` directly, so --overprovisioned
+#        and --reserve-memory=0M are still the correct flags here.
 #
 #    --smp=1
 #        Runs a single Seastar shard (1 worker thread). This matches the
