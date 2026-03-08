@@ -395,28 +395,6 @@ fi
 echo ""
 
 # =============================================================================
-# Backend
-# =============================================================================
-log_info "Deploying Backend (1 replica)..."
-kubectl apply -f "$K8S_DIR/09-backend.yaml"
-if ! wait_for_pods_ready "app=backend" "portfolio" 300 "Backend"; then
-    log_error "Backend failed"
-    kubectl logs -n portfolio -l app=backend --tail=30 2>/dev/null || true
-    exit 1
-fi
-echo ""
-
-# =============================================================================
-# Nginx
-# =============================================================================
-log_info "Deploying Nginx..."
-kubectl apply -f "$K8S_DIR/10-nginx.yaml"
-if ! wait_for_pods_ready "app=nginx" "portfolio" 60 "Nginx"; then
-    log_error "Nginx failed"; exit 1
-fi
-echo ""
-
-# =============================================================================
 # Redpanda
 # =============================================================================
 log_info "Deploying Redpanda..."
@@ -459,6 +437,29 @@ if ! wait_for_deployment_ready "consumer" "portfolio" 60 "Consumer"; then
     exit 1
 fi
 echo ""
+
+# =============================================================================
+# Backend
+# =============================================================================
+log_info "Deploying Backend (1 replica)..."
+kubectl apply -f "$K8S_DIR/09-backend.yaml"
+if ! wait_for_pods_ready "app=backend" "portfolio" 300 "Backend"; then
+    log_error "Backend failed"
+    kubectl logs -n portfolio -l app=backend --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
+# Nginx
+# =============================================================================
+log_info "Deploying Nginx..."
+kubectl apply -f "$K8S_DIR/10-nginx.yaml"
+if ! wait_for_pods_ready "app=nginx" "portfolio" 60 "Nginx"; then
+    log_error "Nginx failed"; exit 1
+fi
+echo ""
+
 
 # =============================================================================
 # Summary
