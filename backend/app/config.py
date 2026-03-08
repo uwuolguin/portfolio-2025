@@ -112,5 +112,10 @@ class Settings(BaseSettings):
     email_from: str = "onboarding@resend.dev"
     api_base_url: str = "http://localhost"
 
+    # ------------------------------------------------------------------------
+    # KAFKA
+    # ------------------------------------------------------------------------
+
+    bootstrap_servers = "redpanda:9092"
 
 settings = Settings()

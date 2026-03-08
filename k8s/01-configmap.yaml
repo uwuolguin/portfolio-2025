@@ -63,3 +63,6 @@ data:
   DB_RETRY_ATTEMPTS: "3"
   DB_RETRY_WAIT_MULTIPLIER: "0.5"
   DB_RETRY_MAX_WAIT: "5.0"
+
+  # Kafka
+  BOOTSTRAP_SERVERS: "redpanda:9092"

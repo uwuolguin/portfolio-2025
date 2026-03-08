@@ -5,6 +5,8 @@ import asyncpg
 from datetime import timedelta
 from uuid import UUID
 import structlog
+import asyncio
+from app.kafka.producer import kafka_producer
 
 from app.database.connection import get_db_read, get_db_write
 from app.database.transactions import DB
@@ -163,6 +165,16 @@ async def login(
     )
     
     logger.info("login_success", user_uuid=str(user.uuid), email_verified=user.email_verified)
+
+    asyncio.create_task(kafka_producer.publish_event(
+        topic="user-logins",
+        lang=user_data.lang,
+        payload={
+            "user_uuid": str(user.uuid),
+            "email": user.email,
+            "lang": user_data.lang,
+        },
+    ))
     
     return LoginResponse(
         message="Login successful",
@@ -178,6 +190,13 @@ async def login(
 async def logout(response: Response,user_data: UserLogout, ):
     response.delete_cookie(key="access_token", httponly=True, secure=not settings.debug, samesite="lax")
     response.delete_cookie(key="csrf_token", httponly=False, secure=not settings.debug, samesite="lax")
+
+    asyncio.create_task(kafka_producer.publish_event(
+        topic="user-logouts",
+        lang=user_data.lang,
+        payload={"lang": user_data.lang},
+    ))
+
     logger.info("logout_success")
     return {"message": "Logout successful"}
 

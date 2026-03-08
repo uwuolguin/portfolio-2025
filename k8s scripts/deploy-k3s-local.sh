@@ -417,6 +417,38 @@ fi
 echo ""
 
 # =============================================================================
+# Redpanda
+# =============================================================================
+log_info "Deploying Redpanda..."
+kubectl apply -f "$K8S_DIR/11-redpanda.yaml"
+
+if ! wait_for_statefulset_ready "redpanda" "portfolio" 120 "Redpanda"; then
+    log_error "Redpanda failed"
+    kubectl logs -n portfolio redpanda-0 --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
+# Redpanda Init (topic creation)
+# =============================================================================
+# Applied as a separate step AFTER the StatefulSet is confirmed healthy.
+# This is intentional — see 12-redpanda-init.yaml for full explanation.
+# The Job polls the admin API internally as well, but the StatefulSet wait
+# above gives us a clean outer guarantee before the Job is even submitted.
+log_info "Running Redpanda init Job (creating topics)..."
+kubectl apply -f "$K8S_DIR/12-redpanda-init.yaml"
+
+if ! kubectl wait --for=condition=complete job/redpanda-init -n portfolio --timeout=60s; then
+    log_error "Redpanda init Job failed"
+    kubectl logs -n portfolio -l job-name=redpanda-init --tail=30 2>/dev/null || true
+    exit 1
+fi
+
+log_success "Redpanda topics created"
+echo ""
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""
@@ -480,9 +512,10 @@ echo "  MinIO:              ~128-256MB"
 echo "  Image Service:      ~384-768MB (TensorFlow NSFW)"
 echo "  Backend:            ~192-512MB"
 echo "  Nginx:              ~32-128MB"
+echo "  Redpanda:           ~512-768MB"
 echo "  Swap:               2GB (safety net)"
 echo ""
-echo "  Total requests:    ~1088MB"
-echo "  Total limits:      ~2400MB (will use swap)"
+echo "  Total requests:    ~1600MB"
+echo "  Total limits:      ~3168MB (will use swap)"
 echo "  Available:          2048MB + 2048MB swap"
 echo "============================================"

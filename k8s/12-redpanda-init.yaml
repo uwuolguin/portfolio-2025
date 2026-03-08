@@ -1,0 +1,225 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redpanda-init
+  namespace: portfolio
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rpk
+          #image already in cache, use it
+          image: docker.redpanda.com/redpandadata/redpanda:v24.2.1
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Redpanda to be ready..."
+              until rpk cluster health --api-urls=redpanda:9644 > /dev/null 2>&1; do
+                sleep 3
+              done
+              echo "Redpanda is ready. Creating topics..."
+
+              rpk topic create user-logins \
+                --partitions 2 \
+                --replicas 1 \
+                --topic-config retention.ms=86400000 \
+                --brokers redpanda:9092 || echo "user-logins already exists"
+
+              rpk topic create user-logouts \
+                --partitions 2 \
+                --replicas 1 \
+                --topic-config retention.ms=86400000 \
+                --brokers redpanda:9092 || echo "user-logouts already exists"
+
+              echo "Topics created:"
+              rpk topic list --brokers redpanda:9092
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+# -----------------------------------------------------------------------------
+# Redpanda Init Job
+#
+# Creates the Kafka topics that the application depends on.
+#
+# -----------------------------------------------------------------------------
+# WHY THIS IS A SEPARATE FILE FROM 11-redpanda.yaml
+# -----------------------------------------------------------------------------
+#
+# This is the most important thing to understand about this file.
+#
+# The deploy script applies manifests in order and waits between them:
+#
+#     kubectl apply -f 11-redpanda.yaml
+#     wait_for_statefulset_ready "redpanda" ...     ← blocks until broker is up
+#     kubectl apply -f 12-redpanda-init.yaml        ← only runs after broker ready
+#
+# If this Job lived inside 11-redpanda.yaml, both the StatefulSet and the Job
+# would be submitted to Kubernetes at the same time with a single kubectl apply.
+# Kubernetes does not guarantee creation order within a single file.
+# The Job would likely start before Redpanda finishes initializing.
+#
+# The health check loop inside the Job (until rpk cluster health ...) would
+# eventually catch up, but the deploy script would have no way to know when
+# topics actually exist before proceeding to start the backend and worker.
+#
+# Separating the files gives the deploy script explicit control:
+#
+#     File 11 → broker infrastructure  (permanent, runs forever)
+#     File 12 → broker configuration   (one-shot, runs once, then gone)
+#
+# These are different lifecycles and belong in different files.
+#
+#
+# -----------------------------------------------------------------------------
+# WHY AN INIT CONTAINER IS ALSO A NO-GO
+# -----------------------------------------------------------------------------
+#
+# An init container runs inside the same pod as the main container,
+# before the main container starts.
+#
+# The execution order inside a pod is:
+#
+#     init container 1 → init container 2 → ... → main container starts
+#
+# The fatal problem: init containers run BEFORE the main container.
+# The main container IS Redpanda. So the broker does not exist yet
+# when the init container tries to run rpk topic create.
+#
+# The init container would be talking to a broker that has not started.
+# There is nothing to connect to. It would fail immediately.
+#
+# You might think: "put the health check loop in the init container too."
+# That does not help — the loop polls redpanda:9644, which is the pod's
+# own container, which has not started yet because init containers must
+# finish before the main container is allowed to begin.
+# It is a deadlock by design.
+#
+#     init container: "waiting for redpanda:9644..."
+#     redpanda:       (not started, waiting for init container to finish)
+#
+# The init container pattern is for bootstrapping dependencies that live
+# OUTSIDE the pod — for example, waiting for a database in another pod
+# to be ready before starting your API server.
+#
+#     ✓ init container: "wait for postgres:5432 to accept connections"
+#       then main container (API server) starts — postgres is external, fine
+#
+#     ✗ init container: "wait for redpanda:9092 in this same pod"
+#       deadlock — main container cannot start until init container finishes
+#
+# A separate Job with its own pod is the correct tool here because:
+#     • It runs in a completely separate pod from Redpanda
+#     • Redpanda is already running and healthy before the Job is applied
+#     • The deploy script enforces that ordering explicitly
+#
+#
+# -----------------------------------------------------------------------------
+# THERE IS NO "POST-INIT CONTAINER" IN KUBERNETES
+# -----------------------------------------------------------------------------
+#
+# You might look for a container that runs AFTER the main container starts.
+# It does not exist. Kubernetes only offers:
+#
+#     init containers   → run BEFORE main container, one at a time, in order
+#     (nothing)         → no equivalent that runs after main container starts
+#
+# The two alternatives that might seem close are:
+#
+#     postStart lifecycle hook
+#         Runs inside the main container itself immediately after it starts.
+#         Not a separate container — it is a command injected into Redpanda's
+#         own process space. You would be baking topic creation logic into
+#         the broker, which is the wrong place for it. Also blocks the
+#         container from reaching Ready until it completes.
+#
+#     Sidecar container
+#         Runs alongside the main container, but starts AT THE SAME TIME.
+#         Redpanda and the sidecar race each other on startup.
+#         rpk would fire before the broker is ready to accept connections.
+#         Same race condition as the init container deadlock, different cause.
+#
+# There is no Kubernetes primitive that says "run this container after the
+# main container is healthy." That gap is exactly what a separate Job
+# applied by the deploy script fills.
+#
+# -----------------------------------------------------------------------------
+# WHAT THIS JOB DOES
+# -----------------------------------------------------------------------------
+#
+# 1. Polls the Redpanda admin API until the broker reports healthy.
+#    Uses rpk cluster health against port 9644 (admin API, direct connection,
+#    no bootstrap handshake needed).
+#
+# 2. Creates two topics:
+#
+#        user-logins   → 2 partitions, retention 24h
+#        user-logouts  → 2 partitions, retention 24h
+#
+#    Partition layout:
+#        partition 0 → es users  (producer routes by lang key)
+#        partition 1 → en users
+#
+#    Uses --brokers redpanda:9092 (Kafka protocol, ClusterIP Service DNS).
+#
+# 3. Prints the topic list to confirm creation.
+#
+# The || echo "... already exists" guard makes the Job idempotent.
+# Re-running it (e.g. after a cluster wipe + restore) will not fail
+# if topics were already created by a previous run.
+#
+#
+# -----------------------------------------------------------------------------
+# WHY auto_create_topics_enabled=false MAKES THIS JOB NECESSARY
+# -----------------------------------------------------------------------------
+#
+# Redpanda is configured with auto_create_topics_enabled=false in 11-redpanda.yaml.
+# Without this Job, any publish attempt to user-logins or user-logouts would
+# fail immediately with "topic does not exist."
+#
+# This is intentional — explicit topic creation forces you to define partition
+# count and retention policy up front, and catches typos at deploy time
+# rather than silently creating a wrong topic at runtime.
+#
+#
+# -----------------------------------------------------------------------------
+# JOB LIFECYCLE
+# -----------------------------------------------------------------------------
+#
+# restartPolicy: OnFailure
+#     If the container exits with a non-zero code (e.g. rpk fails to connect),
+#     Kubernetes restarts it. The health check loop handles transient startup
+#     delays, but this catches harder failures.
+#
+# ttlSecondsAfterFinished: 300
+#     Kubernetes automatically deletes the completed Job and its pod 5 minutes
+#     after it finishes. Keeps the namespace clean — a finished Job has no
+#     ongoing value and wastes an API object slot.
+#     If you need to inspect logs after completion, run:
+#         kubectl logs job/redpanda-init -n portfolio
+#     within those 5 minutes, or remove the ttl during debugging.
+#
+#
+# -----------------------------------------------------------------------------
+# THIS IS NOT A CRONJOB
+# -----------------------------------------------------------------------------
+#
+# A CronJob runs on a schedule (every hour, every day, etc.).
+# This is a plain Job — it runs exactly once when applied and then stops.
+# Topics only need to be created once. There is nothing to repeat.
+#
+# If topics already exist (idempotent guard), the Job exits successfully
+# and Kubernetes cleans it up via ttlSecondsAfterFinished.
+#
+# -----------------------------------------------------------------------------
+---
+# Runs once after Redpanda is ready.
+# Creates user-logins and user-logouts topics with 2 partitions each.
+# Partition 0 → es users, Partition 1 → en users (routed by lang key in producer).
+# retention.ms=86400000 = 24 hours.

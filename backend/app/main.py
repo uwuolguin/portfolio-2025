@@ -28,6 +28,7 @@ from app.middleware.security import (
 )
 from app.routers import users, products, communes, companies, health
 from app.utils.exceptions import register_exception_handlers
+from app.kafka.producer import kafka_producer
 
 setup_logging()
 
@@ -65,6 +66,9 @@ def create_app() -> FastAPI:
 
             await redis_client.connect()
             logger.info("redis_connected")
+            
+            await kafka_producer.start()
+            logger.info("kafka_producer_initialized")
 
             scheduler.add_job(
                 scheduled_cleanup,
@@ -105,6 +109,9 @@ def create_app() -> FastAPI:
 
             await redis_client.disconnect()
             logger.info("redis_disconnected")
+
+            await kafka_producer.stop()
+            logger.info("kafka_producer_stopped")
 
             logger.info("application_shutdown_complete")
 
