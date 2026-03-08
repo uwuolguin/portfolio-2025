@@ -54,7 +54,6 @@ spec:
             - internal://0.0.0.0:8082
             - --advertise-pandaproxy-addr
             - internal://redpanda:8082
-            - --set=redpanda.auto_create_topics_enabled=false
           ports:
             - containerPort: 9092
               name: kafka
