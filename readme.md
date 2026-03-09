@@ -27,8 +27,8 @@
 - Kubernetes deployment with 9 pods across 9 services (2GB droplet configuration)
 - Bilingual (ES/EN) with automatic translation fallback
 - HTTPS with Let's Encrypt TLS, auto-renewing certificates
-- Zero-downtime deployments — rolling updates replace pods one at a time (new pod starts → passes health checks → old pod terminates), ensuring traffic is always served
-- Event streaming pipeline — login/logout events published to Redpanda, routed to Temporal workers by language partition
+- Zero-downtime deployments, rolling updates replace pods one at a time (new pod starts → passes health checks → old pod terminates), ensuring traffic is always served
+- Event streaming pipeline, login/logout events published to Redpanda, routed to Temporal workers by language partition
 
 **Pod Breakdown (2GB Droplet):**
 1. `postgres-primary-0` - StatefulSet from `04-postgres-primary.yaml`
@@ -47,7 +47,7 @@
 
 ### Docker Compose (Lightweight Local Preview)
 
-The full production stack runs on Kubernetes — see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no NSFW model, no k8s), use this earlier snapshot:
+The full production stack runs on Kubernetes, see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no NSFW model, no k8s), use this earlier snapshot:
 
 ```bash
 # 1. Clone repository
@@ -80,7 +80,7 @@ docker compose exec backend pytest app/tests/ -v
 
 See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s setup with PostgreSQL replication, TLS termination, and production configuration.
 
-> **HTTPS on the droplet:** If you want to deploy with HTTPS (required for secure cookies and production behaviour), you need to provision a TLS certificate before running the deploy script. See **[SSL Setup Guide](./SSL_SETUP.md)** for the full certbot + Let's Encrypt flow — it covers cert provisioning, making certs accessible to the deploy user, the nginx config changes, and auto-renewal via cron. Run that guide first on a clean droplet, then come back to **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** .
+> **HTTPS on the droplet:** If you want to deploy with HTTPS (required for secure cookies and production behaviour), you need to provision a TLS certificate before running the deploy script. See **[SSL Setup Guide](./SSL_SETUP.md)** for the full certbot + Let's Encrypt flow, it covers cert provisioning, making certs accessible to the deploy user, the nginx config changes, and auto-renewal via cron. Run that guide first on a clean droplet, then come back to **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** .
 
 ---
 
@@ -236,8 +236,8 @@ proveo/
 │   ├── 09-backend.yaml          # 1 replica (2GB droplet)
 │   ├── 10-nginx.yaml            # TLS termination + HTTP→HTTPS redirect
 │   ├── 11-redpanda.yaml         # Kafka-compatible broker (StatefulSet)
-│   ├── 12-redpanda-init.yaml    # One-shot Job — creates topics after broker ready
-│   └── 13-consumer.yaml         # Redpanda consumer worker — routes events to Temporal
+│   ├── 12-redpanda-init.yaml    # One-shot Job, creates topics after broker ready
+│   └── 13-consumer.yaml         # Redpanda consumer worker, routes events to Temporal
 │
 ├── k8s scripts/                 # Deployment automation
 │   ├── 00-install-k3s.sh
