@@ -80,6 +80,8 @@ docker compose exec backend pytest app/tests/ -v
 
 See **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** for full k3s setup with PostgreSQL replication, TLS termination, and production configuration.
 
+> **HTTPS on the droplet:** If you want to deploy with HTTPS (required for secure cookies and production behaviour), you need to provision a TLS certificate before running the deploy script. See **[SSL Setup Guide](./SSL_SETUP.md)** for the full certbot + Let's Encrypt flow — it covers cert provisioning, making certs accessible to the deploy user, the nginx config changes, and auto-renewal via cron. Run that guide first on a clean droplet, then come back to **[Kubernetes Deployment Guide](./k8s%20scripts/README.md)** .
+
 ---
 
 ## ✨ Key Technical Achievements
