@@ -45,21 +45,19 @@
 
 ## 🚀 Quick Start
 
-### Docker Compose (Recommended for Local Demo)
+### Docker Compose (Lightweight Local Preview)
 
-> **Want a quick local look without the full stack?**  
-> Check out commit `4d5cadd` before running — it's a lighter version with the core app only (no Kafka, no Kubernetes, no NSFW model). Same API, same frontend, much faster to spin up:
-> ```bash
-> git checkout 4d5cadd4348797a3d9ee48f6ab2fd3cf08b4794b
-> ```
-> Then follow the same steps below. To return to the full version: `git checkout main`
+The full production stack runs on Kubernetes — see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no NSFW model, no k8s), use this earlier snapshot:
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/uwuolguin/portfolio-2025.git
-cd proveo
+cd portfolio-2025
 
-# 2. Start all services (wait for image-service to finish loading)
+# 2. Switch to the lightweight local snapshot
+git checkout 4d5cadd4348797a3d9ee48f6ab2fd3cf08b4794b
+
+# 3. Start core services
 docker compose up --build
 
 # Wait until you see image-service logs showing "healthy" or repeated output
