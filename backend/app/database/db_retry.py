@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import asyncpg
 import structlog
 from tenacity import (
@@ -19,16 +20,17 @@ TRANSIENT_ERRORS = (
     asyncpg.exceptions.InternalServerError,
     asyncpg.exceptions.TooManyConnectionsError,
     asyncpg.exceptions.DeadlockDetectedError,
-    asyncpg.exceptions.SerializationError,  
+    asyncpg.exceptions.SerializationError,
 )
 
 def db_retry(
-    *, 
+    *,
     stop_after: int = settings.db_retry_attempts,
     wait_multiplier: float = settings.db_retry_wait_multiplier,
     max_wait: float = settings.db_retry_max_wait,
 ):
     return retry(
+        sleep=asyncio.sleep,                                        
         stop=stop_after_attempt(stop_after),
         wait=wait_exponential(multiplier=wait_multiplier, max=max_wait),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
