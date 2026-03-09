@@ -47,6 +47,13 @@
 
 ### Docker Compose (Recommended for Local Demo)
 
+> **Want a quick local look without the full stack?**  
+> Check out commit `4d5cadd` before running — it's a lighter version with the core app only (no Kafka, no Kubernetes, no NSFW model). Same API, same frontend, much faster to spin up:
+> ```bash
+> git checkout 4d5cadd4348797a3d9ee48f6ab2fd3cf08b4794b
+> ```
+> Then follow the same steps below. To return to the full version: `git checkout main`
+
 ```bash
 # 1. Clone repository
 git clone https://github.com/uwuolguin/portfolio-2025.git
