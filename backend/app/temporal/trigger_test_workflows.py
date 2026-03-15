@@ -1,10 +1,15 @@
 """
-Run this to trigger all four test workflows and watch the worker container logs.
+Run this to trigger Temporal test workflows and watch the worker container logs.
 
-    python trigger_test_workflows.py
+    kubectl exec -n portfolio deployment/backend -- \
+      python -m app.temporal.trigger_test_workflows
 
 Watch logs in the worker container:
     kubectl logs -f -n portfolio deployment/temporal-worker
+
+For sync exception testing run separately — it requires a direct process crash:
+    kubectl exec -n portfolio deployment/temporal-worker -- \
+      python app/temporal/test_sync_exception_standalone.py
 """
 import asyncio
 from temporalio.client import Client
@@ -27,13 +32,6 @@ async def main():
         task_queue="auth-queue",
     )
     print("started TestAsyncExceptionWorkflow")
-
-    await client.start_workflow(
-        "TestSyncExceptionWorkflow",
-        id="test-sync-exception-1",
-        task_queue="auth-queue",
-    )
-    print("started TestSyncExceptionWorkflow")
 
     await client.start_workflow(
         "TestCoreLogsWorkflow",

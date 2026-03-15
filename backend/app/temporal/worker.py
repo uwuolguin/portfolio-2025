@@ -52,10 +52,6 @@ from app.temporal.workflows.workflow_test_async_exception import (
     TestAsyncExceptionWorkflow,
     activity_fire_and_forget_bad_task,
 )
-from app.temporal.workflows.workflow_test_sync_exception import (
-    TestSyncExceptionWorkflow,
-    activity_thread_exception,
-)
 from app.temporal.workflows.workflow_test_core_logs import (
     TestCoreLogsWorkflow,
     activity_timeout,
@@ -79,7 +75,6 @@ async def run_worker() -> None:
             "SendNotificationWorkflow",
             "TestSdkLogsWorkflow",
             "TestAsyncExceptionWorkflow",
-            "TestSyncExceptionWorkflow",
             "TestCoreLogsWorkflow",
         ],
         activities=[
@@ -87,7 +82,6 @@ async def run_worker() -> None:
             "send_mock_email_activity",
             "activity_sdk_log",
             "activity_fire_and_forget_bad_task",
-            "activity_thread_exception",
             "activity_timeout",
         ],
     )
@@ -103,7 +97,6 @@ async def run_worker() -> None:
             SendNotificationWorkflow,
             TestSdkLogsWorkflow,
             TestAsyncExceptionWorkflow,
-            TestSyncExceptionWorkflow,
             TestCoreLogsWorkflow,
         ],
         activities=[
@@ -111,7 +104,6 @@ async def run_worker() -> None:
             send_mock_email_activity,
             activity_sdk_log,
             activity_fire_and_forget_bad_task,
-            activity_thread_exception,
             activity_timeout,
         ],
     )
