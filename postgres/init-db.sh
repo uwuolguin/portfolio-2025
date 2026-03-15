@@ -4,20 +4,11 @@ set -e
 echo "Creating databases..."
 
 psql -v ON_ERROR_STOP=1 --username postgres <<-EOF
-    DO
-    \$\$
-    BEGIN
-        IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'portfolio') THEN
-            CREATE DATABASE portfolio OWNER "postgres";
-        END IF;
-        IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'temporal') THEN
-            CREATE DATABASE temporal OWNER "postgres";
-        END IF;
-        IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'temporal_visibility') THEN
-            CREATE DATABASE temporal_visibility OWNER "postgres";
-        END IF;
-    END
-    \$\$
+    SELECT 'CREATE DATABASE temporal OWNER postgres'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'temporal')\gexec
+
+    SELECT 'CREATE DATABASE temporal_visibility OWNER postgres'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'temporal_visibility')\gexec
 EOF
 
 echo "Databases created (or already existed)"
