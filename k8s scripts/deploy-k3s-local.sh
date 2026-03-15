@@ -381,6 +381,40 @@ fi
 echo ""
 
 # =============================================================================
+# Temporal Server + UI
+# =============================================================================
+# Deployed after Redpanda and Consumer because:
+#   - Temporal needs PostgreSQL (already up)
+#   - Consumer needs Temporal to submit workflows (but fails gracefully if
+#     Temporal is not up yet — it crashes and Kubernetes restarts it)
+#   - Temporal worker initContainer polls temporal:7233 so Temporal must
+#     be ready before the worker starts
+log_info "Deploying Temporal server and UI..."
+kubectl apply -f "$K8S_DIR/14-temporal.yaml"
+
+if ! wait_for_pods_ready "app=temporal" "portfolio" 180 "Temporal server"; then
+    log_error "Temporal server failed"
+    kubectl logs -n portfolio -l app=temporal --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
+# Temporal Worker
+# =============================================================================
+# Deployed after Temporal server — the initContainer in 15-temporal-worker.yaml
+# blocks until temporal:7233 accepts TCP connections (layer 4 probe via busybox nc).
+log_info "Deploying Temporal worker..."
+kubectl apply -f "$K8S_DIR/15-temporal-worker.yaml"
+
+if ! wait_for_deployment_ready "temporal-worker" "portfolio" 120 "Temporal worker"; then
+    log_error "Temporal worker failed"
+    kubectl logs -n portfolio -l app=temporal-worker --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
 # Redpanda
 # =============================================================================
 log_info "Deploying Redpanda..."
@@ -416,40 +450,6 @@ kubectl apply -f "$K8S_DIR/13-consumer.yaml"
 if ! wait_for_deployment_ready "consumer" "portfolio" 60 "Consumer"; then
     log_error "Consumer deployment failed"
     kubectl logs -n portfolio -l app=consumer --tail=30 2>/dev/null || true
-    exit 1
-fi
-echo ""
-
-# =============================================================================
-# Temporal Server + UI
-# =============================================================================
-# Deployed after Redpanda and Consumer because:
-#   - Temporal needs PostgreSQL (already up)
-#   - Consumer needs Temporal to submit workflows (but fails gracefully if
-#     Temporal is not up yet — it crashes and Kubernetes restarts it)
-#   - Temporal worker initContainer polls temporal:7233 so Temporal must
-#     be ready before the worker starts
-log_info "Deploying Temporal server and UI..."
-kubectl apply -f "$K8S_DIR/14-temporal.yaml"
-
-if ! wait_for_pods_ready "app=temporal" "portfolio" 180 "Temporal server"; then
-    log_error "Temporal server failed"
-    kubectl logs -n portfolio -l app=temporal --tail=30 2>/dev/null || true
-    exit 1
-fi
-echo ""
-
-# =============================================================================
-# Temporal Worker
-# =============================================================================
-# Deployed after Temporal server — the initContainer in 15-temporal-worker.yaml
-# blocks until temporal:7233 accepts TCP connections (layer 4 probe via busybox nc).
-log_info "Deploying Temporal worker..."
-kubectl apply -f "$K8S_DIR/15-temporal-worker.yaml"
-
-if ! wait_for_deployment_ready "temporal-worker" "portfolio" 120 "Temporal worker"; then
-    log_error "Temporal worker failed"
-    kubectl logs -n portfolio -l app=temporal-worker --tail=30 2>/dev/null || true
     exit 1
 fi
 echo ""
