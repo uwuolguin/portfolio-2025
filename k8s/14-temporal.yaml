@@ -166,6 +166,11 @@ spec:
                 secretKeyRef:
                   name: portfolio-secrets
                   key: POSTGRES_PASSWORD
+            # Ringpop requires a broadcast address when binding on 0.0.0.0
+            - name: TEMPORAL_BROADCAST_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
 
           livenessProbe:
             # tcpSocket is the right probe for gRPC — httpGet would need
