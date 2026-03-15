@@ -66,7 +66,7 @@ metadata:
   namespace: portfolio
 data:
   # ── Persistence ─────────────────────────────────────────────────────────────
-  DB: "postgresql"
+  DB: "postgres12_pgx"
   DB_PORT: "5432"
   POSTGRES_SEEDS: "postgres-primary"
   DBNAME: "temporal"
