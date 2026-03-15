@@ -1,10 +1,21 @@
 import sys
+import asyncio
 import time
 import logging
+import json
 import structlog
+from datetime import datetime, timezone
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from structlog.contextvars import bind_contextvars, clear_contextvars
+
+from temporalio.runtime import (
+    LogForwardingConfig,
+    LoggingConfig,
+    Runtime,
+    TelemetryConfig,
+    TelemetryFilter,
+)
 
 
 def setup_logging() -> None:
@@ -31,6 +42,122 @@ def setup_logging() -> None:
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
+    )
+
+
+def install_sync_exception_handler() -> None:
+    """
+    Install a structured JSON handler for uncaught synchronous exceptions.
+    Call once at startup, after setup_logging().
+    """
+    _log = structlog.get_logger("exception.sync")
+
+    def _sync_excepthook(exc_type, exc_value, exc_traceback):
+        _log.critical(
+            "sync_uncaught_exception",
+            exc_info=(exc_type, exc_value, exc_traceback),
+        )
+
+    sys.excepthook = _sync_excepthook
+
+
+def install_async_exception_handler() -> None:
+    """
+    Install a structured JSON handler for uncaught asyncio exceptions.
+    Must be called from inside a running event loop (e.g. inside run_worker()).
+    """
+    _log = structlog.get_logger("exception.async")
+
+    def _async_exception_handler(loop, context):
+        exc = context.get("exception")
+        if exc is not None:
+            _log.error(
+                "uncaught_async_exception",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+        else:
+            _log.error(
+                "uncaught_async_exception_with_no_exc_object",
+                context=str(context),
+            )
+
+    try:
+        # Already inside a running loop — patch it directly
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(_async_exception_handler)
+    except RuntimeError:
+        # No loop running yet — create one, configure it, register it
+        # asyncio.run() will use the loop set via set_event_loop()
+        loop = asyncio.new_event_loop()
+        loop.set_exception_handler(_async_exception_handler)
+        asyncio.set_event_loop(loop)
+
+
+class _SdkJsonFormatter(logging.Formatter):
+    """For temporalio.* Python-side logs — includes timestamp."""
+    def format(self, record: logging.LogRecord) -> str:
+        log = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname.lower(),
+            "logger": record.name,
+            "event": record.getMessage(),
+        }
+        if record.exc_info:
+            log["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(log)
+
+
+class _CoreJsonFormatter(logging.Formatter):
+    """For Rust core logs — no timestamp, nothing non-deterministic."""
+    def format(self, record: logging.LogRecord) -> str:
+        log = {
+            "level": record.levelname.lower(),
+            "logger": record.name,
+            "event": record.getMessage(),
+        }
+        if record.exc_info:
+            log["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(log)
+
+
+def configure_temporal_logging() -> None:
+    """
+    Route all Temporal logs (Python SDK + Rust core) through JSON formatters.
+    Must be called before Client.connect() and before any Temporal code runs.
+    """
+    # ── Python SDK logs ──────────────────────────────────────────────────
+    sdk_logger = logging.getLogger("temporalio")
+    sdk_logger.setLevel(logging.WARNING)
+    sdk_logger.propagate = False
+    sdk_handler = logging.StreamHandler(sys.stdout)
+    sdk_handler.setFormatter(_SdkJsonFormatter())
+    sdk_logger.addHandler(sdk_handler)
+
+    # ── Rust core logs ───────────────────────────────────────────────────
+    # Without LogForwardingConfig, Rust core logs bypass Python logging entirely
+    # and print raw unformatted text to the console.
+    core_logger = logging.getLogger("temporalio.core")
+    core_logger.setLevel(logging.WARNING)
+    core_logger.propagate = False
+    core_handler = logging.StreamHandler(sys.stdout)
+    core_handler.setFormatter(_CoreJsonFormatter())
+    core_logger.addHandler(core_handler)
+
+    Runtime.set_default(
+        Runtime(
+            telemetry=TelemetryConfig(
+                logging=LoggingConfig(
+                    filter=TelemetryFilter(
+                        core_level="WARN",
+                        other_level="WARN",
+                    ),
+                    forwarding=LogForwardingConfig(
+                        logger=core_logger,
+                        append_target_to_name=True,
+                    ),
+                )
+            )
+        )
     )
 
 

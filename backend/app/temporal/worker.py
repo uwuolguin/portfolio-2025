@@ -26,17 +26,40 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 try:
-    from app.middleware.logging import setup_logging
+    from app.middleware.logging import (
+        setup_logging,
+        configure_temporal_logging,
+        install_sync_exception_handler,
+    )
     setup_logging()
+    configure_temporal_logging()      # must run before Client.connect()
+    install_sync_exception_handler()  # sync crashes → structured JSON
 except Exception:
     import logging
     logging.basicConfig(level=logging.INFO)
 
 from app.config import settings
+from app.middleware.logging import install_async_exception_handler
 from app.temporal.activities.log_event_activity import log_event_activity
 from app.temporal.activities.send_email_activity import send_mock_email_activity
 from app.temporal.workflows.workflow_logging import AuthEventWorkflow
 from app.temporal.workflows.workflow_send_notification import SendNotificationWorkflow
+from app.temporal.workflows.workflow_test_sdk_logs import (
+    TestSdkLogsWorkflow,
+    activity_sdk_log,
+)
+from app.temporal.workflows.workflow_test_async_exception import (
+    TestAsyncExceptionWorkflow,
+    activity_fire_and_forget_bad_task,
+)
+from app.temporal.workflows.workflow_test_sync_exception import (
+    TestSyncExceptionWorkflow,
+    activity_thread_exception,
+)
+from app.temporal.workflows.workflow_test_core_logs import (
+    TestCoreLogsWorkflow,
+    activity_timeout,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -44,12 +67,29 @@ TASK_QUEUE = "auth-queue"
 
 
 async def run_worker() -> None:
+    # Must be called inside the running loop — patches the live event loop
+    install_async_exception_handler()
+
     logger.info(
         "temporal_worker_starting",
         host=settings.temporal_host,
         task_queue=TASK_QUEUE,
-        workflows=["AuthEventWorkflow", "SendNotificationWorkflow"],
-        activities=["log_event_activity", "send_mock_email_activity"],
+        workflows=[
+            "AuthEventWorkflow",
+            "SendNotificationWorkflow",
+            "TestSdkLogsWorkflow",
+            "TestAsyncExceptionWorkflow",
+            "TestSyncExceptionWorkflow",
+            "TestCoreLogsWorkflow",
+        ],
+        activities=[
+            "log_event_activity",
+            "send_mock_email_activity",
+            "activity_sdk_log",
+            "activity_fire_and_forget_bad_task",
+            "activity_thread_exception",
+            "activity_timeout",
+        ],
     )
 
     client = await Client.connect(settings.temporal_host)
@@ -58,11 +98,26 @@ async def run_worker() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[AuthEventWorkflow, SendNotificationWorkflow],
-        activities=[log_event_activity, send_mock_email_activity],
+        workflows=[
+            AuthEventWorkflow,
+            SendNotificationWorkflow,
+            TestSdkLogsWorkflow,
+            TestAsyncExceptionWorkflow,
+            TestSyncExceptionWorkflow,
+            TestCoreLogsWorkflow,
+        ],
+        activities=[
+            log_event_activity,
+            send_mock_email_activity,
+            activity_sdk_log,
+            activity_fire_and_forget_bad_task,
+            activity_thread_exception,
+            activity_timeout,
+        ],
     )
 
     logger.info("temporal_worker_polling", task_queue=TASK_QUEUE)
+
     await worker.run()
 
     logger.info("temporal_worker_stopped", task_queue=TASK_QUEUE)
@@ -74,6 +129,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("temporal_worker_interrupted")
         sys.exit(0)
-
-
-        

@@ -93,6 +93,43 @@ kubectl exec -n portfolio deployment/backend -- \
 # Run tests
 kubectl exec -n portfolio deployment/backend -- \
   pytest app/tests/ -v
+
+# ── Temporal Logging Verification ────────────────────────────────────────────
+# Run test workflows to verify all Temporal log sources are emitting JSON.
+# Each workflow targets a different log path:
+#   TestSdkLogsWorkflow        → _SdkJsonFormatter  (temporalio.* Python-side logs)
+#   TestAsyncExceptionWorkflow → install_async_exception_handler (asyncio loop handler)
+#   TestSyncExceptionWorkflow  → threading.excepthook (thread-level unhandled exception)
+#   TestCoreLogsWorkflow       → _CoreJsonFormatter (Rust core via LogForwardingConfig)
+#
+# Step 1 — open a second terminal and tail the worker logs BEFORE triggering:
+kubectl logs -n portfolio deployment/temporal-worker -f
+#
+# Step 2 — in this terminal, trigger all four workflows:
+kubectl exec -n portfolio deployment/backend -- \
+  python -m app.temporal.trigger_test_workflows
+#
+# What to look for in the worker logs:
+#
+#   SDK log (Python-side):
+#   {"timestamp":"...","level":"warning","logger":"temporalio.workflow","event":"test_workflow_sdk_log..."}
+#
+#   Async exception:
+#   {"level":"error","event":"uncaught_async_exception","exc_info":"...RuntimeError: test async..."}
+#
+#   Sync/thread exception:
+#   printed to stderr by threading.excepthook — visible in the container logs
+#
+#   Core log (Rust):
+#   {"level":"warn","logger":"temporalio.core...","event":"..."}
+#   (appears after TestCoreLogsWorkflow times out its activity — wait ~5 seconds)
+#
+# To filter by log type:
+kubectl logs -n portfolio deployment/temporal-worker | grep '"logger":"temporalio'
+kubectl logs -n portfolio deployment/temporal-worker | grep '"event":"uncaught_async'
+kubectl logs -n portfolio deployment/temporal-worker | grep '"event":"uncaught_sync\|thread'
+kubectl logs -n portfolio deployment/temporal-worker | grep '"logger":"temporalio.core'
+# ─────────────────────────────────────────────────────────────────────────────
 ```
 
 ### 7. Access
