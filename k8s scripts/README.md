@@ -534,6 +534,8 @@ export KUBECONFIG=~/.kube/config
 kubectl wait --for=delete namespace/portfolio --timeout=60s
 sudo rm -rf /var/lib/rancher/k3s/storage/*
 sudo ls /var/lib/rancher/k3s/storage/   # must be empty before proceeding
+# this in case you want to delete evry image in k3s
+sudo k3s ctr images ls -q | sudo xargs -r k3s ctr images rm
 ./deploy-k3s-local.sh
 ```
 
