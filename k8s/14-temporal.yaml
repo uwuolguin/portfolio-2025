@@ -90,6 +90,7 @@ data:
   # Tell auto-setup to connect with SSL — matches your hostssl pg_hba rules
   POSTGRES_TLS_ENABLED: "true"
   POSTGRES_TLS_DISABLE_HOST_VERIFICATION: "true"
+  SKIP_DB_CREATE: "true"   # databases already exist, skip creation
 ---
 # ── Temporal server Deployment ────────────────────────────────────────────────
 #
