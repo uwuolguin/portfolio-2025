@@ -383,12 +383,6 @@ echo ""
 # =============================================================================
 # Temporal Server + UI
 # =============================================================================
-# Deployed after Redpanda and Consumer because:
-#   - Temporal needs PostgreSQL (already up)
-#   - Consumer needs Temporal to submit workflows (but fails gracefully if
-#     Temporal is not up yet — it crashes and Kubernetes restarts it)
-#   - Temporal worker initContainer polls temporal:7233 so Temporal must
-#     be ready before the worker starts
 log_info "Deploying Temporal server and UI..."
 kubectl apply -f "$K8S_DIR/14-temporal.yaml"
 
@@ -400,10 +394,21 @@ fi
 echo ""
 
 # =============================================================================
+# Temporal Namespace
+# =============================================================================
+log_info "Registering Temporal default namespace..."
+TEMPORAL_POD=$(kubectl get pods -n portfolio -l app=temporal -o jsonpath='{.items[0].metadata.name}')
+if kubectl exec -n portfolio "$TEMPORAL_POD" -- tctl namespace describe default &>/dev/null 2>&1; then
+    log_success "Temporal default namespace already exists"
+else
+    kubectl exec -n portfolio "$TEMPORAL_POD" -- tctl namespace register --retention 7 default
+    log_success "Temporal default namespace registered"
+fi
+echo ""
+
+# =============================================================================
 # Temporal Worker
 # =============================================================================
-# Deployed after Temporal server — the initContainer in 15-temporal-worker.yaml
-# blocks until temporal:7233 accepts TCP connections (layer 4 probe via busybox nc).
 log_info "Deploying Temporal worker..."
 kubectl apply -f "$K8S_DIR/15-temporal-worker.yaml"
 
