@@ -53,17 +53,17 @@ async def run_worker() -> None:
     )
 
     client = await Client.connect(settings.temporal_host)
-
     logger.info("temporal_client_connected", host=settings.temporal_host)
 
-    async with Worker(
+    worker = Worker(
         client,
         task_queue=TASK_QUEUE,
         workflows=[AuthEventWorkflow, SendNotificationWorkflow],
         activities=[log_event_activity, send_mock_email_activity],
-    ) as worker:
-        logger.info("temporal_worker_polling", task_queue=TASK_QUEUE)
-        await worker.run()
+    )
+
+    logger.info("temporal_worker_polling", task_queue=TASK_QUEUE)
+    await worker.run()
 
     logger.info("temporal_worker_stopped", task_queue=TASK_QUEUE)
 
@@ -74,3 +74,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("temporal_worker_interrupted")
         sys.exit(0)
+
+
+        

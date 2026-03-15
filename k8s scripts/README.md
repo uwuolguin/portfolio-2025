@@ -265,22 +265,26 @@ kubectl logs -n portfolio deployment/temporal-worker | grep "mock_email_sent"
 
 # Access Temporal UI via port-forward
 #
-# Port-forward creates a direct tunnel to the pod, bypassing nginx entirely:
-#   your laptop:8080 → SSH tunnel → droplet:8080 → kubectl → temporal-ui pod:8080
+# Port-forward creates a direct tunnel to the pod, bypassing nginx entirely.
+# We use port 8888 to avoid conflicts with other local services (e.g. EDB Postgres).
 #
-# This works because kubectl talks to the Kubernetes API server, which proxies
-# the connection directly to the pod — no Ingress, no LoadBalancer, no nginx needed.
-# The temporal-ui Service is ClusterIP (internal only), so port-forward is the
-# only way to reach it from outside the cluster without exposing it publicly.
+# How the tunnel works:
+#   ssh -L [local_port]:[host_seen_from_droplet]:[port_on_that_host]
+#   - First 8888  → port that opens on YOUR laptop
+#   - localhost   → from the droplet's perspective, where to send traffic (itself)
+#   - Second 8888 → port on the droplet's localhost where kubectl is forwarding
+#
+# Full chain:
+#   your browser :8888 → SSH → droplet localhost:8888 → kubectl → temporal-ui pod:8080
 #
 # Step 1 — on the droplet:
-kubectl port-forward -n portfolio svc/temporal-ui 8080:8080
+kubectl port-forward -n portfolio svc/temporal-ui 8888:8080
 
 # Step 2 — on your laptop (SSH tunnel):
-ssh -L 8080:localhost:8080 deploy@<your-droplet-ip>
+ssh -L 8888:localhost:8888 deploy@<your-droplet-ip>
 
 # Step 3 — open in browser:
-# http://localhost:8080
+# http://localhost:8888
 # You can inspect workflow histories, replay executions, and search by workflow ID
 
 # Verify Temporal databases were created by auto-setup
@@ -379,7 +383,8 @@ kubectl port-forward -n portfolio svc/backend 8000:8000
 kubectl port-forward -n portfolio svc/minio 9001:9001
 
 # Temporal UI (bypasses nginx — direct tunnel to temporal-ui pod)
-kubectl port-forward -n portfolio svc/temporal-ui 8080:8080
+# Uses 8888 to avoid conflict with local services on 8080
+kubectl port-forward -n portfolio svc/temporal-ui 8888:8080
 ```
 
 ---
