@@ -392,7 +392,7 @@ echo ""
 log_info "Deploying Temporal server and UI..."
 kubectl apply -f "$K8S_DIR/14-temporal.yaml"
 
-if ! wait_for_pods_ready "app=temporal" "portfolio" 60 "Temporal server"; then
+if ! wait_for_pods_ready "app=temporal" "portfolio" 120 "Temporal server"; then
     log_error "Temporal server failed"
     kubectl logs -n portfolio -l app=temporal --tail=30 2>/dev/null || true
     exit 1

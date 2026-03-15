@@ -18,7 +18,8 @@ import os
 
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.structs import OffsetAndMetadata
-from temporalio.client import Client, WorkflowAlreadyStartedError
+from temporalio.client import Client
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 logger = logging.getLogger(__name__)
 

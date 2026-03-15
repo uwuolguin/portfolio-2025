@@ -264,6 +264,15 @@ kubectl logs -n portfolio deployment/temporal-worker | grep "mock_email_sent"
 #            "event_type":"login","lang":"en","note":"MOCK — no real email sent",...}
 
 # Access Temporal UI via port-forward
+#
+# Port-forward creates a direct tunnel to the pod, bypassing nginx entirely:
+#   your laptop:8080 → SSH tunnel → droplet:8080 → kubectl → temporal-ui pod:8080
+#
+# This works because kubectl talks to the Kubernetes API server, which proxies
+# the connection directly to the pod — no Ingress, no LoadBalancer, no nginx needed.
+# The temporal-ui Service is ClusterIP (internal only), so port-forward is the
+# only way to reach it from outside the cluster without exposing it publicly.
+#
 # Step 1 — on the droplet:
 kubectl port-forward -n portfolio svc/temporal-ui 8080:8080
 
