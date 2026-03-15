@@ -99,7 +99,7 @@ kubectl exec -n portfolio deployment/backend -- \
 # Each workflow targets a different log path:
 #   TestSdkLogsWorkflow        → _SdkJsonFormatter  (temporalio.* Python-side logs)
 #   TestAsyncExceptionWorkflow → install_async_exception_handler (asyncio loop handler)
-#   TestSyncExceptionWorkflow  → threading.excepthook (thread-level unhandled exception)
+#   test_sync_exception_standalone → sys.excepthook (process-level startup crash)
 #   TestCoreLogsWorkflow       → _CoreJsonFormatter (Rust core via LogForwardingConfig)
 #
 # Step 1 — open a second terminal and tail the worker logs BEFORE triggering:
@@ -107,8 +107,8 @@ kubectl logs -n portfolio deployment/temporal-worker -f
 #
 # Step 2 — in this terminal, trigger all four workflows:
 kubectl exec -n portfolio deployment/temporal-worker -- \
-  python -m app.temporal.test_sync_exception_standalone
-  
+  python -m app.temporal.workflows.test_sync_exception_standalone
+
 kubectl exec -n portfolio deployment/backend -- \
   python -m app.temporal.trigger_test_workflows
 #
@@ -120,8 +120,8 @@ kubectl exec -n portfolio deployment/backend -- \
 #   Async exception:
 #   {"level":"error","event":"uncaught_async_exception","exc_info":"...RuntimeError: test async..."}
 #
-#   Sync/thread exception:
-#   printed to stderr by threading.excepthook — visible in the container logs
+#   Sync exception (run separately — crashes the process by design):
+#   {"level": "critical", "event": "sync_uncaught_exception", "exc_info": "...RuntimeError..."}
 #
 #   Core log (Rust):
 #   {"level":"warn","logger":"temporalio.core...","event":"..."}
