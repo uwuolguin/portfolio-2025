@@ -1,0 +1,253 @@
+# =============================================================================
+# 14-temporal.yaml — Temporal Server with PostgreSQL persistence
+#
+# Uses temporalio/auto-setup which:
+#   1. Runs schema migrations against postgres-primary on first boot
+#   2. Creates two databases: temporal + temporal_visibility
+#   3. Starts the Temporal frontend/history/matching/worker services
+#      all-in-one (suitable for single-node demo deployments)
+#
+# Temporal UI is available via port-forward:
+#   kubectl port-forward -n portfolio svc/temporal-ui 8080:8080
+# =============================================================================
+
+---
+# ── Temporal server service (gRPC 7233 + HTTP 7234) ──────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  namespace: portfolio
+  labels:
+    app: temporal
+spec:
+  type: ClusterIP
+  ports:
+    - port: 7233
+      targetPort: 7233
+      protocol: TCP
+      name: grpc-frontend
+    - port: 7234
+      targetPort: 7234
+      protocol: TCP
+      name: http
+  selector:
+    app: temporal
+
+---
+# ── Temporal UI service ───────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  namespace: portfolio
+  labels:
+    app: temporal-ui
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: temporal-ui
+
+---
+# ── Temporal configuration ────────────────────────────────────────────────────
+# Non-secret env vars for both the Temporal server and UI.
+# Secrets (POSTGRES_USER, POSTGRES_PWD) stay in portfolio-secrets.
+# Kept in this file and not in 01-configmap.yaml because this config
+# is Temporal-specific — if Temporal is removed, this file goes with it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-config
+  namespace: portfolio
+data:
+  # ── Persistence ─────────────────────────────────────────────────────────────
+  DB: "postgresql"
+  DB_PORT: "5432"
+  POSTGRES_SEEDS: "postgres-primary"
+  DBNAME: "temporal"
+  VISIBILITY_DBNAME: "temporal_visibility"
+
+  # ── Server ───────────────────────────────────────────────────────────────────
+  TEMPORAL_ADDRESS: "temporal:7233"
+  BIND_ON_IP: "0.0.0.0"
+  LOG_LEVEL: "warn"
+
+  # ── Namespace (auto-created on first boot) ───────────────────────────────────
+  # DEFAULT_NAMESPACE and DEFAULT_NAMESPACE_RETENTION are handled by the
+  # auto-setup entrypoint script.
+  # Source: https://temporal.io/blog/auto-setup
+  DEFAULT_NAMESPACE: "default"
+  DEFAULT_NAMESPACE_RETENTION: "1"
+
+  # ── UI ───────────────────────────────────────────────────────────────────────
+  TEMPORAL_CORS_ORIGINS: "http://localhost:8080"
+  TEMPORAL_UI_PORT: "8080"
+
+---
+# ── Temporal server Deployment ────────────────────────────────────────────────
+#
+# WHY NOT a StatefulSet?
+# Temporal stores ALL durable state in PostgreSQL — not on local disk.
+# The pod itself is stateless: kill and restart it freely.
+# A Deployment is the right primitive for stateless services.
+#
+# WHY auto-setup image?
+# temporalio/auto-setup bundles:
+#   - temporal-server       (the main process)
+#   - temporal-sql-tool     (schema migration runner)
+#   - an entrypoint script  (runs migrations, then starts the server)
+#
+# On first boot against an empty DB:
+#   1. Creates databases temporal + temporal_visibility
+#   2. Applies all schema migrations
+#   3. Starts all Temporal internal services (frontend, history, matching, worker)
+#
+# On subsequent boots: detects schema is current, skips migrations, starts server.
+# Source: deepwiki.com/temporalio/temporal/8.4-database-schema-management
+#
+# No initContainer needed — auto-setup polls postgres internally before
+# running migrations.
+# Source: github.com/temporalio/temporal/issues/2322
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal
+  namespace: portfolio
+  labels:
+    app: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal
+  strategy:
+    # RollingUpdate is safe because auto-setup tracks schema versions in the
+    # database and skips already-applied migrations.
+    # Source: deepwiki.com/temporalio/temporal/8.4-database-schema-management
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: temporal
+    spec:
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: temporal
+          image: temporalio/auto-setup:1.24.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7233
+              name: grpc-frontend
+            - containerPort: 7234
+              name: http
+
+          envFrom:
+            - configMapRef:
+                name: temporal-config
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: POSTGRES_PASSWORD
+
+          livenessProbe:
+            # tcpSocket is the right probe for gRPC — httpGet would need
+            # an HTTP endpoint which Temporal's gRPC port doesn't expose.
+            tcpSocket:
+              port: 7233
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          readinessProbe:
+            tcpSocket:
+              port: 7233
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+---
+# ── Temporal UI Deployment ────────────────────────────────────────────────────
+#
+# The Temporal Web UI is a React SPA that talks to the Temporal server
+# over its HTTP API (port 7234). It is read-only — you can inspect
+# workflows, replay histories, and search executions. No auth by default.
+#
+# Access via port-forward from the droplet:
+#   kubectl port-forward -n portfolio svc/temporal-ui 8080:8080
+# Then browse to http://localhost:8080 from your laptop via SSH tunnel.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  namespace: portfolio
+  labels:
+    app: temporal-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-ui
+  template:
+    metadata:
+      labels:
+        app: temporal-ui
+    spec:
+      containers:
+        - name: temporal-ui
+          image: temporalio/ui:2.28.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: temporal-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "25m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"

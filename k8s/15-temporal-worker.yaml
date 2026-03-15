@@ -1,0 +1,144 @@
+# =============================================================================
+# 15-temporal-worker.yaml — Temporal Worker Deployment
+#
+# Reuses portfolio-backend:latest — no separate Docker build needed.
+# The only difference from the backend pod is the command:
+#   python -m app.temporal.worker   (instead of uvicorn)
+#
+# The worker polls the Temporal server task queue "auth-queue" and executes:
+#   - AuthEventWorkflow
+#   - log_event_activity      (heavy structured logging)
+#   - send_mock_email_activity (mock email, logs what WOULD be sent)
+#
+# On SIGTERM:
+#   Temporal's Worker.run() stops accepting new tasks and waits for
+#   in-flight activities to finish before exiting.
+#   terminationGracePeriodSeconds=60 gives it time to drain.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: portfolio
+  labels:
+    app: temporal-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-worker
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1         # briefly 2 workers during rollout — Temporal deduplicates tasks
+      maxUnavailable: 0   # old worker stays up until new one is polling
+
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+    spec:
+      # Give the worker 60s to finish in-flight activities before SIGKILL.
+      # Must be > the longest activity start_to_close_timeout (30s) + buffer.
+      terminationGracePeriodSeconds: 60
+
+      initContainers:
+        # The Temporal Python SDK Client.connect() has no built-in retry on
+        # initial connection — it fails fast if the server is not up yet.
+        # Source: github.com/temporalio/temporal/issues/1057
+        # This initContainer waits until Temporal's gRPC port accepts TCP
+        # connections before the worker pod starts.
+        # This is a layer 4 (TCP) probe — not a gRPC health check. It confirms
+        # the port is open and accepting connections, not that gRPC is ready.
+        # busybox is used instead of alpine because nc -z is built in —
+        # alpine requires an explicit apk install to get netcat.
+        - name: wait-for-temporal
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for temporal:7233..."
+              until nc -z temporal 7233; do
+                echo "  temporal not ready, retrying in 5s..."
+                sleep 5
+              done
+              echo "temporal:7233 is accepting connections"
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"
+
+      containers:
+        - name: temporal-worker
+          image: portfolio-backend:latest
+          imagePullPolicy: Never   # built locally, imported into k3s
+
+          # Override the default uvicorn CMD from the backend image.
+          command:
+            - python
+            - -m
+            - app.temporal.worker
+
+          env:
+            # ── Temporal server address ──────────────────────────────────
+            - name: TEMPORAL_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: portfolio-config
+                  key: TEMPORAL_HOST
+
+            # ── Database (needed by app.config.Settings validation) ──────
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: DATABASE_URL
+            - name: DATABASE_URL_PRIMARY
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: DATABASE_URL_PRIMARY
+            - name: DATABASE_URL_REPLICA
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: DATABASE_URL_REPLICA
+            - name: ALEMBIC_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: portfolio-secrets
+                  key: ALEMBIC_DATABASE_URL
+
+          # Pull all remaining config from the shared ConfigMap and Secret.
+          # Settings validation requires them even though the worker itself
+          # only uses TEMPORAL_HOST.
+          envFrom:
+            - configMapRef:
+                name: portfolio-config
+            - secretRef:
+                name: portfolio-secrets
+
+          resources:
+            requests:
+              # Worker is mostly idle — polling gRPC + running Python activities.
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              # Burst headroom for structlog JSON rendering + Temporal SDK overhead.
+              memory: "256Mi"
+              cpu: "200m"
+
+          # No liveness/readiness probe — this is not a Service.
+          # No traffic is routed to the worker pod; it only makes outbound
+          # connections to the Temporal server. If it crashes, Kubernetes
+          # restarts it automatically and it resumes polling.
+          # Once connected, the SDK retries polling indefinitely on connection loss.
+          # Source: github.com/temporalio/sdk-python/issues/311
+
+      restartPolicy: Always

@@ -2,10 +2,10 @@
 set -e
 
 # =============================================================================
-# Portfolio k3s Deployment Script - DigitalOcean 2GB Droplet
+# Portfolio k3s Deployment Script - DigitalOcean 4GB Droplet
 # Run as regular user with sudo privileges
-# Deploys services SEQUENTIALLY to avoid OOM on 2GB RAM
-# 
+# Deploys services SEQUENTIALLY to avoid OOM
+#
 # UPDATED: Now loads Resend API key from .env.secrets
 # =============================================================================
 
@@ -25,7 +25,7 @@ log_warn()    { printf '%b\n' "${YELLOW}[WARN]${NC} $1"; }
 log_error()   { printf '%b\n' "${RED}[ERROR]${NC} $1"; }
 
 echo "============================================"
-echo "Portfolio Deployment - DO 2GB Droplet"
+echo "Portfolio Deployment - DO 4GB Droplet"
 echo "============================================"
 echo ""
 echo "K8s manifests: $K8S_DIR"
@@ -74,7 +74,6 @@ wait_for_deployment_ready() {
         local desired=$(kubectl get deployment "$name" -n "$namespace" \
             -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
 
-        # normalize empty to 0 (readyReplicas is absent when 0, not "0")
         ready="${ready:-0}"
 
         if [ "$ready" = "$desired" ] && [ "$ready" != "0" ]; then
@@ -94,6 +93,7 @@ wait_for_deployment_ready() {
     kubectl describe deployment "$name" -n "$namespace" 2>/dev/null | tail -20
     return 1
 }
+
 wait_for_statefulset_ready() {
     local name="$1"
     local namespace="$2"
@@ -126,6 +126,7 @@ wait_for_statefulset_ready() {
     kubectl describe statefulset "$name" -n "$namespace" 2>/dev/null | tail -20
     return 1
 }
+
 wait_for_pods_ready() {
     local selector="$1"
     local namespace="$2"
@@ -173,7 +174,6 @@ if ! kubectl cluster-info &> /dev/null; then
     exit 1
 fi
 
-# Verify images (k3s ctr needs sudo)
 MISSING=0
 for img in portfolio-backend:latest portfolio-image-service:latest portfolio-nginx:latest portfolio-postgres:16; do
     if ! sudo k3s ctr images ls | grep -q "$img"; then
@@ -192,16 +192,6 @@ echo ""
 # =============================================================================
 # Generate secrets
 # =============================================================================
-#   openssl rand -hex 16
-#   → generates 16 raw random bytes (128 bits of entropy)
-#   → encodes each byte as exactly 2 hex digits (0-9, a-f)
-#   → output is ALWAYS exactly 32 characters, no filtering needed
-#   → hex chars are safe in URLs, shell variables, YAML, and config parsers
-#   → no tr, no head, no probabilistic failure — deterministic by design
-#
-#   If you want 64 chars: openssl rand -hex 32
-#   If you want 128 bits of entropy in 32 chars: openssl rand -hex 16  ← used here
-#
 log_info "Generating secrets..."
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 JWT_SECRET=$(openssl rand -hex 16)
@@ -248,7 +238,7 @@ fi
 log_info "Detected droplet IP: $DROPLET_IP"
 
 # =============================================================================
-# Deploy step by step (kubectl uses user's kubeconfig, no sudo needed)
+# Deploy step by step
 # =============================================================================
 
 # Namespace
@@ -256,9 +246,7 @@ log_info "Creating namespace..."
 kubectl apply -f "$K8S_DIR/00-namespace.yaml"
 echo ""
 
-# TLS secret — certs must already exist at /home/deploy/certs/ (put there by certbot)
-# See SSL_SETUP.md Step 4 for how to get them there.
-# --dry-run=client -o yaml | kubectl apply -f - makes this idempotent (safe to re-run)
+# TLS secret
 log_info "Loading TLS certificates into cluster..."
 if [ -f "/home/deploy/certs/fullchain.pem" ] && [ -f "/home/deploy/certs/privkey.pem" ]; then
     kubectl create secret tls tls-secret \
@@ -279,7 +267,6 @@ log_info "Creating ConfigMap..."
 kubectl apply -f "$K8S_DIR/01-configmap.yaml"
 echo ""
 
-# Patch ALLOWED_ORIGINS with droplet IP
 kubectl patch configmap portfolio-config -n portfolio --type merge \
   -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"https://testproveoportfolio.xyz\\\",\\\"https://www.testproveoportfolio.xyz\\\"]\"}}"
 
@@ -304,7 +291,6 @@ kubectl create secret generic portfolio-secrets \
   -n portfolio \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# Save credentials
 cat > "${SCRIPT_DIR}/.credentials" <<EOF
 # Generated credentials - $(date -Iseconds)
 # KEEP THIS FILE SECURE
@@ -387,7 +373,7 @@ echo ""
 # =============================================================================
 # Image Service
 # =============================================================================
-log_info "Deploying Image Service (1 replica, NSFW enabled - will use swap)..."
+log_info "Deploying Image Service (NSFW enabled)..."
 kubectl apply -f "$K8S_DIR/08-image-service.yaml"
 if ! wait_for_pods_ready "app=image-service" "portfolio" 120 "Image Service"; then
     log_error "Image Service failed"; exit 1
@@ -410,10 +396,6 @@ echo ""
 # =============================================================================
 # Redpanda Init (topic creation)
 # =============================================================================
-# Applied as a separate step AFTER the StatefulSet is confirmed healthy.
-# This is intentional — see 12-redpanda-init.yaml for full explanation.
-# The Job polls the admin API internally as well, but the StatefulSet wait
-# above gives us a clean outer guarantee before the Job is even submitted.
 log_info "Running Redpanda init Job (creating topics)..."
 kubectl apply -f "$K8S_DIR/12-redpanda-init.yaml"
 
@@ -439,6 +421,40 @@ fi
 echo ""
 
 # =============================================================================
+# Temporal Server + UI
+# =============================================================================
+# Deployed after Redpanda and Consumer because:
+#   - Temporal needs PostgreSQL (already up)
+#   - Consumer needs Temporal to submit workflows (but fails gracefully if
+#     Temporal is not up yet — it crashes and Kubernetes restarts it)
+#   - Temporal worker initContainer polls temporal:7233 so Temporal must
+#     be ready before the worker starts
+log_info "Deploying Temporal server and UI..."
+kubectl apply -f "$K8S_DIR/14-temporal.yaml"
+
+if ! wait_for_pods_ready "app=temporal" "portfolio" 180 "Temporal server"; then
+    log_error "Temporal server failed"
+    kubectl logs -n portfolio -l app=temporal --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
+# Temporal Worker
+# =============================================================================
+# Deployed after Temporal server — the initContainer in 15-temporal-worker.yaml
+# blocks until temporal:7233 accepts TCP connections (layer 4 probe via busybox nc).
+log_info "Deploying Temporal worker..."
+kubectl apply -f "$K8S_DIR/15-temporal-worker.yaml"
+
+if ! wait_for_deployment_ready "temporal-worker" "portfolio" 120 "Temporal worker"; then
+    log_error "Temporal worker failed"
+    kubectl logs -n portfolio -l app=temporal-worker --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
 # Backend
 # =============================================================================
 log_info "Deploying Backend (1 replica)..."
@@ -459,7 +475,6 @@ if ! wait_for_pods_ready "app=nginx" "portfolio" 60 "Nginx"; then
     log_error "Nginx failed"; exit 1
 fi
 echo ""
-
 
 # =============================================================================
 # Summary
@@ -508,28 +523,35 @@ echo "     kubectl exec -n portfolio postgres-primary-0 -- \\"
 echo "       psql -U postgres -d portfolio -c \\"
 echo "       'SELECT client_addr, state FROM pg_stat_replication;'"
 echo ""
-echo "  5. Monitor memory:"
+echo "  5. Access Temporal UI (port-forward):"
+echo "     kubectl port-forward -n portfolio svc/temporal-ui 8080:8080"
+echo "     # Then open http://localhost:8080 via SSH tunnel"
+echo ""
+echo "  6. Monitor memory:"
 echo "     watch 'free -h && echo && kubectl top pods -n portfolio'"
 echo ""
 echo "  Credentials: ${SCRIPT_DIR}/.credentials"
 echo ""
 echo "============================================"
-echo "  MEMORY BUDGET (2GB droplet + NSFW enabled)"
+echo "  MEMORY BUDGET (4GB droplet + 2GB swap)"
 echo "============================================"
 echo ""
-echo "  k3s system:        ~300MB"
-echo "  PostgreSQL primary: ~192-384MB"
-echo "  PostgreSQL replica: ~128-256MB"
-echo "  Redis:              ~32-96MB"
-echo "  MinIO:              ~128-256MB"
-echo "  Image Service:      ~384-768MB (TensorFlow NSFW)"
-echo "  Backend:            ~192-512MB"
-echo "  Nginx:              ~32-128MB"
-echo "  Redpanda:           ~512-768MB"
-echo "  Consumer:           ~64-128MB"
-echo "  Swap:               2GB (safety net)"
-echo ""
-echo "  Total requests:    ~1700MB"
-echo "  Total limits:      ~3296MB (will use swap)"
-echo "  Available:          2048MB + 2048MB swap"
+echo "  k3s system:         ~300MB"
+echo "  PostgreSQL primary:  ~192-384MB"
+echo "  PostgreSQL replica:  ~128-256MB"
+echo "  Redis:               ~32-96MB"
+echo "  MinIO:               ~128-256MB"
+echo "  Image Service:       ~384-768MB (TensorFlow NSFW)"
+echo "  Backend:             ~192-512MB"
+echo "  Nginx:               ~32-128MB"
+echo "  Redpanda:            ~512-768MB"
+echo "  Consumer:            ~64-128MB"
+echo "  Temporal server:     ~192-384MB"
+echo "  Temporal UI:         ~64-128MB"
+echo "  Temporal worker:     ~128-256MB"
+echo "  Grafana:             (coming soon)"
+echo "  ─────────────────────────────────"
+echo "  Total requests:     ~2348MB"
+echo "  Total limits:       ~4064MB"
+echo "  Available:           4096MB RAM + 2048MB swap"
 echo "============================================"
