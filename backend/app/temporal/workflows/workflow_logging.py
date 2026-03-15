@@ -1,5 +1,5 @@
 from temporalio import workflow
-from temporalio.common import ParentClosePolicy
+from temporalio.workflow import ParentClosePolicy
 from datetime import timedelta
 
 with workflow.unsafe.imports_passed_through():

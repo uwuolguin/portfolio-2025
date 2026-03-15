@@ -12,12 +12,12 @@ A Kubernetes (k3s) deployment showcasing:
 
 ## Droplet Specs
 
-- **Plan**: Premium AMD ~$24/mo
+- **Plan**: Premium AMD ~$28/mo
 - **RAM**: 4 GB + 2 GB swap
-- **CPU**: 2 AMD CPUs
-- **Disk**: 80 GB NVMe SSD
-- **Transfer**: 4 TB
-- **OS**: Ubuntu 24.04
+- **CPU**: 2 AMD vCPUs
+- **Disk**: 60 GB NVMe SSD
+- **Region**: SFO3
+- **OS**: Ubuntu 24.04 (LTS) x64
 
 ---
 
@@ -372,13 +372,13 @@ kubectl logs -n portfolio redpanda-0 -f
 ### Access Services via Port-Forward
 
 ```bash
-# API docs
+# API docs (bypasses nginx — direct tunnel to backend pod)
 kubectl port-forward -n portfolio svc/backend 8000:8000
 
-# MinIO console
+# MinIO console (bypasses nginx — direct tunnel to minio pod)
 kubectl port-forward -n portfolio svc/minio 9001:9001
 
-# Temporal UI
+# Temporal UI (bypasses nginx — direct tunnel to temporal-ui pod)
 kubectl port-forward -n portfolio svc/temporal-ui 8080:8080
 ```
 
@@ -483,10 +483,23 @@ sudo chown $(id -u):$(id -g) ~/.kube/config
 export KUBECONFIG=~/.kube/config
 ```
 
+### Stale PVC Data After Redeployment
+
+```bash
+# If PostgreSQL rejects passwords after a fresh deploy, old data survived cleanup.
+# local-path provisioner leaves data on disk even after namespace deletion.
+./cleanup.sh
+kubectl wait --for=delete namespace/portfolio --timeout=60s
+sudo rm -rf /var/lib/rancher/k3s/storage/*
+sudo ls /var/lib/rancher/k3s/storage/   # must be empty before proceeding
+./deploy-k3s-local.sh
+```
+
 ### Clean Restart
 
 ```bash
 ./cleanup.sh
+sudo rm -rf /var/lib/rancher/k3s/storage/*
 ./deploy-k3s-local.sh
 ```
 
@@ -532,6 +545,7 @@ export KUBECONFIG=~/.kube/config
 13. **Temporal child workflows**: Fire and forget pattern with ABANDON parent close policy — child runs independently after parent completes
 14. **TCP vs gRPC probes**: busybox nc for layer 4 TCP readiness check vs grpc_health_probe for layer 7
 15. **Structured logging**: Every log line including Temporal SDK internals and uncaught exceptions routed to JSON via structlog
+16. **pg_hba mixed auth policy**: Both SSL and non-SSL TCP accepted — encryption enforced at the application layer per service, not globally at the database
 
 ---
 
@@ -555,27 +569,41 @@ export KUBECONFIG=~/.kube/config
 
 ## Memory Budget (4GB Droplet)
 
+Actual measurements from `kubectl top pods` on a running cluster, alongside
+configured requests/limits. Use `kubectl top pods -n portfolio` to verify on your deployment.
+
 ```
-Component              Request    Limit
-──────────────────────────────────────
-k3s system             ~300MB     -
-PostgreSQL Primary      192MB     384MB
-PostgreSQL Replica      128MB     256MB
-Redis                    32MB      96MB
-MinIO                   128MB     256MB
-Image Service           384MB     768MB  (TensorFlow NSFW)
-Backend                 192MB     512MB
-Nginx                    32MB     128MB
-Redpanda                512MB     768MB
-Consumer                 64MB     128MB
-Temporal server         192MB     384MB
-Temporal UI              64MB     128MB
-Temporal worker         128MB     256MB
-──────────────────────────────────────
-Total Requests         ~2348MB
-Total Limits           ~4064MB
-Available               4096MB RAM + 2048MB swap
+Component              Actual     Request    Limit
+────────────────────────────────────────────────────
+k3s system             ~300MB     -          -
+postgres-primary        107Mi     192Mi      384Mi
+postgres-replica         35Mi     128Mi      256Mi
+redis                     5Mi      32Mi       96Mi
+minio                    91Mi     128Mi      256Mi
+image-service           399Mi     384Mi      768Mi   (TensorFlow NSFW)
+backend                  69Mi     192Mi      512Mi
+nginx                     7Mi      32Mi      128Mi
+redpanda                197Mi     512Mi      768Mi
+consumer                 28Mi      64Mi      128Mi
+temporal                149Mi     256Mi      512Mi
+temporal-ui               3Mi      64Mi      128Mi
+temporal-worker          ~50Mi    128Mi      256Mi   (estimated, not yet measured)
+────────────────────────────────────────────────────
+Current actual total   ~1140Mi
+Current node used       2.1Gi    (includes k3s overhead, kernel, buff/cache)
+Current node available  1.8Gi
+────────────────────────────────────────────────────
+Planned — Grafana stack (coming)
+  Prometheus            ~150Mi    200Mi      500Mi
+  Grafana               ~80Mi     100Mi      256Mi
+────────────────────────────────────────────────────
+Projected total requests        ~2448Mi
+Projected total limits          ~4820Mi
+Available                        4096Mi RAM + 2048Mi swap
 ```
 
-> Use `kubectl top pods -n portfolio` to see **actual** memory usage per pod.
-> `free -h` shows node-level RAM only — it does not break down per process.
+> The gap between actual (~1140Mi pods) and node used (~2.1Gi) is k3s system
+> processes, kernel buffers, and page cache — normal and expected.
+> Swap usage of ~106Mi is minimal, mostly Redpanda cold pages.
+> Image service is the heaviest pod at 399Mi actual — TensorFlow keeps the
+> model loaded in memory at all times.
