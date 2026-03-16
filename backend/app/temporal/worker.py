@@ -54,7 +54,7 @@ from app.temporal.workflows.workflow_test_async_exception import (
 )
 from app.temporal.workflows.workflow_test_core_logs import (
     TestCoreLogsWorkflow,
-    activity_timeout,
+    activity_core_log,
 )
 
 logger = structlog.get_logger(__name__)
@@ -82,7 +82,7 @@ async def run_worker() -> None:
             "send_mock_email_activity",
             "activity_sdk_log",
             "activity_fire_and_forget_bad_task",
-            "activity_timeout",
+            "activity_core_log",
         ],
     )
 
@@ -104,7 +104,7 @@ async def run_worker() -> None:
             send_mock_email_activity,
             activity_sdk_log,
             activity_fire_and_forget_bad_task,
-            activity_timeout,
+            activity_core_log,
         ],
     )
 

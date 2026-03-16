@@ -106,7 +106,7 @@ kubectl exec -n portfolio deployment/backend -- \
 kubectl logs -n portfolio deployment/temporal-worker -f
 #
 # Step 2 — in this terminal, trigger all four workflows:
-kubectl exec -n portfolio deployment/temporal-worker -- \
+kubectl exec -n portfolio deployment/backend -- \
   python -m app.temporal.workflows.test_sync_exception_standalone
 
 kubectl exec -n portfolio deployment/backend -- \
