@@ -21,20 +21,21 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 Browser → nginx (TLS) → FastAPI backend → PostgreSQL primary (writes)
                                         → PostgreSQL replica (reads)
                                         → Redis (cache + rate limiting)
                                         → MinIO (image storage)
-                                        → LibreTranslate (self-hosted translation)
+                                        → LibreTranslate (translation)
                                         → Image Service (NSFW detection)
 
-Login/Logout → Redpanda → Consumer Worker → Temporal → AuthEventWorkflow
-                                                      → SendNotificationWorkflow (child, fire-and-forget)
+Login/Logout → Redpanda → Consumer → Temporal → AuthEventWorkflow
+                                              → SendNotificationWorkflow
+                                                (child, fire-and-forget)
 
-temporal-worker pod → Promtail → Loki → Grafana
+temporal-worker → Promtail → Loki → Grafana
 ```
 
 ---
@@ -263,6 +264,7 @@ proveo/
 ## Contact
 
 **Andrés Olguín**
+
 Email: acos2014600836@gmail.com
 LinkedIn: https://www.linkedin.com/in/uwuolguin/
 GitHub: https://github.com/uwuolguin/
