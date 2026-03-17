@@ -15,6 +15,10 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 | [https://testproveoportfolio.xyz/front-page/front-page.html](https://testproveoportfolio.xyz/front-page/front-page.html) | Frontend |
 | `https://testproveoportfolio.xyz/grafana` | Grafana: live pipeline logs |
 
+**Try the live pipeline:** open Grafana first, then sign up and log in on the frontend, your login event will show up in the dashboard within seconds.
+
+**Grafana demo credentials:** username is always `demo`, today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID).
+
 **A few things to know before poking around:**
 - Email verification uses Resend free tier, delivery is not guaranteed. Company creation is restricted to admin-verified users for now, but you can sign up still
 - Private/incognito window recommended
