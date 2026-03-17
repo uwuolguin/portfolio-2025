@@ -371,6 +371,21 @@ fi
 echo ""
 
 # =============================================================================
+# Libretranslate
+# =============================================================================
+log_info "Deploying LibreTranslate (self-hosted translation)..."
+kubectl apply -f "$K8S_DIR/16-libretranslate.yaml"
+
+log_info "Waiting for LibreTranslate — first boot downloads language models, allow 2-3 minutes..."
+if ! wait_for_pods_ready "app=libretranslate" "portfolio" 300 "LibreTranslate"; then
+    log_warn "LibreTranslate not ready — translation will fall back to duplication"
+    log_warn "Check: kubectl logs -n portfolio -l app=libretranslate"
+    # Non-fatal: the backend handles translation failures gracefully
+    # by duplicating the source text for the missing language.
+fi
+echo ""
+
+# =============================================================================
 # Image Service
 # =============================================================================
 log_info "Deploying Image Service (NSFW enabled)..."
@@ -554,9 +569,9 @@ echo "  Consumer:            ~64-128MB"
 echo "  Temporal server:     ~192-384MB"
 echo "  Temporal UI:         ~64-128MB"
 echo "  Temporal worker:     ~128-256MB"
+echo "  LibreTranslate:      ~256-512MB (en+es models)"
 echo "  Grafana:             (coming soon)"
 echo "  ─────────────────────────────────"
-echo "  Total requests:     ~2348MB"
-echo "  Total limits:       ~4064MB"
+echo "  Total requests:     ~2604MB"
+echo "  Total limits:       ~4576MB"
 echo "  Available:           4096MB RAM + 2048MB swap"
-echo "============================================"
