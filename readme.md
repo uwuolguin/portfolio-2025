@@ -8,7 +8,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 
 ---
 
-## Live Demo
+## 🌎 Live Demo
 
 | URL | What |
 |-----|------|
@@ -28,6 +28,7 @@ Browser → nginx (TLS) → FastAPI backend → PostgreSQL primary (writes)
                                         → PostgreSQL replica (reads)
                                         → Redis (cache + rate limiting)
                                         → MinIO (image storage)
+                                        → LibreTranslate (self-hosted translation)
                                         → Image Service (NSFW detection)
 
 Login/Logout → Redpanda → Consumer Worker → Temporal → AuthEventWorkflow
@@ -38,43 +39,44 @@ temporal-worker pod → Promtail → Loki → Grafana
 
 ---
 
-## Stack
+## 🛠️ Stack
 
 ### Backend
-- **FastAPI 0.120** + **asyncpg 0.30**: async Python, raw SQL, no ORM
-- **Pydantic v2**: validation
-- **Alembic**: migrations
-- **structlog**: structured JSON logging throughout, including Temporal SDK internals and Rust core logs via `LogForwardingConfig`
-- **aiokafka**: Redpanda producer + consumer worker
-- **temporalio 1.7**: workflow SDK
+- **FastAPI 0.120** + **asyncpg 0.30** — async Python, raw SQL, no ORM
+- **Pydantic v2** — validation
+- **Alembic** — migrations
+- **structlog** — structured JSON logging throughout, including Temporal SDK internals and Rust core logs via `LogForwardingConfig`
+- **aiokafka** — Redpanda producer + consumer worker
+- **temporalio 1.7** — workflow SDK
 
 ### Frontend
-- **Vanilla ES6+**: no framework, no build pipeline
-- **DOMPurify 3.0.8**: XSS sanitization wired in, currently dormant (all DOM writes go through `textContent`)
-- **ES modules**: native browser imports, component-per-file
+- **Vanilla ES6+** — no framework, no build pipeline
+- **DOMPurify 3.0.8** — XSS sanitization wired in, currently dormant (all DOM writes go through `textContent`)
+- **ES modules** — native browser imports, component-per-file
 
 ### Infrastructure
-- **PostgreSQL 16**: primary/replica streaming replication, pg_cron, pg_trgm, materialized views
-- **Redis 7**: caching (3-day TTL, LRU eviction, 64MB limit)
-- **MinIO**: S3-compatible object storage, self-hosted
-- **Redpanda v24.2**: Kafka-compatible broker, StatefulSet, persistent storage
-- **Temporal 1.24**: durable workflow execution, PostgreSQL persistence
-- **k3s**: single-node Kubernetes
-- **Nginx**: TLS termination, HTTP→HTTPS redirect, HTTP/2, gzip, rate limiting, security headers
-- **Let's Encrypt**: automated TLS via certbot, auto-renewed via cron
+- **PostgreSQL 16** — primary/replica streaming replication, pg_cron, pg_trgm, materialized views
+- **Redis 7** — caching (3-day TTL, LRU eviction, 64MB limit)
+- **MinIO** — S3-compatible object storage, self-hosted
+- **LibreTranslate** — self-hosted translation, ES↔EN only (`LT_LOAD_ONLY=en,es`)
+- **Redpanda v24.2** — Kafka-compatible broker, StatefulSet, persistent storage
+- **Temporal 1.24** — durable workflow execution, PostgreSQL persistence
+- **k3s** — single-node Kubernetes
+- **Nginx** — TLS termination, HTTP→HTTPS redirect, HTTP/2, gzip, rate limiting, security headers
+- **Let's Encrypt** — automated TLS via certbot, auto-renewed via cron
 
 ### Observability
-- **Grafana**: live dashboard, publicly accessible with rotating demo credentials
-- **Loki**: log aggregation
-- **Promtail**: scrapes `temporal-worker` pod logs only, routes to Loki
+- **Grafana** — live dashboard, publicly accessible with rotating demo credentials
+- **Loki** — log aggregation
+- **Promtail** — scrapes `temporal-worker` pod logs only, routes to Loki
 
 ### AI/ML
-- **TensorFlow 2.15** + **OpenNSFW2**: NSFW content detection on upload
-- **Pillow**: image validation and optimization
+- **TensorFlow 2.15** + **OpenNSFW2** — NSFW content detection on upload
+- **Pillow** — image validation and optimization
 
 ---
 
-## How Things Work
+## 🔍 How Things Work
 
 ### PostgreSQL Replication
 Write pool connects to `postgres-primary`, read pool connects to `postgres-replica`. On startup the app calls `pg_is_in_recovery()` to verify the replica is actually in standby mode and falls back to primary for reads if it isn't.
@@ -112,7 +114,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 ---
 
-## Known Gaps
+## ⚠️ Known Gaps
 
 - One environment. No dev/staging split.
 - CI/CD is scoped to `prod-*` commit prefixes via GitHub Actions: not a full pipeline.
@@ -122,7 +124,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 ---
 
-## Pod Breakdown (4GB Droplet)
+## 📦 Pod Breakdown (4GB Droplet)
 
 | Pod | Manifest | Actual RAM |
 |-----|----------|-----------|
@@ -138,13 +140,14 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 | `temporal-*` | `14-temporal.yaml` | ~149Mi |
 | `temporal-ui-*` | `14-temporal.yaml` | ~3Mi |
 | `temporal-worker-*` | `15-temporal-worker.yaml` | ~50Mi |
+| `libretranslate-*` | `16-libretranslate.yaml` | ~300Mi |
 | `loki-*` | `17-monitoring.yaml` | ~128Mi |
 | `promtail-*` | `17-monitoring.yaml` | ~64Mi |
 | `grafana-*` | `17-monitoring.yaml` | ~128Mi |
 
 ---
 
-## Quick Local Preview
+## 🚀 Quick Local Preview
 
 The full production stack runs on Kubernetes — see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no NSFW model, no k8s), use this earlier snapshot:
 
@@ -182,7 +185,7 @@ For HTTPS first: **[SSL Setup Guide](./SSL_SETUP.md)**.
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 proveo/
@@ -195,7 +198,7 @@ proveo/
 │   │   ├── database/            # Read/write pools, transactions
 │   │   ├── routers/             # API endpoints
 │   │   ├── auth/                # JWT + CSRF
-│   │   ├── services/            # Image processing, email
+│   │   ├── services/            # Image processing, email, translation, circuit breaker
 │   │   ├── schemas/             # Pydantic models
 │   │   ├── middleware/          # CORS, logging, security
 │   │   ├── redis/               # Cache, rate limiting
