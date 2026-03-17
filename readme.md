@@ -261,7 +261,7 @@ proveo/
 
 ---
 
-## Contact
+## 📬 Contact
 
 **Andrés Olguín**
 
