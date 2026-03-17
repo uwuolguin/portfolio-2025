@@ -67,3 +67,6 @@ data:
   # Kafka / Temporal
   BOOTSTRAP_SERVERS: "redpanda:9092"
   TEMPORAL_HOST: "temporal:7233"
+
+  # Translation
+  LIBRETRANSLATE_URL: "http://libretranslate:5000"

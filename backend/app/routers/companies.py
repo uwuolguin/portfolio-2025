@@ -157,15 +157,6 @@ async def search_companies(
         search_query = normalize_whitespace(q) if q else ""
         commune_filter = normalize_whitespace(commune) if commune else None
         product_filter = normalize_whitespace(product) if product else None
-        logger.info(f"q: {q}")
-        logger.info(f"commune: {commune}")
-        logger.info(f"product: {product}")
-        logger.info(f"lang: {lang}")
-        logger.info(f"limit: {limit}")
-        logger.info(f"offset: {offset}")
-        logger.info(f"search_query: {search_query}")
-        logger.info(f"commune_filter: {commune_filter}")
-        logger.info(f"product_filter: {product_filter}")
         return await DB.search_companies(
             conn=db,
             query=search_query,
@@ -555,10 +546,11 @@ async def update_my_company(
             response_dict = company_with_relations.model_dump()
             return CompanyResponse(**response_dict)
         
-        # Fallback
-        response_dict = updated_company.model_dump()
-        return CompanyResponse(**response_dict)
-        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Company updated but failed to retrieve"
+        )
+                
     except (NotFoundError, ValidationError, ServiceUnavailableError):
         raise
     except Exception as e:
@@ -630,10 +622,6 @@ async def admin_list_companies(
         result = []
         for company in companies:
             response_dict = company.model_dump()
-            response_dict["image_url"] = image_service_client.build_image_url(
-                company.image_url,
-                company.image_extension,
-            )
             result.append(CompanyResponse(**response_dict))
         
         logger.info("admin_list_companies", admin_email=current_user["email"], companies_count=len(result))

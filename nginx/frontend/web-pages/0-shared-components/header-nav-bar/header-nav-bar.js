@@ -1,30 +1,16 @@
-import { getInternalUrl,getLoginState, getLanguage, getCompanyPublishState, setLanguage, setLoginState, checkAuthStatus, checkCompanyStatus } from '../utils/shared-functions.js';
+import { getInternalUrl, getLoginState, getLanguage, getCompanyPublishState, setLanguage, setLoginState, checkAuthStatus, checkCompanyStatus } from '../utils/shared-functions.js';
 
-// ============================================
-// ASYNC INITIALIZATION ON PAGE LOAD
-// ============================================
 document.addEventListener('DOMContentLoaded', async () => {
-    // STEP 1: Check authentication status by calling the backend
     const isLoggedIn = await checkAuthStatus();
-    
-    // STEP 2: If logged in, check if user has a published company
     if (isLoggedIn) {
         await checkCompanyStatus();
     }
-    
-    // STEP 3: Now that we have accurate state, render the navigation bar
     renderNav();
-    
-    // STEP 4: Listen for state changes (from other tabs or same tab)
     document.addEventListener('stateChange', () => {
-        console.log('[Nav] State changed, re-rendering navigation');
         renderNav();
     });
 });
 
-// ============================================
-// TRANSLATIONS
-// ============================================
 const translations = {
     es: {
         profileView: "Ver perfil",
@@ -48,53 +34,41 @@ const translations = {
     }
 };
 
-// ============================================
-// RENDER NAVIGATION BAR
-// ============================================
 function renderNav() {
     const navContainer = document.getElementById('nav-container-component');
     const lang = getLanguage();
     const isLoggedIn = getLoginState();
     const hasCompany = getCompanyPublishState();
 
-    // Clear container safely
     navContainer.textContent = '';
 
-    // Create nav element
     const nav = document.createElement('nav');
     nav.className = 'nav-container-flex-container';
 
-    // Logo container
     const logoContainer = document.createElement('div');
     logoContainer.className = 'nav-container-logo-container';
-    
     const logoLink = document.createElement('a');
     logoLink.href = getInternalUrl('/front-page/front-page.html');
-    
     const logoImg = document.createElement('img');
     logoImg.src = '/files/logos/logoSVG.svg';
     logoImg.alt = 'Proveo Logo';
-    
     logoLink.appendChild(logoImg);
     logoContainer.appendChild(logoLink);
     nav.appendChild(logoContainer);
 
-    // Navigation menu
     const ul = document.createElement('ul');
     ul.className = 'nav-container-ul';
 
     if (isLoggedIn) {
-        // Profile link
         const profileLi = document.createElement('li');
         profileLi.className = 'nav-container-li';
         const profileLink = document.createElement('a');
-        profileLink.href = getInternalUrl('/profile-view/profile-view.html');               
+        profileLink.href = getInternalUrl('/profile-view/profile-view.html');
         profileLink.className = 'nav-container-a';
         profileLink.textContent = translations[lang].profileView;
         profileLi.appendChild(profileLink);
         ul.appendChild(profileLi);
 
-        // Edit company OR publish link
         if (hasCompany) {
             const editLi = document.createElement('li');
             editLi.className = 'nav-container-li';
@@ -115,7 +89,6 @@ function renderNav() {
             ul.appendChild(publishLi);
         }
 
-        // Logout link
         const logoutLi = document.createElement('li');
         logoutLi.className = 'nav-container-li';
         const logoutLink = document.createElement('a');
@@ -125,7 +98,6 @@ function renderNav() {
         logoutLi.appendChild(logoutLink);
         ul.appendChild(logoutLi);
     } else {
-        // Register link
         const registerLi = document.createElement('li');
         registerLi.className = 'nav-container-li';
         const registerLink = document.createElement('a');
@@ -135,7 +107,6 @@ function renderNav() {
         registerLi.appendChild(registerLink);
         ul.appendChild(registerLi);
 
-        // Login link
         const loginLi = document.createElement('li');
         loginLi.className = 'nav-container-li';
         const loginLink = document.createElement('a');
@@ -146,19 +117,15 @@ function renderNav() {
         ul.appendChild(loginLi);
     }
 
-    // Language toggle (always shown)
     const langLi = document.createElement('li');
     langLi.className = 'nav-container-li lang-toggle';
-    
     const langBtn = document.createElement('button');
     langBtn.id = 'lang-btn';
     langBtn.className = 'lang-btn';
-    
     const langImg = document.createElement('img');
     langImg.src = translations[lang].img;
     langImg.alt = translations[lang].flag;
     langImg.className = 'lang-flag';
-    
     langBtn.appendChild(langImg);
     langLi.appendChild(langBtn);
     ul.appendChild(langLi);
@@ -167,14 +134,10 @@ function renderNav() {
     navContainer.appendChild(nav);
 }
 
-// ============================================
-// EVENT HANDLERS
-// ============================================
 document.addEventListener('DOMContentLoaded', () => {
     const navContainer = document.getElementById('nav-container-component');
-    
+
     navContainer.addEventListener("click", async (e) => {
-        // Handle language toggle
         const btn = e.target.closest("#lang-btn");
         if (btn) {
             const currentLang = getLanguage();
@@ -183,12 +146,10 @@ document.addEventListener('DOMContentLoaded', () => {
             renderNav();
             return;
         }
-        
-        // Handle logout
+
         const logoutLink = e.target.closest('.logout-link');
         if (logoutLink) {
             e.preventDefault();
-            
             try {
                 const response = await fetch('/api/v1/users/logout', {
                     method: 'POST',
@@ -199,15 +160,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     },
                     body: JSON.stringify({ lang: getLanguage() })
                 });
-                
                 if (response.ok) {
-                    // Clear all authentication data
                     setLoginState(false);
                     window.location.href = getInternalUrl('/front-page/front-page.html');
                 }
             } catch (error) {
                 console.error('Logout error:', error);
-                // Force logout even if request fails
                 setLoginState(false);
                 window.location.href = getInternalUrl('/front-page/front-page.html');
             }

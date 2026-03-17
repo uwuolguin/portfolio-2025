@@ -1,0 +1,167 @@
+---
+# =============================================================================
+# 16-libretranslate.yaml — Self-hosted translation service
+#
+# Replaces the previous dependency on the unofficial Google Translate
+# scraping endpoint (translate.googleapis.com/translate_a/single with
+# client=gtx). That endpoint is undocumented, rate-limited, and can
+# be killed without notice.
+#
+# LibreTranslate is open source, runs fully offline after model download,
+# and exposes a documented REST API at /translate.
+#
+# LT_LOAD_ONLY=en,es loads only the two language models this application
+# uses. Without this flag the container downloads all ~20 language models
+# on first boot (~4GB). With it, startup completes in under 2 minutes and
+# memory footprint stays around 300Mi.
+#
+# API usage:
+#   POST /translate
+#   {"q": "hola", "source": "es", "target": "en", "format": "text"}
+#   → {"translatedText": "hello"}
+#
+# The backend reaches this service at http://libretranslate:5000.
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: libretranslate
+  namespace: portfolio
+  labels:
+    app: libretranslate
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5000
+      targetPort: 5000
+      protocol: TCP
+      name: http
+  selector:
+    app: libretranslate
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: libretranslate
+  namespace: portfolio
+  labels:
+    app: libretranslate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: libretranslate
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: libretranslate
+    spec:
+      # Model files are downloaded on first boot into the languages volume.
+      # Subsequent restarts skip the download and start immediately.
+      # Without persistence the container re-downloads ~200MB of en+es
+      # models on every pod restart.
+      initContainers:
+        - name: wait-for-models
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "LibreTranslate model init will happen in main container"
+              echo "This init container just delays startup to avoid probe failures"
+              sleep 5
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"
+
+      containers:
+        - name: libretranslate
+          image: libretranslate/libretranslate:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+              name: http
+          env:
+            # Only load English and Spanish models.
+            # Saves ~3.8GB of download and ~1GB of runtime memory
+            # compared to loading all supported languages.
+            - name: LT_LOAD_ONLY
+              value: "en,es"
+            # Disable the web UI — this pod is API-only, internal traffic only
+            - name: LT_DISABLE_WEB_UI
+              value: "true"
+            # No API key required — this is internal cluster traffic only,
+            # not exposed through nginx. If you expose it externally, set
+            # LT_API_KEYS=true and manage keys separately.
+            - name: LT_API_KEYS
+              value: "false"
+            # Bind on all interfaces inside the container
+            - name: LT_HOST
+              value: "0.0.0.0"
+            - name: LT_PORT
+              value: "5000"
+
+          # First boot downloads language models — takes 60-90s.
+          # Subsequent boots use the cached models from the volume.
+          # initialDelaySeconds is set conservatively to cover first boot.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "50m"
+            limits:
+              # en+es models fit in ~300Mi at runtime.
+              # 512Mi limit gives headroom for translation requests.
+              memory: "512Mi"
+              cpu: "500m"
+
+          volumeMounts:
+            - name: libretranslate-models
+              mountPath: /home/libretranslate/.local/share/argos-translate/packages
+
+      volumes:
+        - name: libretranslate-models
+          persistentVolumeClaim:
+            claimName: libretranslate-models-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: libretranslate-models-data
+  namespace: portfolio
+  labels:
+    app: libretranslate
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path

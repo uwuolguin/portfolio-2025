@@ -1,11 +1,4 @@
-#Running all the commented commands below in powershell in windows delete everything for real in docker
-#docker compose down -v --remove-orphans
-#docker ps -aq | % { docker rm -f $_ }
-#docker images -aq | % { docker rmi -f $_ }
-#docker volume ls -q | % { docker volume rm -f $_ }
-#docker network ls -q | % { docker network rm $_ }
-#docker builder prune -a -f
-#docker system prune -a -f --volumes
+#This file is just for reference, not being used as of now
 services:
   postgres-certgen:
     image: alpine:3.20
@@ -124,6 +117,30 @@ services:
       timeout: 5s
       retries: 5
 
+  # Self-hosted translation service — replaces the unofficial Google Translate
+  # scraping endpoint. LT_LOAD_ONLY=en,es downloads only the two language
+  # models this application uses (~200MB vs ~4GB for all languages).
+  # First boot takes 60-90s while models download. Subsequent starts are fast.
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: portfolio-libretranslate
+    environment:
+      LT_LOAD_ONLY: "en,es"
+      LT_DISABLE_WEB_UI: "true"
+      LT_API_KEYS: "false"
+      LT_HOST: "0.0.0.0"
+      LT_PORT: "5000"
+    volumes:
+      - libretranslate_models:/home/libretranslate/.local/share/argos-translate/packages
+    networks:
+      - portfolio-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
   backend:
     build:
       context: ./backend
@@ -136,6 +153,10 @@ services:
         condition: service_healthy
       image-service:
         condition: service_healthy
+      libretranslate:
+        condition: service_healthy
+    environment:
+      LIBRETRANSLATE_URL: "http://libretranslate:5000"
     networks:
       - portfolio-network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -163,6 +184,7 @@ volumes:
   postgres_certs:
   redis_data:
   minio_data:
+  libretranslate_models:
 
 networks:
   portfolio-network:

@@ -22,12 +22,11 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     # Database
     # ------------------------------------------------------------------------
-    database_url: str  # Points to postgres-primary (legacy, kept for compatibility)
-    database_url_primary: str  # Write operations
-    database_url_replica: str  # Read operations
-    alembic_database_url: str  # Migrations - always primary
-    
-    # Pool settings
+    database_url: str
+    database_url_primary: str
+    database_url_replica: str
+    alembic_database_url: str
+
     db_pool_min_size: int = 5
     db_pool_max_size: int = 20
     db_pool_max_queries: int = 50_000
@@ -72,6 +71,13 @@ class Settings(BaseSettings):
     max_retries: int = 3
     max_connections: int = 100
     max_keepalive_connections: int = 20
+
+    # ------------------------------------------------------------------------
+    # Translation — self-hosted LibreTranslate
+    # Internal cluster DNS. Override via LIBRETRANSLATE_URL env var if pointing
+    # at an external instance.
+    # ------------------------------------------------------------------------
+    libretranslate_url: str = "http://libretranslate:5000"
 
     # ------------------------------------------------------------------------
     # API
@@ -121,5 +127,6 @@ class Settings(BaseSettings):
     # Temporal
     # ------------------------------------------------------------------------
     temporal_host: str = "temporal:7233"
+
 
 settings = Settings()
