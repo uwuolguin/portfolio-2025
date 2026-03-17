@@ -115,7 +115,7 @@ Certbot provisions Let's Encrypt certs on the droplet, they get copied to `/home
 Every caught exception across every service is JSON via structlog. In the `temporal-worker` pod specifically, uncaught exceptions are also captured as JSON: asyncio loop exceptions via `install_async_exception_handler` and synchronous crashes via `sys.excepthook`. Temporal SDK Python-side logs and Rust core logs are routed through `LogForwardingConfig` and formatted as JSON in that same pod. Gaps: threads, multiprocessing, and OS-level errors that occur before the asyncio worker starts (such as missing env vars resolved at import time) are not guaranteed to be JSON. The `temporal-worker` pod logs are scraped by Promtail and indexed in Loki: queryable live in Grafana.
 
 ### Frontend
-Vanilla ES6+, no framework, no build step. Components rebuild on state change by clearing and reconstructing the DOM, straightforward and fast for this scale. The known roughness is the language toggle refetching bilingual data that's already in memory; the data model already has both `name_es` and `name_en` in every response so the fix is trivial, marked for refactoring.
+Vanilla ES6+, no framework, no build step. Components rebuild on state change by clearing and reconstructing the DOM, straightforward and fast for this scale.
 
 ---
 
@@ -125,7 +125,6 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 - CI/CD is scoped to `prod-*` commit prefixes via GitHub Actions: not a full pipeline.
 - No backups. Local-path PVCs on one node: if the droplet dies, data goes with it.
 - `force_rollback` on DB methods is a testing convenience, not a production pattern.
-- Frontend language toggle refetches data already in memory: marked for refactoring.
 
 ---
 
