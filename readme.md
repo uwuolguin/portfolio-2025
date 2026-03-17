@@ -4,7 +4,7 @@ A full-stack marketplace platform consolidating five years of professional exper
 
 The domain is a B2B marketplace where companies list their services. Simple enough to build as a side project, with enough operational surface area to make the infrastructure decisions meaningful.
 
-Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/staging split, one environment, manual deploys — except for commits prefixed with `prod-`, which trigger a GitHub Actions pipeline that runs the deployment scripts automatically.
+Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/staging split, one environment, manual deploys, except for commits prefixed with `prod-`, which trigger a GitHub Actions pipeline that runs the deployment scripts automatically.
 
 ---
 
@@ -16,7 +16,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 | `https://testproveoportfolio.xyz/grafana` | Grafana: live pipeline logs |
 
 **A few things to know before poking around:**
-- Email verification uses Resend free tier — delivery is not guaranteed. Company creation is restricted to admin-verified users for now, but you can sign up still
+- Email verification uses Resend free tier, delivery is not guaranteed. Company creation is restricted to admin-verified users for now, but you can sign up still
 - Private/incognito window recommended
 
 ---
@@ -43,37 +43,37 @@ temporal-worker → Promtail → Loki → Grafana
 ## 🛠️ Stack
 
 ### Backend
-- **FastAPI 0.120** + **asyncpg 0.30** — async Python, raw SQL, no ORM
-- **Pydantic v2** — validation
-- **Alembic** — migrations
-- **structlog** — structured JSON logging throughout, including Temporal SDK internals and Rust core logs via `LogForwardingConfig`
-- **aiokafka** — Redpanda producer + consumer worker
-- **temporalio 1.7** — workflow SDK
+- **FastAPI 0.120** + **asyncpg 0.30**: async Python, raw SQL, no ORM
+- **Pydantic v2**: validation
+- **Alembic**: migrations
+- **structlog**: structured JSON logging throughout, including Temporal SDK internals and Rust core logs via `LogForwardingConfig`
+- **aiokafka**: Redpanda producer + consumer worker
+- **temporalio 1.7**: workflow SDK
 
 ### Frontend
-- **Vanilla ES6+** — no framework, no build pipeline
-- **DOMPurify 3.0.8** — XSS sanitization wired in, currently dormant (all DOM writes go through `textContent`)
-- **ES modules** — native browser imports, component-per-file
+- **Vanilla ES6+**: no framework, no build pipeline
+- **DOMPurify 3.0.8**: XSS sanitization wired in, currently dormant (all DOM writes go through `textContent`)
+- **ES modules**: native browser imports, component-per-file
 
 ### Infrastructure
-- **PostgreSQL 16** — primary/replica streaming replication, pg_cron, pg_trgm, materialized views
-- **Redis 7** — caching (3-day TTL, LRU eviction, 64MB limit)
-- **MinIO** — S3-compatible object storage, self-hosted
-- **LibreTranslate** — self-hosted translation, ES↔EN only (`LT_LOAD_ONLY=en,es`)
-- **Redpanda v24.2** — Kafka-compatible broker, StatefulSet, persistent storage
-- **Temporal 1.24** — durable workflow execution, PostgreSQL persistence
-- **k3s** — single-node Kubernetes
-- **Nginx** — TLS termination, HTTP→HTTPS redirect, HTTP/2, gzip, rate limiting, security headers
-- **Let's Encrypt** — automated TLS via certbot, auto-renewed via cron
+- **PostgreSQL 16**: primary/replica streaming replication, pg_cron, pg_trgm, materialized views
+- **Redis 7**: caching (3-day TTL, LRU eviction, 64MB limit)
+- **MinIO**: S3-compatible object storage, self-hosted
+- **LibreTranslate**: self-hosted translation, ES↔EN only (`LT_LOAD_ONLY=en,es`)
+- **Redpanda v24.2**: Kafka-compatible broker, StatefulSet, persistent storage
+- **Temporal 1.24**: durable workflow execution, PostgreSQL persistence
+- **k3s**: single-node Kubernetes
+- **Nginx**: TLS termination, HTTP→HTTPS redirect, HTTP/2, gzip, rate limiting, security headers
+- **Let's Encrypt**: automated TLS via certbot, auto-renewed via cron
 
 ### Observability
-- **Grafana** — live dashboard, publicly accessible with rotating demo credentials
-- **Loki** — log aggregation
-- **Promtail** — scrapes `temporal-worker` pod logs only, routes to Loki
+- **Grafana**: live dashboard, publicly accessible with rotating demo credentials
+- **Loki**: log aggregation
+- **Promtail**: scrapes `temporal-worker` pod logs only, routes to Loki
 
 ### AI/ML
-- **TensorFlow 2.15** + **OpenNSFW2** — NSFW content detection on upload
-- **Pillow** — image validation and optimization
+- **TensorFlow 2.15** + **OpenNSFW2**: NSFW content detection on upload
+- **Pillow**: image validation and optimization
 
 ---
 
@@ -86,7 +86,7 @@ Write pool connects to `postgres-primary`, read pool connects to `postgres-repli
 Materialized view (`proveo.company_search`) with a GIN trigram index. Short queries (`< 4 chars`) use `ILIKE`, longer ones use `similarity()` scoring. pg_cron refreshes the view every minute with `REFRESH MATERIALIZED VIEW CONCURRENTLY` so reads are never blocked.
 
 ### Image Service
-Separate microservice with its own Dockerfile and deployment. Validates format, dimensions, and NSFW score before writing to MinIO. Circuit breaker pattern prevents cascade failures if the service is unavailable. Images stream directly — no full file buffering in the backend.
+Separate microservice with its own Dockerfile and deployment. Validates format, dimensions, and NSFW score before writing to MinIO. Circuit breaker pattern prevents cascade failures if the service is unavailable. Images stream directly, no full file buffering in the backend.
 
 ### Kafka + Temporal Pipeline
 Login and logout events publish to Redpanda, partitioned by language (`es → 0`, `en → 1`). A consumer worker routes them to Temporal's `AuthEventWorkflow`, which logs the event and fires a child `SendNotificationWorkflow` with ABANDON policy: the child keeps running after the parent completes.
@@ -94,7 +94,7 @@ Login and logout events publish to Redpanda, partitioned by language (`es → 0`
 The workload running through it is simple (structured log + mock email) but the wiring is real: explicit partition routing, manual offset commits for at-least-once delivery, deterministic workflow IDs so duplicate Kafka delivery doesn't execute the workflow twice, fire-and-forget child workflows. Swap the mock email activity for a real one and the pipeline is production-ready.
 
 ### Live Pipeline Verification: Grafana
-Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials — username is always `demo`, today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID). Then create an account on the demo site and log in. The event shows up in the dashboard within seconds.
+Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials, username is always `demo`, today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID). Then create an account on the demo site and log in. The event shows up in the dashboard within seconds.
 
 What you'll see:
 - The JSON log line with `user_uuid`, `email`, `lang`, `event_type`, `partition`, `offset`
@@ -111,7 +111,7 @@ Certbot provisions Let's Encrypt certs on the droplet, they get copied to `/home
 Every caught exception across every service is JSON via structlog. In the `temporal-worker` pod specifically, uncaught exceptions are also captured as JSON: asyncio loop exceptions via `install_async_exception_handler` and synchronous crashes via `sys.excepthook`. Temporal SDK Python-side logs and Rust core logs are routed through `LogForwardingConfig` and formatted as JSON in that same pod. Gaps: threads, multiprocessing, and OS-level errors that occur before the asyncio worker starts (such as missing env vars resolved at import time) are not guaranteed to be JSON. The `temporal-worker` pod logs are scraped by Promtail and indexed in Loki: queryable live in Grafana.
 
 ### Frontend
-Vanilla ES6+, no framework, no build step. Components rebuild on state change by clearing and reconstructing the DOM — straightforward and fast for this scale. The known roughness is the language toggle refetching bilingual data that's already in memory; the data model already has both `name_es` and `name_en` in every response so the fix is trivial, marked for refactoring.
+Vanilla ES6+, no framework, no build step. Components rebuild on state change by clearing and reconstructing the DOM, straightforward and fast for this scale. The known roughness is the language toggle refetching bilingual data that's already in memory; the data model already has both `name_es` and `name_en` in every response so the fix is trivial, marked for refactoring.
 
 ---
 
@@ -150,7 +150,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 ## 🚀 Quick Local Preview
 
-The full production stack runs on Kubernetes — see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no NSFW model, no k8s), use this earlier snapshot:
+The full production stack runs on Kubernetes, see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no NSFW model, no k8s), use this earlier snapshot:
 
 ```bash
 # 1. Clone repository
@@ -266,5 +266,7 @@ proveo/
 **Andrés Olguín**
 
 Email: acos2014600836@gmail.com
+
 LinkedIn: https://www.linkedin.com/in/uwuolguin/
+
 GitHub: https://github.com/uwuolguin/
