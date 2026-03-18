@@ -21,7 +21,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 
 **A few things to know before poking around:**
 - Email verification uses the Resend free tier, so only the email acos2014600836@gmail.com can receive the verification link. Company creation is restricted to admin-verified users for now, but you can still sign up.
-- Private/incognito window recommended
+- Private/incognito window recommended. Use passwords that do not relate to the ones you normally use, even though passwords are hashed.
 
 ---
 
