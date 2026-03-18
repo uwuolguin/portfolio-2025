@@ -20,7 +20,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 **Grafana demo credentials:** username is always `demo`, today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID).
 
 **A few things to know before poking around:**
-- Email verification uses Resend free tier, delivery is not guaranteed. Company creation is restricted to admin-verified users for now, but you can sign up still
+- Email verification uses the Resend free tier, so only the email acos2014600836@gmail.com can receive the verification link. Company creation is restricted to admin-verified users for now, but you can still sign up.
 - Private/incognito window recommended
 
 ---
