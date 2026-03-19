@@ -12,6 +12,7 @@ export default [
       sourceType: "module",
       globals: {
         ...globals.browser,
+        DOMPurify: "readonly",
       },
     },
     rules: {
