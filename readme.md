@@ -4,7 +4,7 @@ A full-stack marketplace platform consolidating five years of professional exper
 
 The domain is a B2B marketplace where companies list their services. Simple enough to build as a side project, with enough operational surface area to make the infrastructure decisions meaningful.
 
-Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/staging split, one environment, manual deploys, except for commits prefixed with `prod-`, which trigger a GitHub Actions pipeline that runs the deployment scripts automatically. The prefix-based trigger was a deliberate choice: it avoids burning GitHub Actions minutes on work-in-progress commits and prevents unnecessary pod restarts on a resource-constrained single-node cluster.
+Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/staging split, one environment, manual deploys, except for commits prefixed with `prod-`, which trigger a GitHub Actions pipeline that runs the deployment scripts automatically. The prefix-based trigger avoids burning GitHub Actions minutes on work-in-progress commits.
 
 ---
 
