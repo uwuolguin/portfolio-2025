@@ -40,7 +40,7 @@ Browser
    ▼
 nginx (TLS · HTTP→HTTPS · rate limiting · security headers)
    │
-├──▶ /api/*        FastAPI backend
+   ├──▶ /api/*        FastAPI backend
    │                     ├── PostgreSQL primary           writes, DDL, pg_cron, WAL streaming
    │                     ├── PostgreSQL replica           reads, hot standby
    │                     ├── Redis                        cache (allkeys-LRU, 64 MB) + rate limiting
