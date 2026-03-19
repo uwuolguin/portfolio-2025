@@ -1,0 +1,25 @@
+name: Lint Image Service
+
+on: [push]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pylint
+          pip install fastapi uvicorn minio structlog python-multipart pydantic pydantic-settings Pillow
+
+      - name: Run pylint
+        run: |
+          pylint image-service/main.py image-service/config.py image-service/image_validator.py --fail-under=7
+          
