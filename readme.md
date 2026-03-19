@@ -32,7 +32,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 
 ### 🧩 Services Overview
 
-> Every service runs inside a single Kubernetes namespace (`portfolio`) on k3s, connected via ClusterIP — nothing reaches the internet except through nginx.
+> Every service runs inside a single Kubernetes namespace (portfolio) on k3s, connected via ClusterIP. Nothing reaches the internet except through nginx.
 
 ```
 Browser
@@ -65,13 +65,13 @@ FastAPI backend (uvicorn, 1 worker — pinned to minimize RAM footprint on 4GB n
 | **PostgreSQL primary** | Write database | pg_cron, scram-sha-256, SSL, WAL level `replica` |
 | **PostgreSQL replica** | Read database | Streams WAL from primary via replication slot; `hot_standby = on` |
 | **Redis** | Cache | TTL-based invalidation; LRU eviction under memory pressure |
-| **MinIO** | Object storage | Bucket `images`; accessed internally — never exposed through nginx directly |
+| **MinIO** | Object storage | Bucket `images`; accessed internally, never exposed through nginx directly | Bucket images; 
 | **Image Service** | Content moderation | Intercepts uploads, runs TensorFlow model, rejects or stores in MinIO |
 | **LibreTranslate** | Translation | `LT_LOAD_ONLY=en,es` keeps memory at ~300 MB; fully offline after model download |
 
 ---
 
-### ⚡ End-to-End Event Flow — Auth Event Pipeline
+### ⚡ End-to-End Event Flow: Auth Event Pipeline
 
 > A user logs in or out → the event travels through four decoupled layers before producing a structured audit log and a (mock) notification email. Zero synchronous coupling between any of them.
 
@@ -120,13 +120,13 @@ Temporal worker (portfolio-backend image, different CMD)
       │                                         default datasource
       │
       └──▶  send_mock_email_activity  (fire-and-forget child workflow)
-              logs what WOULD be sent — swap for real Resend call in production
+              logs what WOULD be sent; swap for real Resend call in production
 ```
 
 **Why each layer exists:**
 
-- **Redpanda** decouples the HTTP request from all downstream processing — the API response returns instantly; the event pipeline runs asynchronously.
-- **Consumer → Temporal hand-off** makes the workflow durable. If the Temporal server restarts mid-execution, the workflow resumes from the last checkpoint — no event is lost.
+- **Redpanda** decouples the HTTP request from all downstream processing. The API response returns instantly; the event pipeline runs asynchronously.
+- **Consumer → Temporal hand-off** makes the workflow durable. If the Temporal server restarts mid-execution, the workflow resumes from the last checkpoint. No event is lost.
 - **Temporal** provides retries, timeouts, and full execution history without any custom retry logic in application code.
 - **Promtail → Loki → Grafana** gives observability into workflow execution without instrumenting the application beyond `structlog` JSON output.
 
@@ -183,10 +183,10 @@ Separate microservice with its own Dockerfile and deployment. Validates format, 
 ### Kafka + Temporal Pipeline
 Login and logout events publish to Redpanda, partitioned by language (`es → 0`, `en → 1`) to demonstrate deterministic routing and consumer locality. In a high-scale production environment, `user_uuid` would be used instead to ensure even distribution across partitions. A consumer worker routes events to Temporal's `AuthEventWorkflow`, which logs the event and fires a child `SendNotificationWorkflow` with **ABANDON policy**: the child keeps running after the parent completes.
 
-Events are published via `asyncio.create_task` for sub-millisecond API response times — the HTTP response returns before Redpanda acknowledgment. For critical-path events where zero-loss is mandated over latency, `await` would be used to ensure delivery before responding. The rest of the wiring is production-grade: explicit partition routing, **manual offset commits** for **at-least-once delivery**, **deterministic workflow IDs** so duplicate Kafka delivery doesn't execute the workflow twice, fire-and-forget child workflows. Swap the mock email activity for a real one and the pipeline is production-ready.
+Events are published via `asyncio.create_task` for sub-millisecond API response times. The HTTP response returns before Redpanda acknowledgment. For critical-path events where zero-loss is mandated over latency, `await` would be used to ensure delivery before responding. The rest of the wiring is production-grade: explicit partition routing, **manual offset commits** for **at-least-once delivery**, **deterministic workflow IDs** so duplicate Kafka delivery doesn't execute the workflow twice, fire-and-forget child workflows. Swap the mock email activity for a real one and the pipeline is production-ready.
 
 ### Live Pipeline Verification: Grafana
-Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials — username is always `demo`, today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID). Then create an account on the demo site and log in. The event shows up in the dashboard within seconds.
+Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials. Username is always `demo`, today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID). Then create an account on the demo site and log in. The event shows up in the dashboard within seconds.
 
 What you'll see:
 - The JSON log line with `user_uuid`, `email`, `lang`, `event_type`, `partition`, `offset`
