@@ -63,15 +63,14 @@ User login / logout
       │
       ▼
 FastAPI backend
-  publishes event via asyncio.create_task (fire-and-forget for sub-millisecond
-  API response times; for zero-loss critical events, await would be used instead)
-  topic: user-logins  │  user-logouts
-  partition key: lang (es → p0 · en → p1)
+  publishes event to Redpanda (fire-and-forget via asyncio.create_task)
+  topics: user-logins · user-logouts
+  partition key: lang (es → p0, en → p1)
       │
       ▼
 Redpanda  ──── single-broker StatefulSet, 2 partitions/topic, 24 h retention
                partitioned by lang to demonstrate deterministic routing and consumer
-               locality; in high-scale production, user_uuid would distribute load evenly
+               locality; in high-scale production
       │
       ▼
 Consumer (aiokafka)
@@ -328,7 +327,7 @@ proveo/
 │   ├── Dockerfile
 │   ├── init-db.sh               # Creates portfolio, temporal, temporal_visibility
 │   ├── init-ssl.sh              # certbot + Let's Encrypt setup, TLS secret injection into k3s
-│   └── init-pgpass.sh
+│   └── init-pgpass.sh           # passwordless non-interactive connections
 │
 ├── docker-compose.yml           # Local development
 ├── SSL_SETUP.md                 # Guide to install https
