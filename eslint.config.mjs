@@ -18,6 +18,8 @@ export default [
     rules: {
       "no-unused-vars": "warn",
       "no-undef": "error",
+      "no-useless-escape": "warn",
+      "no-useless-catch": "warn",
     },
   },
 ];
