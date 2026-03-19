@@ -38,38 +38,20 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 Browser
    │
    ▼
-nginx  ──── TLS termination (Let's Encrypt) · HTTP→HTTPS redirect
-            reverse proxy (backend + image-service) · rate limiting · security headers
+nginx (TLS · HTTP→HTTPS · rate limiting · security headers)
    │
-   ▼
-FastAPI backend (uvicorn, 1 worker — pinned to minimize RAM footprint on 4GB node;
-                 asyncpg handles I/O concurrency)
+   ├──▶ /api/*        FastAPI backend
+   │                     ├── PostgreSQL primary   writes, DDL, pg_cron, WAL streaming
+   │                     ├── PostgreSQL replica   reads, hot standby
+   │                     ├── Redis                cache (allkeys-LRU, 64 MB) + rate limiting
+   │                     ├── MinIO                object storage
+   │                     ├── Image Service        content moderation via TensorFlow
+   │                     └── LibreTranslate       self-hosted translation (en ↔ es)
    │
-   ├──▶  PostgreSQL primary   — writes, DDL, Alembic migrations (pg_cron, SSL, WAL streaming)
+   ├──▶ /images/*     Image Service (direct, backend bypassed)
    │
-   ├──▶  PostgreSQL replica   — reads only, hot standby, physical replication slot
-   │
-   ├──▶  Redis                — response cache (allkeys-LRU, 64 MB cap) + rate limiting
-   │
-   ├──▶  MinIO                — S3-compatible object storage for user-uploaded images
-   │
-   ├──▶  Image Service        — automated content moderation via TensorFlow before images land in MinIO
-   │
-   └──▶  LibreTranslate       — self-hosted offline translation (en ↔ es, no external API dependency)
+   └──▶ /grafana/*    Grafana UI (HTTPS, rotating demo credentials)
 ```
-
-| Service | Role | Notes |
-|---|---|---|
-| **nginx** | Reverse proxy + TLS edge | Only pod exposed via `LoadBalancer`; everything else is `ClusterIP` |
-| **FastAPI backend** | REST API | Python, asyncpg connection pool, JWT auth, CSRF protection |
-| **PostgreSQL primary** | Write database | pg_cron, scram-sha-256, SSL, WAL level `replica` |
-| **PostgreSQL replica** | Read database | Streams WAL from primary via replication slot; `hot_standby = on` |
-| **Redis** | Cache | TTL-based invalidation; LRU eviction under memory pressure |
-| **MinIO** | Object storage | Bucket `images`; accessed internally, never exposed through nginx directly | Bucket images; 
-| **Image Service** | Content moderation | Intercepts uploads, runs TensorFlow model, rejects or stores in MinIO |
-| **LibreTranslate** | Translation | `LT_LOAD_ONLY=en,es` keeps memory at ~300 MB; fully offline after model download |
-
----
 
 ### ⚡ End-to-End Event Flow: Auth Event Pipeline
 
