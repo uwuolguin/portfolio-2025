@@ -1,26 +1,31 @@
-name: Lint Frontend
-
-on: [push]
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install ESLint
-        run: npm install --save-dev eslint @eslint/js
+- name: Create ESLint config
+        run: |
+          cat > eslint.config.mjs << 'EOF'
+          import js from "@eslint/js";
+          export default [
+            js.configs.recommended,
+            {
+              languageOptions: {
+                ecmaVersion: 2022,
+                sourceType: "module",
+                globals: {
+                  window: "readonly",
+                  document: "readonly",
+                  console: "readonly",
+                  fetch: "readonly",
+                  setTimeout: "readonly",
+                  clearTimeout: "readonly",
+                  localStorage: "readonly",
+                  sessionStorage: "readonly",
+                },
+              },
+              rules: {
+                "no-unused-vars": "warn",
+                "no-undef": "error",
+              },
+            },
+          ];
+          EOF
 
       - name: Run ESLint
-        run: |
-          npx eslint nginx/frontend/**/*.js \
-            --env browser \
-            --env es2022 \
-            --parser-options=sourceType:module,ecmaVersion:2022 \
-            --rule "no-unused-vars: warn" \
-            --rule "no-undef: error"
+        run: npx eslint "nginx/frontend/**/*.js"
