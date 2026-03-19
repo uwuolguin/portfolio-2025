@@ -41,13 +41,13 @@ Browser
 nginx (TLS · HTTP→HTTPS · rate limiting · security headers)
    │
 ├──▶ /api/*        FastAPI backend
-   │                     ├── PostgreSQL primary   writes, DDL, pg_cron, WAL streaming
-   │                     ├── PostgreSQL replica   reads, hot standby
-   │                     ├── Redis                cache (allkeys-LRU, 64 MB) + rate limiting
-   │                     ├── MinIO                object storage
-   │                     ├── Image Service        content moderation via TensorFlow
-   │                     ├── LibreTranslate       self-hosted translation (en ↔ es)
-   │                     └── Redpanda             Async event pipeline, fully observable
+   │                     ├── PostgreSQL primary           writes, DDL, pg_cron, WAL streaming
+   │                     ├── PostgreSQL replica           reads, hot standby
+   │                     ├── Redis                        cache (allkeys-LRU, 64 MB) + rate limiting
+   │                     ├── MinIO                        object storage
+   │                     ├── Image Service                content moderation via TensorFlow
+   │                     ├── LibreTranslate               self-hosted translation (en ↔ es)
+   │                     └── Redpanda/ Temporal/ Grafana  async event pipeline, fully observable
    │
    ├──▶ /images/*     Image Service (direct, backend bypassed)
    │
