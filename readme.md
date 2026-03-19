@@ -282,12 +282,14 @@ proveo/
 │   │   ├── templates/           # Email HTML templates
 │   │   ├── utils/               # Validators, exceptions
 │   │   └── tests/               # Pytest test suite
+│   ├── Dockerfile
 │   ├── alembic/                 # Database migrations
 │   └── scripts/                 # Admin tools, seeding, maintenance
 │
 ├── image-service/               # Content moderation microservice
 │   ├── main.py                  # FastAPI + TensorFlow
 │   ├── image_validator.py       # Image processing logic
+│   ├── Dockerfile
 │   └── config.py                # Service configuration
 │
 ├── k8s/                         # Kubernetes manifests
@@ -331,6 +333,7 @@ proveo/
 │
 ├── docker-compose.yml           # Local development
 ├── SSL_SETUP.md                 # Guide to install https
+├── eslint.config.mjs
 └── README.md
 ```
 
