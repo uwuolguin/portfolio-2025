@@ -1,20 +1,45 @@
-name: Lint Frontend
-
-on: [push]
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install ESLint
-        run: npm install --save-dev eslint @eslint/js
-
-      - name: Run ESLint
-        run: npx eslint "nginx/frontend/**/*.js"
+- name: Create ESLint config
+        run: |
+          cat > eslint.config.mjs << 'ESLINTEOF'
+          import js from "@eslint/js";
+          export default [
+            {
+              ignores: ["**/libs/**"],
+            },
+            js.configs.recommended,
+            {
+              languageOptions: {
+                ecmaVersion: 2022,
+                sourceType: "module",
+                globals: {
+                  window: "readonly",
+                  document: "readonly",
+                  console: "readonly",
+                  fetch: "readonly",
+                  setTimeout: "readonly",
+                  clearTimeout: "readonly",
+                  localStorage: "readonly",
+                  sessionStorage: "readonly",
+                  HTMLElement: "readonly",
+                  HTMLAnchorElement: "readonly",
+                  HTMLAreaElement: "readonly",
+                  HTMLImageElement: "readonly",
+                  HTMLMediaElement: "readonly",
+                  URL: "readonly",
+                  URLSearchParams: "readonly",
+                  CustomEvent: "readonly",
+                  FormData: "readonly",
+                  Event: "readonly",
+                  DOMPurify: "readonly",
+                  confirm: "readonly",
+                  alert: "readonly",
+                  self: "readonly",
+                },
+              },
+              rules: {
+                "no-unused-vars": "warn",
+                "no-undef": "error",
+              },
+            },
+          ];
+          ESLINTEOF
