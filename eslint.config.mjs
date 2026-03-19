@@ -1,20 +1,17 @@
 import js from "@eslint/js";
+import globals from "globals";
 
 export default [
+  {
+    ignores: ["**/libs/**", "**/*.min.js"],
+  },
   js.configs.recommended,
   {
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
       globals: {
-        window: "readonly",
-        document: "readonly",
-        console: "readonly",
-        fetch: "readonly",
-        setTimeout: "readonly",
-        clearTimeout: "readonly",
-        localStorage: "readonly",
-        sessionStorage: "readonly",
+        ...globals.browser,
       },
     },
     rules: {

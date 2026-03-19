@@ -14,7 +14,7 @@ jobs:
           node-version: "20"
 
       - name: Install ESLint
-        run: npm install --save-dev eslint @eslint/js
+        run: npm install --save-dev eslint @eslint/js globals
 
       - name: Run ESLint
         run: npx eslint "nginx/frontend/**/*.js"
