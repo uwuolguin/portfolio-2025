@@ -47,7 +47,7 @@ nginx (TLS · HTTP→HTTPS · rate limiting · security headers)
    │                     ├── MinIO                object storage
    │                     ├── Image Service        content moderation via TensorFlow
    │                     ├── LibreTranslate       self-hosted translation (en ↔ es)
-   │                     └── Redpanda → Temporal → Loki → Grafana Async event pipeline, fully observable
+   │                     └── Redpanda             Async event pipeline, fully observable
    │
    ├──▶ /images/*     Image Service (direct, backend bypassed)
    │
