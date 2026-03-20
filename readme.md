@@ -224,7 +224,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 ## 🚀 Quick Local Preview
 
-The full production stack runs on Kubernetes, see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no content moderation model, no k8s), use this earlier snapshot:
+The full production stack runs on Kubernetes, see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no temporal, no k8s), use this earlier snapshot:
 
 ```bash
 # 1. Clone repository
