@@ -58,7 +58,7 @@ spec:
         # Runs as root before the main container starts.
         # local-path provisioner creates the PVC directory as root — this
         # chowns it to UID/GID 1032 (libretranslate user) so the process
-        # can write model files on first boot.
+        # can write model files and index.json on first boot.
         - name: fix-permissions
           image: busybox:1.36
           command: ["sh", "-c", "chown -R 1032:1032 /data"]
@@ -142,10 +142,11 @@ spec:
               cpu: "500m"
 
           volumeMounts:
-            # Model files persist here across pod restarts.
-            # Without this PVC the container re-downloads ~200MB on every restart.
+            # Mounted one level up from packages so index.json and all
+            # other argos-translate files are also on the PVC and owned
+            # by the libretranslate user.
             - name: libretranslate-models
-              mountPath: /home/libretranslate/.local/share/argos-translate/packages
+              mountPath: /home/libretranslate/.local/share/argos-translate
 
       volumes:
         - name: libretranslate-models
