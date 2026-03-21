@@ -54,6 +54,11 @@ spec:
       labels:
         app: libretranslate
     spec:
+      # LibreTranslate runs as UID/GID 1032 inside the container.
+      # fsGroup tells Kubernetes to chown the PVC to GID 1032 before
+      # the container starts, so the process can write model files to it.
+      securityContext:
+        fsGroup: 1032
       containers:
         - name: libretranslate
           image: libretranslate/libretranslate:latest
