@@ -71,7 +71,6 @@
     background-color: #e68a00;
 }
 
-/* New classes for already logged in view */
 .already-logged-message {
     color: #ffffff;
     font-family: sans-serif;
@@ -128,3 +127,13 @@
         max-width: none;
     }
 }
+
+/* JS state utilities */
+.hidden        { display: none !important; }
+.text-error    { color: #ff6b6b; }
+.text-success  { color: #4CAF50; }
+.text-white    { color: #ffffff; }
+.text-orange   { color: #FF9800; }
+.no-decoration { text-decoration: none; }
+.mt-sm         { margin-top: 1rem; }
+.mb-sm         { margin-bottom: 1rem; }

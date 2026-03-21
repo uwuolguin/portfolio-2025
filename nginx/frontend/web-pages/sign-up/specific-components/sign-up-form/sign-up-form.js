@@ -67,10 +67,8 @@ document.addEventListener('DOMContentLoaded', () => {
         form.className = 'signup-form';
         form.id = 'signup-form';
 
-        // Name field
         const nameGroup = document.createElement('div');
         nameGroup.className = 'input-group';
-
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.id = 'signup-name';
@@ -80,14 +78,11 @@ document.addEventListener('DOMContentLoaded', () => {
         nameInput.required = true;
         nameInput.autocomplete = 'name';
         nameInput.maxLength = 100;
-
         nameGroup.appendChild(nameInput);
         form.appendChild(nameGroup);
 
-        // Email field
         const emailGroup = document.createElement('div');
         emailGroup.className = 'input-group';
-
         const emailInput = document.createElement('input');
         emailInput.type = 'email';
         emailInput.id = 'signup-email';
@@ -96,14 +91,11 @@ document.addEventListener('DOMContentLoaded', () => {
         emailInput.placeholder = t.email;
         emailInput.required = true;
         emailInput.autocomplete = 'email';
-
         emailGroup.appendChild(emailInput);
         form.appendChild(emailGroup);
 
-        // Password field
         const passwordGroup = document.createElement('div');
         passwordGroup.className = 'input-group';
-
         const passwordInput = document.createElement('input');
         passwordInput.type = 'password';
         passwordInput.id = 'signup-password';
@@ -113,14 +105,11 @@ document.addEventListener('DOMContentLoaded', () => {
         passwordInput.required = true;
         passwordInput.minLength = 8;
         passwordInput.autocomplete = 'new-password';
-
         passwordGroup.appendChild(passwordInput);
         form.appendChild(passwordGroup);
 
-        // Confirm password field
         const confirmGroup = document.createElement('div');
         confirmGroup.className = 'input-group';
-
         const confirmInput = document.createElement('input');
         confirmInput.type = 'password';
         confirmInput.id = 'signup-confirm-password';
@@ -130,85 +119,69 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmInput.required = true;
         confirmInput.minLength = 8;
         confirmInput.autocomplete = 'new-password';
-
         confirmGroup.appendChild(confirmInput);
         form.appendChild(confirmGroup);
 
-        // Error message container
+        // starts hidden, toggled between text-error and text-success
         const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.style.display = 'none';
-        errorDiv.style.color = '#ff6b6b';
-        errorDiv.style.marginBottom = '1rem';
+        errorDiv.className = 'error-message hidden text-error mb-sm';
         form.appendChild(errorDiv);
 
-        // Success message container
         const successDiv = document.createElement('div');
-        successDiv.className = 'success-message';
-        successDiv.style.display = 'none';
-        successDiv.style.color = '#4CAF50';
-        successDiv.style.marginBottom = '1rem';
+        successDiv.className = 'success-message hidden text-success mb-sm';
         form.appendChild(successDiv);
 
-        // Submit button
         const submitButton = document.createElement('button');
         submitButton.type = 'submit';
         submitButton.className = 'signup-button';
         submitButton.textContent = t.signupButton;
         form.appendChild(submitButton);
 
-        // Login link
         const loginSection = document.createElement('div');
-        loginSection.style.marginTop = '1rem';
-        loginSection.style.color = '#ffffff';
-        
+        loginSection.className = 'mt-sm text-white';
+
         const haveAccountText = document.createTextNode(t.haveAccount + ' ');
         loginSection.appendChild(haveAccountText);
-        
+
         const loginAnchor = document.createElement('a');
         loginAnchor.href = '/log-in/log-in.html';
         loginAnchor.textContent = t.login;
-        loginAnchor.style.color = '#FF9800';
-        loginAnchor.style.textDecoration = 'none';
-        
+        loginAnchor.className = 'text-orange no-decoration';
         loginSection.appendChild(loginAnchor);
         form.appendChild(loginSection);
 
-        // Form submit handler
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            errorDiv.style.display = 'none';
-            successDiv.style.display = 'none';
+
+            errorDiv.classList.add('hidden');
+            successDiv.classList.add('hidden');
 
             const password = passwordInput.value;
             const confirmPassword = confirmInput.value;
 
-            // Client-side validation
             if (password.length < 8) {
                 errorDiv.textContent = t.weakPassword;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
             if (password !== confirmPassword) {
                 errorDiv.textContent = t.passwordMismatch;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
-            // Sanitize and validate name
             const sanitizedName = sanitizeText(nameInput.value.trim());
             if (!sanitizedName) {
                 errorDiv.textContent = t.invalidName;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
-            // Sanitize and validate email
             const sanitizedEmail = sanitizeEmail(emailInput.value);
             if (!sanitizedEmail) {
                 errorDiv.textContent = t.invalidEmail;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
@@ -218,27 +191,23 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const response = await apiRequest('/api/v1/users/signup', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         name: sanitizedName,
                         email: sanitizedEmail,
-                        password: password  // Don't sanitize passwords
+                        password: password
                     })
                 });
 
                 if (response.ok) {
                     successDiv.textContent = t.success;
-                    successDiv.style.display = 'block';
-                    
-                    // Disable form
+                    successDiv.classList.remove('hidden');
+
                     nameInput.disabled = true;
                     emailInput.disabled = true;
                     passwordInput.disabled = true;
                     confirmInput.disabled = true;
-                    
-                    // Redirect to login after 2 seconds
+
                     setTimeout(() => {
                         window.location.href = '/log-in/log-in.html';
                     }, 2000);
@@ -250,7 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error('Signup error:', error);
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 submitButton.disabled = false;
                 submitButton.textContent = t.signupButton;
             }
