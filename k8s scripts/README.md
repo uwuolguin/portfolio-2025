@@ -320,8 +320,11 @@ kubectl logs -n portfolio deployment/temporal-worker | grep "mock_email_sent"
 # Step 1 — on the droplet:
 kubectl port-forward -n portfolio svc/temporal-ui 8888:8080
 
+
+kubectl port-forward -n portfolio svc/backend-ui 8888:8000
+
 # Step 2 — on your laptop (SSH tunnel):
-ssh -L 8888:localhost:8888 deploy@<your-droplet-ip>
+ssh -L 8888:localhost:8888 deploy@143.110.154.54
 
 # Step 3 — open in browser:
 # http://localhost:8888

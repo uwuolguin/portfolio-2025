@@ -33,53 +33,57 @@ async def create_admin_user():
         print("❌ Cancelled")
         return False
 
+    conn = None
     try:
-        async with asyncpg.connect(settings.alembic_database_url) as conn:
-            existing = await conn.fetchval(
-                "SELECT uuid FROM proveo.users WHERE email = $1",
+        conn = await asyncpg.connect(settings.alembic_database_url)
+
+        existing = await conn.fetchval(
+            "SELECT uuid FROM proveo.users WHERE email = $1",
+            admin_email,
+        )
+
+        if existing:
+            await conn.execute(
+                """
+                UPDATE proveo.users
+                SET role = 'admin',
+                    email_verified = true,
+                    verification_token = NULL,
+                    verification_token_expires = NULL,
+                    hashed_password = $1
+                WHERE email = $2
+                """,
+                get_password_hash(admin_password),
                 admin_email,
             )
+            print(f" Updated existing user to admin: {admin_email}")
+        else:
+            user_uuid = str(uuid.uuid4())
+            hashed_password = get_password_hash(admin_password)
 
-            if existing:
-                await conn.execute(
-                    """
-                    UPDATE proveo.users
-                    SET role = 'admin',
-                        email_verified = true,
-                        verification_token = NULL,
-                        verification_token_expires = NULL,
-                        hashed_password = $1
-                    WHERE email = $2
-                    """,
-                    get_password_hash(admin_password),
-                    admin_email,
-                )
-
-                print(f" Updated existing user to admin: {admin_email}")
-            else:
-                user_uuid = str(uuid.uuid4())
-                hashed_password = get_password_hash(admin_password)
-
-                await conn.execute(
-                    """
-                    INSERT INTO proveo.users
-                    (uuid, name, email, hashed_password, role, email_verified,
-                     verification_token, verification_token_expires)
-                    VALUES ($1, $2, $3, $4, 'admin', true, NULL, NULL)
-                    """,
-                    user_uuid,
-                    admin_name,
-                    admin_email,
-                    hashed_password,
-                )
-
-                print(f" Created new admin user: {admin_email}")
+            await conn.execute(
+                """
+                INSERT INTO proveo.users
+                (uuid, name, email, hashed_password, role, email_verified,
+                 verification_token, verification_token_expires)
+                VALUES ($1, $2, $3, $4, 'admin', true, NULL, NULL)
+                """,
+                user_uuid,
+                admin_name,
+                admin_email,
+                hashed_password,
+            )
+            print(f" Created new admin user: {admin_email}")
 
         return True
 
     except Exception as e:
         print(f"❌ Error: {e}")
         return False
+
+    finally:
+        if conn:
+            await conn.close()
 
 
 if __name__ == "__main__":
