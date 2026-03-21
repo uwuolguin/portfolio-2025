@@ -105,12 +105,11 @@ async function loadCurrentCompany() {
 
 function createFilterableDropdown(id, options, placeholder, selectedValue = null) {
     const lang = getLanguage();
-    
-    // Crash if lang is not properly set
+
     if (lang !== 'es' && lang !== 'en') {
         throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
     }
-    
+
     const container = document.createElement('div');
     container.className = 'input-group';
     container.dataset.dropdownId = id;
@@ -125,7 +124,7 @@ function createFilterableDropdown(id, options, placeholder, selectedValue = null
         const englishName = opt.name_en || '';
         const communeName = opt.name || '';
         const normalizedValue = normalize(selectedValue);
-        
+
         return normalize(spanishName) === normalizedValue ||
                normalize(englishName) === normalizedValue ||
                normalize(communeName) === normalizedValue;
@@ -157,15 +156,14 @@ function createFilterableDropdown(id, options, placeholder, selectedValue = null
     optionsList.className = 'options-list';
 
     options.forEach(option => {
-        const displayName = lang === 'es' 
+        const displayName = lang === 'es'
             ? (option.name_es || option.name)
             : (option.name_en || option.name);
 
         const value = lang === 'es'
             ? (option.name_es || option.name)
             : (option.name_en || option.name);
-        
-        // Crash if the required translation is missing for products
+
         if (option.name_es && option.name_en && !displayName) {
             throw new Error(`Missing ${lang} translation for product: ${JSON.stringify(option)}`);
         }
@@ -216,63 +214,56 @@ function createFilterableDropdown(id, options, placeholder, selectedValue = null
 }
 
 function getOptionLabel(option, lang) {
-    // Crash if lang is not properly set
     if (lang !== 'es' && lang !== 'en') {
         throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
     }
-    
+
     const displayName = lang === 'es'
         ? (option.name_es || option.name)
         : (option.name_en || option.name);
-    
+
     if (!displayName) {
         throw new Error(`Missing ${lang} translation for option: ${JSON.stringify(option)}`);
     }
-    
+
     return sanitizeText(displayName);
 }
 
-
 async function handleFormSubmit(e) {
     e.preventDefault();
-    
+
     const lang = getLanguage();
     const t = translations[lang];
-    
+
     const form = e.target;
     const submitButton = form.querySelector('button[type="submit"]');
     const originalText = submitButton.textContent;
-    
+
     submitButton.disabled = true;
     submitButton.textContent = t.saving;
-    
+
     try {
         const formData = new FormData();
-        
-        // Get form values
+
         const name = form.querySelector('[name="name"]').value.trim();
         const email = form.querySelector('[name="email"]').value.trim();
         const phone = form.querySelector('[name="phone"]').value.trim();
         const address = form.querySelector('[name="address"]').value.trim();
         const description = form.querySelector('[name="description"]').value.trim();
-        
-        // Get dropdown values
+
         const communeDropdown = form.querySelector('[data-dropdown-id="commune"] .dropdown-selected');
         const productDropdown = form.querySelector('[data-dropdown-id="product"] .dropdown-selected');
 
-        
         const communeName = communeDropdown?.dataset.value || '';
         const productName = productDropdown?.dataset.value || '';
-        
-        // ONLY append fields that have values (partial update support)
+
         if (name) formData.append('name', name);
         if (email) formData.append('email', email);
         if (phone) formData.append('phone', phone);
         if (address) formData.append('address', address);
         if (communeName) formData.append('commune_name', communeName);
         if (productName) formData.append('product_name', productName);
-        
-        // CRITICAL: Send description based on CURRENT language flag
+
         if (description) {
             if (lang === 'es') {
                 formData.append('description_es', description);
@@ -280,22 +271,19 @@ async function handleFormSubmit(e) {
                 formData.append('description_en', description);
             }
         }
-        
-        // Always send lang to indicate which language we're editing
+
         formData.append('lang', lang);
-        
-        // Append image only if user selected a new one
+
         const imageInput = form.querySelector('[name="image"]');
         if (imageInput?.files?.[0]) {
             formData.append('image', imageInput.files[0]);
         }
-        
-        // Submit form
+
         const response = await apiRequest('/api/v1/companies/user/my-company', {
             method: 'PATCH',
             body: formData
         });
-        
+
         if (response.ok) {
             showMessage(t.success, 'success');
             await loadCurrentCompany();
@@ -306,7 +294,7 @@ async function handleFormSubmit(e) {
             const errorData = await response.json();
             throw new Error(errorData.error?.message || errorData.detail || t.error);
         }
-        
+
     } catch (error) {
         console.error('Error updating company:', error);
         showMessage(error.message || t.error, 'error');
@@ -318,16 +306,16 @@ async function handleFormSubmit(e) {
 async function handleDelete() {
     const lang = getLanguage();
     const t = translations[lang];
-    
+
     if (!confirm(t.deleteConfirm)) {
         return;
     }
-    
+
     try {
         const response = await apiRequest('/api/v1/companies/user/my-company', {
             method: 'DELETE'
         });
-        
+
         if (response.ok) {
             showMessage(t.deleteSuccess, 'success');
             setTimeout(() => {
@@ -345,13 +333,13 @@ async function handleDelete() {
 function showMessage(message, type) {
     const editSection = document.getElementById('profile-edit-section');
     const container = editSection.querySelector('.profile-edit-container');
-    
+
     const messageDiv = document.createElement('div');
     messageDiv.className = `${type}-message`;
     setText(messageDiv, message);
-    
+
     container.insertBefore(messageDiv, container.firstChild);
-    
+
     setTimeout(() => {
         messageDiv.remove();
     }, 5000);
@@ -360,121 +348,112 @@ function showMessage(message, type) {
 async function renderEditForm() {
     const editSection = document.getElementById('profile-edit-section');
     const lang = getLanguage();
-    
-    // Crash if lang is not properly set
+
     if (lang !== 'es' && lang !== 'en') {
         throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
     }
-    
+
     const t = translations[lang];
-    
+
+    // ── Not logged in ──────────────────────────────────────────────────────
     if (!getLoginState()) {
         clearElement(editSection);
-        
+
         const container = document.createElement('div');
         container.className = 'profile-edit-container';
-        
+
         const title = document.createElement('h2');
         title.className = 'profile-edit-title';
         setText(title, t.title);
         container.appendChild(title);
-        
+
         const message = document.createElement('p');
         message.className = 'login-message';
         setText(message, t.notLoggedIn);
         container.appendChild(message);
-        
+
         const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'profile-edit-actions';
-        actionsDiv.style.marginTop = '2rem';
-        
+        actionsDiv.className = 'profile-edit-actions mt-lg';
+
         const loginButton = document.createElement('a');
         loginButton.href = '/log-in/log-in.html';
-        loginButton.className = 'profile-edit-button';
+        loginButton.className = 'profile-edit-button no-decoration visible-inline';
         setText(loginButton, t.loginLink);
-        loginButton.style.textDecoration = 'none';
-        loginButton.style.display = 'inline-block';
         actionsDiv.appendChild(loginButton);
-        
+
         container.appendChild(actionsDiv);
-        
+
         const signupSection = document.createElement('div');
-        signupSection.style.marginTop = '1.5rem';
-        signupSection.style.color = '#ffffff';
-        
+        signupSection.className = 'mt-md text-white';
+
         const noAccountText = document.createTextNode(t.noAccount + ' ');
         signupSection.appendChild(noAccountText);
-        
+
         const signupLink = document.createElement('a');
         signupLink.href = '/sign-up/sign-up.html';
+        signupLink.className = 'text-orange no-decoration';
         setText(signupLink, t.registerHere);
-        signupLink.style.color = '#FF9800';
-        signupLink.style.textDecoration = 'none';
         signupSection.appendChild(signupLink);
-        
+
         container.appendChild(signupSection);
         editSection.appendChild(container);
-        
+
         return;
     }
-    
+
+    // ── No company yet ─────────────────────────────────────────────────────
     if (!getCompanyPublishState()) {
         clearElement(editSection);
-        
+
         const container = document.createElement('div');
         container.className = 'profile-edit-container';
-        
+
         const title = document.createElement('h2');
         title.className = 'profile-edit-title';
         setText(title, t.title);
         container.appendChild(title);
-        
+
         const message = document.createElement('p');
         message.className = 'no-company-message';
         setText(message, t.noCompany);
         container.appendChild(message);
-        
+
         const createButton = document.createElement('a');
         createButton.href = '/publish/publish.html';
-        createButton.className = 'profile-edit-button';
+        createButton.className = 'profile-edit-button no-decoration visible-inline mt-sm';
         setText(createButton, t.createCompanyLink);
-        createButton.style.textDecoration = 'none';
-        createButton.style.display = 'inline-block';
-        createButton.style.marginTop = '1rem';
         container.appendChild(createButton);
-        
+
         editSection.appendChild(container);
-        
+
         return;
     }
 
+    // ── Loading state ──────────────────────────────────────────────────────
     clearElement(editSection);
-    
+
     const loadingContainer = document.createElement('div');
     loadingContainer.className = 'profile-edit-container';
-    
+
     const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'loading';
-    loadingDiv.style.color = 'white';
-    loadingDiv.style.textAlign = 'center';
-    loadingDiv.style.padding = '2rem';
+    loadingDiv.className = 'loading text-white text-center p-md';
     setText(loadingDiv, t.loading);
-    
+
     loadingContainer.appendChild(loadingDiv);
     editSection.appendChild(loadingContainer);
 
     const company = await loadCurrentCompany();
+
     if (!company) {
         clearElement(editSection);
-        
+
         const errorContainer = document.createElement('div');
         errorContainer.className = 'profile-edit-container';
-        
+
         const errorP = document.createElement('p');
-        errorP.style.color = 'white';
-        errorP.style.textAlign = 'center';
+        errorP.className = 'text-white text-center';
         setText(errorP, 'Error loading company data');
-        
+
         errorContainer.appendChild(errorP);
         editSection.appendChild(errorContainer);
         return;
@@ -496,24 +475,24 @@ async function renderEditForm() {
     if (company.image_url) {
         const imageContainer = document.createElement('div');
         imageContainer.className = 'current-image-container';
-        
+
         const imageLabel = document.createElement('p');
         imageLabel.className = 'current-image-label';
         setText(imageLabel, t.currentImage);
         imageContainer.appendChild(imageLabel);
-        
+
         const img = document.createElement('img');
         img.className = 'current-image';
         setSrc(img, company.image_url);
         img.alt = sanitizeText(company.name || 'Company image');
-        img.onerror = function() {
+        img.onerror = function () {
             const placeholder = document.createElement('p');
             placeholder.className = 'no-image-placeholder';
             setText(placeholder, t.noImage);
             this.replaceWith(placeholder);
         };
         imageContainer.appendChild(img);
-        
+
         container.appendChild(imageContainer);
     }
 
@@ -565,7 +544,6 @@ async function renderEditForm() {
     addressGroup.appendChild(addressInput);
     form.appendChild(addressGroup);
 
-    // COMMUNE: Just use name (no name_es/name_en)
     const communeDropdown = createFilterableDropdown(
         'commune',
         communes,
@@ -574,11 +552,10 @@ async function renderEditForm() {
     );
     form.appendChild(communeDropdown);
 
-    // PRODUCT: Spanish → name_es, English → name_en, NO FALLBACK
-    const productSelectedValue = lang === 'es' 
+    const productSelectedValue = lang === 'es'
         ? company.product_name_es
         : company.product_name_en;
-    
+
     const productDropdown = createFilterableDropdown(
         'product',
         products,
@@ -594,7 +571,6 @@ async function renderEditForm() {
     descTextarea.className = 'profile-edit-textarea';
     descTextarea.placeholder = t.description;
     descTextarea.rows = 4;
-    // CRITICAL: Show description based on current language flag
     descTextarea.value = sanitizeText(
         (lang === 'es' ? company.description_es : company.description_en) || ''
     );
@@ -603,22 +579,22 @@ async function renderEditForm() {
 
     const imageGroup = document.createElement('div');
     imageGroup.className = 'input-group';
-    
+
     const fileWrapper = document.createElement('div');
     fileWrapper.className = 'file-input-wrapper';
-    
+
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.id = 'company-image';
     fileInput.name = 'image';
     fileInput.className = 'file-input-hidden';
     fileInput.accept = 'image/jpeg,image/png';
-    
+
     const fileLabel = document.createElement('label');
     fileLabel.htmlFor = 'company-image';
     fileLabel.className = 'file-input-label';
     setText(fileLabel, t.selectImage);
-    
+
     fileInput.addEventListener('change', (e) => {
         if (e.target.files?.[0]) {
             setText(fileLabel, e.target.files[0].name);
@@ -628,7 +604,7 @@ async function renderEditForm() {
             fileLabel.classList.remove('has-file');
         }
     });
-    
+
     fileWrapper.appendChild(fileInput);
     fileWrapper.appendChild(fileLabel);
     imageGroup.appendChild(fileWrapper);
@@ -636,13 +612,13 @@ async function renderEditForm() {
 
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'profile-edit-actions';
-    
+
     const saveButton = document.createElement('button');
     saveButton.type = 'submit';
     saveButton.className = 'profile-edit-button';
     setText(saveButton, t.save);
     actionsDiv.appendChild(saveButton);
-    
+
     const cancelButton = document.createElement('button');
     cancelButton.type = 'button';
     cancelButton.className = 'profile-edit-button secondary';
@@ -651,14 +627,14 @@ async function renderEditForm() {
         window.location.href = '/front-page/front-page.html';
     });
     actionsDiv.appendChild(cancelButton);
-    
+
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = 'profile-edit-button danger';
     setText(deleteButton, t.delete);
     deleteButton.addEventListener('click', handleDelete);
     actionsDiv.appendChild(deleteButton);
-    
+
     form.appendChild(actionsDiv);
 
     form.addEventListener('submit', handleFormSubmit);
@@ -670,7 +646,7 @@ async function renderEditForm() {
 document.addEventListener('DOMContentLoaded', async () => {
     if (initialized) return;
     initialized = true;
-    
+
     await renderEditForm();
 });
 

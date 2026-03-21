@@ -1,6 +1,6 @@
 /* Results content container */
 .results-content {
-    min-height: 200px; /* Ensures space even when empty */
+    min-height: 200px;
 }
 
 .results-grid {
@@ -42,7 +42,6 @@
     word-break: break-word; 
 }
 
-
 .business-name {
     margin: 0 0 10px;
     font-size: 1.3em;
@@ -58,14 +57,13 @@
     color: #666;
 }
 
-/* Pagination wrapper - independent from results */
 .pagination-wrapper {
     width: 100%;
     display: flex;
     justify-content: center;
     margin-top: 20px;
     margin-bottom: 60px;
-    min-height: 50px; /* Ensures space is reserved */
+    min-height: 50px;
 }
 
 .pagination-container {
@@ -102,7 +100,6 @@
     pointer-events: none;
 }
 
-/* Loading, error, and no results states */
 .loading-message,
 .error-message,
 .no-results-message {
@@ -122,3 +119,6 @@
 .no-results-message {
     color: #666;
 }
+
+/* JS state utility */
+.hidden { display: none !important; }

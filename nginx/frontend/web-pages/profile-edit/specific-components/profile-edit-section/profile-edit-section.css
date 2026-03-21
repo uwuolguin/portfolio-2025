@@ -12,6 +12,7 @@ body {
 main {
   flex-grow: 1;
 }
+
 #profile-edit-section {
     display: flex;
     justify-content: center;
@@ -82,7 +83,6 @@ main {
     resize: vertical;
 }
 
-/* Filterable Dropdown Styles (updated from publish-section.css) */
 .filterable-dropdown {
     position: relative;
     width: 100%;
@@ -113,6 +113,7 @@ main {
     color: #ffffff;
     transition: transform 0.2s ease;
 }
+
 .dropdown-selected:hover .dropdown-arrow {
     transform: rotate(180deg);
 }
@@ -184,7 +185,6 @@ main {
     border-radius: 3px;
 }
 
-/* Rest of the original CSS */
 .profile-edit-button {
     background-color: #FF9800;
     color: white;
@@ -383,3 +383,15 @@ main {
         max-height: 120px;
     }
 }
+
+/* JS state utilities */
+.hidden         { display: none !important; }
+.visible-inline { display: inline-block; }
+.text-white     { color: #ffffff; }
+.text-orange    { color: #FF9800; }
+.text-center    { text-align: center; }
+.no-decoration  { text-decoration: none; }
+.mt-sm          { margin-top: 1rem; }
+.mt-md          { margin-top: 1.5rem; }
+.mt-lg          { margin-top: 2rem; }
+.p-md           { padding: 2rem; }

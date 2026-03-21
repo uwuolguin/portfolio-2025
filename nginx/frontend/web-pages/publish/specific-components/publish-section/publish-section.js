@@ -103,7 +103,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Returns full user object if cookie is present, null if no session
     async function fetchCurrentUser() {
         try {
             const response = await apiRequest('/api/v1/users/me');
@@ -125,11 +124,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const selected = document.createElement('div');
         selected.className = 'dropdown-selected';
         selected.dataset.value = '';
-        
+
         const selectedText = document.createElement('span');
         selectedText.textContent = placeholder;
         selected.appendChild(selectedText);
-        
+
         const arrow = document.createElement('span');
         arrow.className = 'dropdown-arrow';
         arrow.textContent = '▼';
@@ -153,7 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (lang !== 'es' && lang !== 'en') {
                 throw new Error(`Language must be 'es' or 'en', got: "${lang}"`);
             }
-            
+
             const displayName =
                 lang === 'es'
                     ? (option.name_es || option.name)
@@ -163,20 +162,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 lang === 'es'
                     ? (option.name_es || option.name)
                     : (option.name_en || option.name);
-            
+
             if (!displayName || !value) {
                 throw new Error(`Missing ${lang} translation for option: ${JSON.stringify(option)}`);
             }
-            
+
             const optionElement = buildDropdownOption(value, displayName);
-            
+
             optionElement.addEventListener('click', () => {
                 selectedText.textContent = displayName;
                 selected.dataset.value = value;
                 optionsContainer.style.display = 'none';
                 container.classList.remove('dropdown-open');
             });
-            
+
             optionsList.appendChild(optionElement);
         });
 
@@ -218,9 +217,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const lang = getLanguage();
         const t = translations[lang];
 
-        // ── GATE 1: no cookie at all → show login prompt ──────────────────
-        // We call /me directly instead of trusting localStorage so we always
-        // reflect the real cookie state on page load.
+        // ── GATE 1: no session ─────────────────────────────────────────────
         const currentUser = await fetchCurrentUser();
 
         if (!currentUser) {
@@ -235,30 +232,24 @@ document.addEventListener('DOMContentLoaded', async () => {
             container.appendChild(title);
 
             const message = document.createElement('p');
-            message.className = 'login-message';
+            message.className = 'login-message text-white mb-md';
             message.textContent = t.loginRequired;
-            message.style.color = 'white';
-            message.style.marginBottom = '1.5rem';
             container.appendChild(message);
 
             const loginLink = document.createElement('a');
             loginLink.href = '/log-in/log-in.html';
-            loginLink.className = 'publish-button';
+            loginLink.className = 'publish-button no-decoration visible-inline';
             loginLink.textContent = t.loginHere;
-            loginLink.style.textDecoration = 'none';
-            loginLink.style.display = 'inline-block';
             container.appendChild(loginLink);
 
             const signupSection = document.createElement('div');
-            signupSection.style.marginTop = '1.5rem';
-            signupSection.style.color = '#ffffff';
+            signupSection.className = 'mt-md text-white';
             const noAccountText = document.createTextNode(t.noAccount + ' ');
             signupSection.appendChild(noAccountText);
             const signupLink = document.createElement('a');
             signupLink.href = '/sign-up/sign-up.html';
+            signupLink.className = 'text-orange no-decoration';
             signupLink.textContent = t.registerHere;
-            signupLink.style.color = '#FF9800';
-            signupLink.style.textDecoration = 'none';
             signupSection.appendChild(signupLink);
             container.appendChild(signupSection);
 
@@ -266,9 +257,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // ── GATE 2: cookie present but email_verified false ────────────────
-        // Show blocked message + resend button using email from the JWT/session.
-        // No email input needed — we already know who they are.
+        // ── GATE 2: email not verified ─────────────────────────────────────
         if (!currentUser.email_verified) {
             clearElement(publishSection);
 
@@ -281,23 +270,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             container.appendChild(title);
 
             const message = document.createElement('p');
-            message.style.color = '#a0a0a0';
-            message.style.fontFamily = 'sans-serif';
-            message.style.fontSize = '0.95rem';
-            message.style.lineHeight = '1.6';
-            message.style.marginBottom = '1.5rem';
+            message.className = 'text-muted-lt state-msg mb-md';
             message.textContent = t.notVerifiedMessage;
             container.appendChild(message);
 
-            // Feedback message (success / error from resend)
+            // Feedback div — starts hidden, gets text-success or text-error + visible-block
             const statusDiv = document.createElement('div');
-            statusDiv.style.display = 'none';
-            statusDiv.style.fontFamily = 'sans-serif';
-            statusDiv.style.fontSize = '0.9rem';
-            statusDiv.style.marginBottom = '1rem';
+            statusDiv.className = 'hidden state-msg-sm mb-sm';
             container.appendChild(statusDiv);
 
-            // Resend section — only visible while not yet sent
             const resendSection = document.createElement('div');
             resendSection.className = 'resend-verification-section';
 
@@ -322,18 +303,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                     );
 
                     if (response.ok) {
-                        statusDiv.style.color = '#4CAF50';
+                        statusDiv.classList.add('text-success', 'visible-block');
+                        statusDiv.classList.remove('hidden', 'text-error');
                         statusDiv.textContent = t.resendSent;
-                        statusDiv.style.display = 'block';
-                        resendSection.style.display = 'none';
+                        resendSection.classList.add('hidden');
                     } else {
                         const error = await response.json();
                         throw new Error(error.detail || t.resendError);
                     }
                 } catch (error) {
-                    statusDiv.style.color = '#ff6b6b';
+                    statusDiv.classList.add('text-error', 'visible-block');
+                    statusDiv.classList.remove('hidden', 'text-success');
                     statusDiv.textContent = sanitizeText(error.message) || t.resendError;
-                    statusDiv.style.display = 'block';
                     resendButton.disabled = false;
                     resendButton.textContent = t.resendButton;
                 }
@@ -345,7 +326,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // ── GATE 3: verified but already has a company ─────────────────────
+        // ── GATE 3: already has a company ──────────────────────────────────
         const hasCompany = await checkExistingCompany();
         if (hasCompany) {
             clearElement(publishSection);
@@ -359,25 +340,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             container.appendChild(title);
 
             const message = document.createElement('p');
-            message.className = 'already-published-message';
+            message.className = 'already-published-message text-white mb-md';
             message.textContent = t.alreadyPublished;
-            message.style.color = 'white';
-            message.style.marginBottom = '1.5rem';
             container.appendChild(message);
 
             const viewLink = document.createElement('a');
             viewLink.href = '/profile-view/profile-view.html';
-            viewLink.className = 'publish-button';
+            viewLink.className = 'publish-button no-decoration visible-inline';
             viewLink.textContent = t.viewCompany;
-            viewLink.style.textDecoration = 'none';
-            viewLink.style.display = 'inline-block';
             container.appendChild(viewLink);
 
             publishSection.appendChild(container);
             return;
         }
 
-        // ── GATE 4: logged in + verified + no company → show publish form ──────
+        // ── GATE 4: show publish form ──────────────────────────────────────
         clearElement(publishSection);
 
         const container = document.createElement('div');
@@ -484,18 +461,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         imageGroup.appendChild(fileWrapper);
         form.appendChild(imageGroup);
 
+        // Error and success divs — start hidden
         const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.style.display = 'none';
-        errorDiv.style.color = '#ff6b6b';
-        errorDiv.style.marginBottom = '1rem';
+        errorDiv.className = 'error-message hidden text-error mb-sm';
         form.appendChild(errorDiv);
 
         const successDiv = document.createElement('div');
-        successDiv.className = 'success-message';
-        successDiv.style.display = 'none';
-        successDiv.style.color = '#4CAF50';
-        successDiv.style.marginBottom = '1rem';
+        successDiv.className = 'success-message hidden text-success mb-sm';
         form.appendChild(successDiv);
 
         const buttonGroup = document.createElement('div');
@@ -520,8 +492,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            errorDiv.style.display = 'none';
-            successDiv.style.display = 'none';
+
+            // Reset state
+            errorDiv.classList.add('hidden');
+            successDiv.classList.add('hidden');
 
             try {
                 const communeSelected = communeDropdown.querySelector('.dropdown-selected');
@@ -578,7 +552,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 if (response.ok) {
                     successDiv.textContent = t.success;
-                    successDiv.style.display = 'block';
+                    successDiv.classList.remove('hidden');
                     setTimeout(() => {
                         window.location.href = '/profile-view/profile-view.html';
                     }, 2000);
@@ -590,7 +564,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } catch (error) {
                 console.error('Publish error:', error);
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 publishButton.disabled = false;
                 publishButton.textContent = t.publish;
             }

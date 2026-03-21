@@ -35,70 +35,49 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastResultCount = 0;
     const resultsPerPage = 4;
 
-    function showLoading() {
-        const lang = getLanguage();
-        const t = translations[lang];
-        
-        // Find existing content area or create it
+    function getOrCreateContentArea() {
         let contentArea = resultsContainer.querySelector('.results-content-area');
         if (!contentArea) {
             contentArea = document.createElement('div');
             contentArea.className = 'results-content-area';
             resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
         }
-        
+        return contentArea;
+    }
+
+    function showLoading() {
+        const lang = getLanguage();
+        const contentArea = getOrCreateContentArea();
         clearElement(contentArea);
-        
+
         const loading = document.createElement('div');
+        // .loading-message already defines text-align, padding, color in the CSS
         loading.className = 'loading-message';
-        loading.style.textAlign = 'center';
-        loading.style.padding = '2rem';
-        loading.style.color = '#666';
-        loading.textContent = t.loading;
+        loading.textContent = translations[lang].loading;
         contentArea.appendChild(loading);
     }
 
     function showError() {
         const lang = getLanguage();
-        const t = translations[lang];
-        
-        let contentArea = resultsContainer.querySelector('.results-content-area');
-        if (!contentArea) {
-            contentArea = document.createElement('div');
-            contentArea.className = 'results-content-area';
-            resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
-        }
-        
+        const contentArea = getOrCreateContentArea();
         clearElement(contentArea);
-        
+
         const error = document.createElement('div');
+        // .error-message already defines text-align, padding, color in the CSS
         error.className = 'error-message';
-        error.style.textAlign = 'center';
-        error.style.padding = '2rem';
-        error.style.color = '#dc3545';
-        error.textContent = t.error;
+        error.textContent = translations[lang].error;
         contentArea.appendChild(error);
     }
 
     function showNoResults() {
         const lang = getLanguage();
-        const t = translations[lang];
-        
-        let contentArea = resultsContainer.querySelector('.results-content-area');
-        if (!contentArea) {
-            contentArea = document.createElement('div');
-            contentArea.className = 'results-content-area';
-            resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
-        }
-        
+        const contentArea = getOrCreateContentArea();
         clearElement(contentArea);
-        
+
         const noResults = document.createElement('div');
+        // .no-results-message already defines text-align, padding, color in the CSS
         noResults.className = 'no-results-message';
-        noResults.style.textAlign = 'center';
-        noResults.style.padding = '2rem';
-        noResults.style.color = '#666';
-        noResults.textContent = t.noResults;
+        noResults.textContent = translations[lang].noResults;
         contentArea.appendChild(noResults);
     }
 
@@ -130,7 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const rawData = await response.json();
             const companies = sanitizeAPIResponse(rawData);
-            
+
             lastResultCount = companies.length;
 
             displayResults(companies, page);
@@ -138,26 +117,16 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error('Search error:', error);
             showError();
-            // Pagination stays - user can go back!
             updatePagination(currentPage);
         }
     }
 
     function displayResults(companies, page) {
         const lang = getLanguage();
-
-        let contentArea = resultsContainer.querySelector('.results-content-area');
-        if (!contentArea) {
-            contentArea = document.createElement('div');
-            contentArea.className = 'results-content-area';
-            resultsContainer.insertBefore(contentArea, resultsContainer.firstChild);
-        }
-        
+        const contentArea = getOrCreateContentArea();
         clearElement(contentArea);
 
-        const hasResults = companies && companies.length > 0;
-
-        if (!hasResults) {
+        if (!companies || companies.length === 0) {
             showNoResults();
         } else {
             const grid = document.createElement('div');
@@ -171,7 +140,6 @@ document.addEventListener('DOMContentLoaded', () => {
             contentArea.appendChild(grid);
         }
 
-        // ALWAYS update pagination - never remove it
         updatePagination(page);
     }
 
@@ -179,30 +147,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const lang = getLanguage();
         const t = translations[lang];
 
-        // Find or create pagination container
         let paginationContainer = resultsContainer.querySelector('.pagination-container');
-        
+
         if (!paginationContainer) {
             paginationContainer = document.createElement('div');
             paginationContainer.className = 'pagination-container';
             resultsContainer.appendChild(paginationContainer);
         }
 
-        // Clear and rebuild pagination
         clearElement(paginationContainer);
 
-        // Previous button
         const prevLink = document.createElement('a');
         prevLink.href = '#';
-        prevLink.className = 'page-link';
+        prevLink.className = page <= 1
+            ? 'page-link disabled'
+            : 'page-link';
         prevLink.textContent = t.previous;
-        
-        if (page <= 1) {
-            prevLink.classList.add('disabled');
-            prevLink.style.opacity = '0.4';
-            prevLink.style.cursor = 'not-allowed';
-            prevLink.style.pointerEvents = 'none';
-        } else {
+
+        if (page > 1) {
             prevLink.addEventListener('click', (e) => {
                 e.preventDefault();
                 performSearch(page - 1);
@@ -210,24 +172,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         paginationContainer.appendChild(prevLink);
 
-        // Current page indicator
         const pageInfo = document.createElement('span');
         pageInfo.className = 'page-link active';
         pageInfo.textContent = `${t.page} ${page}`;
         paginationContainer.appendChild(pageInfo);
 
-        // Next button
         const nextLink = document.createElement('a');
         nextLink.href = '#';
-        nextLink.className = 'page-link';
+        nextLink.className = lastResultCount < resultsPerPage
+            ? 'page-link disabled'
+            : 'page-link';
         nextLink.textContent = t.next;
-        
-        if (lastResultCount < resultsPerPage) {
-            nextLink.classList.add('disabled');
-            nextLink.style.opacity = '0.4';
-            nextLink.style.cursor = 'not-allowed';
-            nextLink.style.pointerEvents = 'none';
-        } else {
+
+        if (lastResultCount >= resultsPerPage) {
             nextLink.addEventListener('click', (e) => {
                 e.preventDefault();
                 performSearch(page + 1);
@@ -241,26 +198,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const searchInput = document.getElementById('search-query');
         const query = searchInput ? searchInput.value : '';
-        
+
         const communeDropdown = document.querySelector('[data-dropdown-id="commune"] .dropdown-selected');
         const commune = communeDropdown ? communeDropdown.dataset.value : '';
-        
+
         const productDropdown = document.querySelector('[data-dropdown-id="product"] .dropdown-selected');
         const product = productDropdown ? productDropdown.dataset.value : '';
 
         fetchResults(query, commune, product, page);
     }
 
-    // Listen for search trigger
     document.addEventListener('searchTriggered', () => {
         performSearch(1);
     });
 
-    // Re-render on language change
     document.addEventListener('stateChange', () => {
         performSearch(currentPage);
     });
 
-    // Initial load
     performSearch(1);
 });

@@ -12,6 +12,7 @@ body {
 main {
   flex-grow: 1;
 }
+
 #profile-section {
     display: flex;
     justify-content: center;
@@ -118,7 +119,6 @@ main {
     margin-top: 0.5rem;
 }
 
-/* Profile Action Buttons */
 .profile-actions {
     display: flex;
     gap: 1rem;
@@ -204,3 +204,16 @@ main {
         padding: 10px 20px;
     }
 }
+
+/* JS state utilities */
+.hidden        { display: none !important; }
+.visible-inline { display: inline-block; }
+.text-white    { color: #ffffff; }
+.text-orange   { color: #FF9800; }
+.text-muted-lt { color: #a0a0a0; }
+.text-center   { text-align: center; }
+.no-decoration { text-decoration: none; }
+.mt-md         { margin-top: 1.5rem; }
+.mt-lg         { margin-top: 2rem; }
+.mb-sm         { margin-bottom: 1rem; }
+.p-md          { padding: 2rem; }

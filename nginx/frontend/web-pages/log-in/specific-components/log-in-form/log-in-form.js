@@ -96,12 +96,10 @@ document.addEventListener('DOMContentLoaded', () => {
         passwordGroup.appendChild(passwordInput);
         form.appendChild(passwordGroup);
 
-        // Error message container
+        // Error / success message container
+        // starts hidden, colour toggled between text-error and text-success
         const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.style.display = 'none';
-        errorDiv.style.color = '#ff6b6b';
-        errorDiv.style.marginBottom = '1rem';
+        errorDiv.className = 'error-message hidden text-error mb-sm';
         form.appendChild(errorDiv);
 
         // Submit button
@@ -111,10 +109,9 @@ document.addEventListener('DOMContentLoaded', () => {
         submitButton.textContent = t.loginButton;
         form.appendChild(submitButton);
 
-        // Resend verification section
+        // Resend verification section — starts hidden
         const resendSection = document.createElement('div');
-        resendSection.className = 'resend-verification-section';
-        resendSection.style.display = 'none';
+        resendSection.className = 'resend-verification-section hidden';
 
         const resendText = document.createElement('p');
         resendText.className = 'resend-verification-text';
@@ -129,37 +126,37 @@ document.addEventListener('DOMContentLoaded', () => {
         resendSection.appendChild(resendButton);
         form.appendChild(resendSection);
 
-        // Login link section
+        // Sign-up link
         const signupSection = document.createElement('div');
-        signupSection.style.marginTop = '1rem';
-        signupSection.style.color = '#ffffff';
-        
+        signupSection.className = 'mt-sm text-white';
+
         const noAccountText = document.createTextNode(t.noAccount + ' ');
         signupSection.appendChild(noAccountText);
-        
+
         const signupLink = document.createElement('a');
         signupLink.href = '/sign-up/sign-up.html';
         signupLink.textContent = t.signUp;
-        signupLink.style.color = '#FF9800';
-        signupLink.style.textDecoration = 'none';
+        signupLink.className = 'text-orange no-decoration';
         signupSection.appendChild(signupLink);
-        
+
         form.appendChild(signupSection);
 
         // Form submit handler
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            errorDiv.style.display = 'none';
-            errorDiv.style.color = '#ff6b6b';
-            resendSection.style.display = 'none';
 
-            // Sanitize and validate email
+            // Reset message state
+            errorDiv.classList.add('hidden');
+            errorDiv.classList.remove('text-success');
+            errorDiv.classList.add('text-error');
+            resendSection.classList.add('hidden');
+
             const email = sanitizeEmail(emailInput.value);
-            const password = passwordInput.value; // Don't sanitize passwords
+            const password = passwordInput.value;
 
             if (!email) {
                 errorDiv.textContent = t.invalidEmail;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
@@ -169,22 +166,18 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const response = await apiRequest('/api/v1/users/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ email, password, lang})
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, lang })
                 });
 
                 if (response.ok) {
-                    const data = await response.json();                    
                     setLoginState(true);
                     window.location.href = '/front-page/front-page.html';
                 } else if (response.status === 403) {
-                    // Email not verified or forbidden
                     const error = await response.json();
                     errorDiv.textContent = sanitizeText(error.detail) || t.invalidCredentials;
-                    errorDiv.style.display = 'block';
-                    resendSection.style.display = 'block';
+                    errorDiv.classList.remove('hidden');
+                    resendSection.classList.remove('hidden');
                     submitButton.disabled = false;
                     submitButton.textContent = t.loginButton;
                 } else {
@@ -195,18 +188,20 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error('Login error:', error);
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
                 submitButton.disabled = false;
                 submitButton.textContent = t.loginButton;
             }
         });
 
-        // Resend verification email handler
+        // Resend verification handler
         resendButton.addEventListener('click', async () => {
             const email = sanitizeEmail(emailInput.value);
             if (!email) {
                 errorDiv.textContent = t.invalidEmail;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('text-success');
+                errorDiv.classList.add('text-error');
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
@@ -214,24 +209,27 @@ document.addEventListener('DOMContentLoaded', () => {
             resendButton.textContent = t.loading;
 
             try {
-                const response = await apiRequest(`/api/v1/users/resend-verification?email=${encodeURIComponent(email)}`, {
-                    method: 'POST'
-                });
+                const response = await apiRequest(
+                    `/api/v1/users/resend-verification?email=${encodeURIComponent(email)}`,
+                    { method: 'POST' }
+                );
 
                 if (response.ok) {
-                    errorDiv.style.color = '#4CAF50';
+                    errorDiv.classList.remove('text-error');
+                    errorDiv.classList.add('text-success');
                     errorDiv.textContent = t.verificationSent;
-                    errorDiv.style.display = 'block';
-                    resendSection.style.display = 'none';
+                    errorDiv.classList.remove('hidden');
+                    resendSection.classList.add('hidden');
                 } else {
                     const error = await response.json();
                     throw new Error(error.detail || t.error);
                 }
             } catch (error) {
                 console.error('Resend error:', error);
-                errorDiv.style.color = '#ff6b6b';
+                errorDiv.classList.remove('text-success');
+                errorDiv.classList.add('text-error');
                 errorDiv.textContent = sanitizeText(error.message) || t.error;
-                errorDiv.style.display = 'block';
+                errorDiv.classList.remove('hidden');
             } finally {
                 resendButton.disabled = false;
                 resendButton.textContent = t.resendButton;
