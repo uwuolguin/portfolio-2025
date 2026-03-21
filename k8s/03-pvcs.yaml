@@ -70,3 +70,18 @@ spec:
     requests:
       storage: 10Gi
   storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: libretranslate-models-data
+  namespace: portfolio
+  labels:
+    app: libretranslate
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path

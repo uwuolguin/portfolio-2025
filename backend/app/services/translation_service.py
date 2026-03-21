@@ -2,16 +2,12 @@
 Translation Service — LibreTranslate (self-hosted)
 
 Self-hosted LibreTranslate instance running in the same Kubernetes cluster.
-Replaces the previous dependency on the unofficial Google Translate scraping
-endpoint (translate.googleapis.com/translate_a/single?client=gtx), which is
-undocumented, rate-limited, and can be killed without notice.
+Exposes a documented REST API and runs fully offline after language models
+are downloaded on first boot. Only en and es models are loaded
+(LT_LOAD_ONLY=en,es in 16-libretranslate.yaml).
 
-LibreTranslate exposes a documented REST API and runs fully offline after
-the language models are downloaded on first boot. Only en and es models
-are loaded (LT_LOAD_ONLY=en,es in 16-libretranslate.yaml).
-
-Translation quality is adequate for a demo. For production you would
-evaluate DeepL or a managed service with SLA guarantees.
+Translation quality is adequate for a demo. For production evaluate
+DeepL or a managed service with SLA guarantees.
 """
 
 import httpx
@@ -35,10 +31,6 @@ class UniversalTranslator:
         """
         Translate text using self-hosted LibreTranslate.
         Returns None if translation fails — callers fall back to duplication.
-
-        LibreTranslate POST /translate
-        Body: {"q": text, "source": source_lang, "target": target_lang, "format": "text"}
-        Response: {"translatedText": "..."}
         """
         try:
             payload = {
@@ -132,7 +124,8 @@ class UniversalTranslator:
                 f"At least one {field_name} (Spanish or English) must be provided"
             )
 
-        if text_es and not text_en:
+        # At this point exactly one is provided.
+        if text_es:
             logger.debug(f"translating_{field_name}_es_to_en", text=text_es[:50])
 
             translated_en = await UniversalTranslator._translate_text(text_es, "es", "en")
@@ -156,7 +149,7 @@ class UniversalTranslator:
 
             return (text_es, translated_en)
 
-        # text_en provided, text_es is None
+        # text_en — guaranteed by the checks above
         logger.debug(f"translating_{field_name}_en_to_es", text=text_en[:50])
 
         translated_es = await UniversalTranslator._translate_text(text_en, "en", "es")
@@ -182,9 +175,9 @@ class UniversalTranslator:
 
 
 async def translate_field(
-    field_name: str,
     text_es: Optional[str] = None,
     text_en: Optional[str] = None,
+    field_name: str = "text",
 ) -> Tuple[str, str]:
     """Generic translation helper for any bilingual field."""
     return await UniversalTranslator.translate(text_es, text_en, field_name=field_name)
