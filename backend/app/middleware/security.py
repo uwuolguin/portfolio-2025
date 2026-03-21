@@ -13,6 +13,13 @@ logger = structlog.get_logger(__name__)
 # restarts it in a loop.
 HTTPS_EXEMPT_PATHS = {"/api/v1/health", "/health"}
 
+# Hosts that must never be redirected to HTTPS.
+# localhost is loopback-only — never reachable from the internet.
+# Exempting it allows port-forward debugging sessions without browser
+# cache poisoning from a cached 301. Real traffic comes through nginx
+# which enforces HTTPS independently.
+HTTPS_EXEMPT_HOSTS = {"localhost", "127.0.0.1"}
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
@@ -79,6 +86,8 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     - If request path is in HTTPS_EXEMPT_PATHS: passthrough.
       (k8s probes hit the pod directly over HTTP — exempting health endpoints
       prevents a redirect loop that would cause Kubernetes to restart the pod.)
+    - If request hostname is in HTTPS_EXEMPT_HOSTS: passthrough.
+      (localhost is loopback-only, used for port-forward debugging sessions.)
     - If request is already HTTPS (request.url.scheme == "https"): passthrough.
     - If behind a reverse proxy that sets X-Forwarded-Proto=https: passthrough.
     - Otherwise: redirect to the same URL with scheme="https" using a 301.
@@ -91,6 +100,9 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if request.url.path in HTTPS_EXEMPT_PATHS:
+            return await call_next(request)
+
+        if request.url.hostname in HTTPS_EXEMPT_HOSTS:
             return await call_next(request)
         
         if request.url.scheme == "https":
