@@ -97,6 +97,10 @@ spec:
               value: "0.0.0.0"
             - name: LT_PORT
               value: "5000"
+            # 1 worker — sufficient for internal demo traffic.
+            # Default is 4 workers which adds ~50Mi of unnecessary overhead.
+            - name: LT_THREADS
+              value: "1"
 
           # Runs exclusively until it passes — blocks liveness and readiness.
           # Every 10 seconds /health has 5 seconds to respond, 24 times before restart.
@@ -133,12 +137,12 @@ spec:
 
           resources:
             requests:
-              memory: "256Mi"
+              memory: "196Mi"
               cpu: "50m"
             limits:
               # en+es models fit in ~300Mi at runtime.
-              # 512Mi gives headroom for concurrent translation requests.
-              memory: "512Mi"
+              # 384Mi gives headroom with a single worker.
+              memory: "384Mi"
               cpu: "500m"
 
           volumeMounts:

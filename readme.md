@@ -203,19 +203,19 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 | Pod | Manifest | Actual RAM |
 |-----|----------|-----------|
-| `postgres-primary-0` | `04-postgres-primary.yaml` | ~107Mi |
-| `postgres-replica-0` | `05-postgres-replica.yaml` | ~35Mi |
-| `redis-*` | `06-redis.yaml` | ~5Mi |
-| `minio-*` | `07-minio.yaml` | ~91Mi |
-| `image-service-*` | `08-image-service.yaml` | ~399Mi |
-| `backend-*` | `09-backend.yaml` | ~69Mi |
-| `nginx-*` | `10-nginx.yaml` | ~7Mi |
-| `redpanda-0` | `11-redpanda.yaml` | ~197Mi |
-| `consumer-*` | `13-consumer.yaml` | ~28Mi |
-| `temporal-*` | `14-temporal.yaml` | ~149Mi |
-| `temporal-ui-*` | `14-temporal.yaml` | ~3Mi |
-| `temporal-worker-*` | `15-temporal-worker.yaml` | ~50Mi |
-| `libretranslate-*` | `16-libretranslate.yaml` | ~300Mi |
+| `postgres-primary-0` | `04-postgres-primary.yaml` | ~104Mi |
+| `postgres-replica-0` | `05-postgres-replica.yaml` | ~34Mi |
+| `redis-*` | `06-redis.yaml` | ~4Mi |
+| `minio-*` | `07-minio.yaml` | ~81Mi |
+| `image-service-*` | `08-image-service.yaml` | ~331Mi |
+| `backend-*` | `09-backend.yaml` | ~79Mi |
+| `nginx-*` | `10-nginx.yaml` | ~4Mi |
+| `redpanda-0` | `11-redpanda.yaml` | ~146Mi |
+| `consumer-*` | `13-consumer.yaml` | ~27Mi |
+| `temporal-*` | `14-temporal.yaml` | ~85Mi |
+| `temporal-ui-*` | `14-temporal.yaml` | ~9Mi |
+| `temporal-worker-*` | `15-temporal-worker.yaml` | ~62Mi |
+| `libretranslate-*` | `16-libretranslate.yaml` | ~226Mi |
 | `loki-*` | `17-monitoring.yaml` | ~128Mi |
 | `promtail-*` | `17-monitoring.yaml` | ~64Mi |
 | `grafana-*` | `17-monitoring.yaml` | ~128Mi |
