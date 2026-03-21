@@ -309,6 +309,26 @@ echo ""
 # PVCs
 log_info "Creating PVCs..."
 kubectl apply -f "$K8S_DIR/03-pvcs.yaml"
+
+# LibreTranslate runs as UID/GID 1032. The local-path provisioner creates
+# PVC directories as root — chown now while the directory is empty so the
+# process can write model files when the pod starts.
+log_info "Fixing LibreTranslate PVC ownership (UID/GID 1032)..."
+LT_PVC_DIR=$(sudo find /var/lib/rancher/k3s/storage -maxdepth 1 -name "*libretranslate*" -type d 2>/dev/null | head -1)
+if [ -n "$LT_PVC_DIR" ]; then
+    sudo chown -R 1032:1032 "$LT_PVC_DIR"
+    log_success "LibreTranslate PVC ownership fixed"
+else
+    log_warn "LibreTranslate PVC directory not found yet — retrying in 5s..."
+    sleep 5
+    LT_PVC_DIR=$(sudo find /var/lib/rancher/k3s/storage -maxdepth 1 -name "*libretranslate*" -type d 2>/dev/null | head -1)
+    if [ -n "$LT_PVC_DIR" ]; then
+        sudo chown -R 1032:1032 "$LT_PVC_DIR"
+        log_success "LibreTranslate PVC ownership fixed"
+    else
+        log_warn "Could not find LibreTranslate PVC directory — translation may fail on first boot"
+    fi
+fi
 echo ""
 
 # =============================================================================
@@ -371,7 +391,7 @@ fi
 echo ""
 
 # =============================================================================
-# Libretranslate
+# LibreTranslate
 # =============================================================================
 log_info "Deploying LibreTranslate (self-hosted translation)..."
 kubectl apply -f "$K8S_DIR/16-libretranslate.yaml"
