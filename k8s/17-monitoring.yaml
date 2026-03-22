@@ -42,13 +42,13 @@ data:
             store: inmemory
           replication_factor: 1
         final_sleep: 0s
-      chunk_idle_period: 5m
+      chunk_idle_period: 1m
       chunk_retain_period: 30s
       max_transfer_retries: 0
 
     schema_config:
       configs:
-        - from: 2020-10-24
+        - from: 2026-01-01
           store: boltdb-shipper
           object_store: filesystem
           schema: v11
@@ -59,8 +59,6 @@ data:
     storage_config:
       boltdb_shipper:
         active_index_directory: /loki/boltdb-shipper-active
-        cache_location: /loki/boltdb-shipper-cache
-        cache_ttl: 24h
         shared_store: filesystem
       filesystem:
         directory: /loki/chunks
@@ -72,16 +70,16 @@ data:
     limits_config:
       enforce_metric_name: false
       reject_old_samples: true
-      reject_old_samples_max_age: 168h
+      reject_old_samples_max_age: 72h
       ingestion_rate_mb: 4
       ingestion_burst_size_mb: 6
 
     chunk_store_config:
-      max_look_back_period: 0s
+      max_look_back_period: 72h
 
     table_manager:
-      retention_deletes_enabled: false
-      retention_period: 0s
+      retention_deletes_enabled: true
+      retention_period: 72h
 
 ---
 apiVersion: v1
@@ -133,10 +131,23 @@ spec:
       labels:
         app: loki
     spec:
-      securityContext:
-        runAsUser: 10001
-        runAsGroup: 10001
-        fsGroup: 10001
+      initContainers:
+        # local-path provisioner creates the PVC directory as root.
+        # chown to UID/GID 10001 (loki user) before the main process starts
+        # so Loki can write chunks and index files.
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 10001:10001 /loki"]
+          volumeMounts:
+            - name: loki-data
+              mountPath: /loki
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"
       containers:
         - name: loki
           image: grafana/loki:2.9.0
@@ -390,10 +401,23 @@ spec:
       labels:
         app: grafana
     spec:
-      securityContext:
-        runAsUser: 472
-        runAsGroup: 472
-        fsGroup: 472
+      initContainers:
+        # local-path provisioner creates the PVC directory as root.
+        # chown to UID/GID 472 (grafana user) before the main process starts
+        # so Grafana can write its database and config files.
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 472:472 /var/lib/grafana"]
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"
       containers:
         - name: grafana
           image: grafana/grafana:10.2.0
