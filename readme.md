@@ -8,7 +8,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 
 ---
 
-## 🌎 Live Demo
+## Live Demo
 
 | URL | What |
 |-----|------|
@@ -20,7 +20,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 **Grafana demo credentials:**
 
 > **Username:** `demo`
-> **Password:** today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID) (rotates daily)
+> **Password:** ask the admin or see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md#grafana-credentials)
 
 **A few things to know before poking around:**
 - Email verification uses the Resend free tier, so only the email acos2014600836@gmail.com can receive the verification link. Company creation is restricted to admin-verified users for now, but you can still sign up.
@@ -28,93 +28,92 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-### 🧩 Services Overview
+### Services Overview
 
 > Every service runs inside a single Kubernetes namespace (portfolio) on k3s, connected via ClusterIP. Nothing reaches the internet except through nginx.
 
 ```
 Browser
-   │
-   ▼
-nginx (TLS · HTTP→HTTPS · rate limiting · security headers)
-   │
-   ├──▶ /api/*        FastAPI backend
-   │                     ├── PostgreSQL primary           writes, DDL, pg_cron, WAL streaming
-   │                     ├── PostgreSQL replica           reads, hot standby
-   │                     ├── Redis                        cache (allkeys-LRU, 64 MB) + rate limiting
-   │                     ├── MinIO                        object storage
-   │                     ├── Image Service                content moderation via TensorFlow
-   │                     ├── LibreTranslate               self-hosted translation (en ↔ es)
-   │                     └── Redpanda/ Temporal/ Grafana  async event pipeline, fully observable
-   │
-   ├──▶ /images/*     Image Service (direct, backend bypassed)
-   │
-   └──▶ /grafana/*    Grafana UI (HTTPS, rotating demo credentials)
+   |
+   v
+nginx (TLS - HTTP->HTTPS - rate limiting - security headers)
+   |
+   |---> /api/*        FastAPI backend
+   |                     |-- PostgreSQL primary           writes, DDL, pg_cron, WAL streaming
+   |                     |-- PostgreSQL replica           reads, hot standby
+   |                     |-- Redis                        cache (allkeys-LRU, 64 MB) + rate limiting
+   |                     |-- MinIO                        object storage
+   |                     |-- Image Service                content moderation via TensorFlow
+   |                     |-- LibreTranslate               self-hosted translation (en <-> es)
+   |                     +-- Redpanda/ Temporal/ Grafana  async event pipeline, fully observable
+   |
+   |---> /images/*     Image Service (direct, backend bypassed)
+   |
+   +---> /grafana/*    Grafana UI (HTTPS, rotating demo credentials)
 ```
 
-### ⚡ End-to-End Event Flow: Auth Event Pipeline
+### End-to-End Event Flow: Auth Event Pipeline
 
-> A user logs in or out → the event travels through four decoupled layers before producing a structured audit log and a (mock) notification email. Zero synchronous coupling between any of them.
+> A user logs in or out -> the event travels through four decoupled layers before producing a structured audit log and a (mock) notification email. Zero synchronous coupling between any of them.
 
 ```
 User login / logout
-      │
-      ▼
+      |
+      v
 FastAPI backend
   publishes event to Redpanda (fire-and-forget via asyncio.create_task)
-  topics: user-logins · user-logouts
-  partition key: lang (es → p0, en → p1)
-      │
-      ▼
-Redpanda  ──── single-broker StatefulSet, 2 partitions/topic, 24 h retention
+  topics: user-logins - user-logouts
+  partition key: lang (es -> p0, en -> p1)
+      |
+      v
+Redpanda  ---- single-broker StatefulSet, 2 partitions/topic, 24 h retention
                partitioned by lang to demonstrate deterministic routing and consumer
-               locality; in high-scale production
-      │
-      ▼
+               locality; in high-scale production use user_uuid instead
+      |
+      v
 Consumer (aiokafka)
   polls Redpanda, deserialises event, commits offset only after hand-off succeeds
   at-least-once delivery guarantee
-      │
-      ▼
-Temporal server  ──── durable workflow engine backed by PostgreSQL
+      |
+      v
+Temporal server  ---- durable workflow engine backed by PostgreSQL
   receives: StartWorkflow(AuthEventWorkflow, payload)
-      │
-      ▼
+      |
+      v
 Temporal worker (portfolio-backend image, different CMD)
   executes AuthEventWorkflow
-      │
-      ├──▶  log_event_activity
-      │       structlog → JSON line → stdout
-      │                                │
-      │                                ▼
-      │                         Promtail (DaemonSet)
-      │                           tails /var/log/pods/…
-      │                                │
-      │                                ▼
-      │                           Loki  ──── indexes JSON fields (level, event,
-      │                                      workflow_id, event_type, lang)
-      │                                │
-      │                                ▼
-      │                           Grafana  ──── LogQL queries, label filters,
-      │                                         admin login, Loki pre-wired as
-      │                                         default datasource
-      │
-      └──▶  send_mock_email_activity  (fire-and-forget child workflow)
+      |
+      |-->  log_event_activity
+      |       structlog -> JSON line -> stdout
+      |                                |
+      |                                v
+      |                         Promtail (DaemonSet)
+      |                           tails /var/log/pods/...
+      |                                |
+      |                                v
+      |                           Loki  ---- indexes JSON fields (level, event,
+      |                                      workflow_id, event_type, lang)
+      |                                |
+      |                                v
+      |                           Grafana  ---- LogQL queries, label filters,
+      |                                         Loki pre-wired as default datasource
+      |
+      +-->  send_mock_email_activity  (fire-and-forget child workflow)
               logs what WOULD be sent; swap for real Resend call in production
 ```
 
 **Why each layer exists:**
 
 - **Redpanda** decouples the HTTP request from all downstream processing. The API response returns instantly; the event pipeline runs asynchronously.
-- **Consumer → Temporal hand-off** makes the workflow durable. If the Temporal server restarts mid-execution, the workflow resumes from the last checkpoint. No event is lost.
+- **Consumer -> Temporal hand-off** makes the workflow durable. If the Temporal server restarts mid-execution, the workflow resumes from the last checkpoint. No event is lost.
 - **Temporal** provides retries, timeouts, and full execution history without any custom retry logic in application code.
-- **Promtail → Loki → Grafana** gives observability into workflow execution without instrumenting the application beyond `structlog` JSON output.
+- **Promtail -> Loki -> Grafana** gives observability into workflow execution without instrumenting the application beyond `structlog` JSON output.
 
 ---
 
-## 🛠️ Stack
+## Stack
 
 ### Backend
 - **FastAPI 0.120** + **asyncpg 0.30**: async Python, raw SQL, no ORM
@@ -133,11 +132,11 @@ Temporal worker (portfolio-backend image, different CMD)
 - **PostgreSQL 16**: primary/replica streaming replication, pg_cron, pg_trgm, materialized views
 - **Redis 7**: caching (3-day TTL, LRU eviction, 64MB limit)
 - **MinIO**: S3-compatible object storage, self-hosted
-- **LibreTranslate**: self-hosted translation, ES↔EN only (`LT_LOAD_ONLY=en,es`)
+- **LibreTranslate**: self-hosted translation, ES<->EN only (`LT_LOAD_ONLY=en,es`)
 - **Redpanda v24.2**: Kafka-compatible broker, StatefulSet, persistent storage
 - **Temporal 1.24**: durable workflow execution, PostgreSQL persistence
 - **k3s**: single-node Kubernetes
-- **Nginx**: TLS termination, HTTP→HTTPS redirect, HTTP/2, gzip, rate limiting, security headers
+- **Nginx**: TLS termination, HTTP->HTTPS redirect, HTTP/2, gzip, rate limiting, security headers
 - **Let's Encrypt**: automated TLS via certbot, auto-renewed via cron
 
 ### Observability
@@ -151,7 +150,7 @@ Temporal worker (portfolio-backend image, different CMD)
 
 ---
 
-## 🔍 How Things Work
+## How Things Work
 
 ### PostgreSQL Replication
 Write pool connects to `postgres-primary`, read pool connects to `postgres-replica`. On startup the app calls **`pg_is_in_recovery()`** to verify the replica is actually in standby mode and falls back to primary for reads if it isn't.
@@ -163,12 +162,12 @@ Materialized view (`proveo.company_search`) with a **GIN trigram index**. Short 
 Separate microservice with its own Dockerfile and deployment. Validates format, dimensions, and content moderation score before writing to MinIO. Circuit breaker pattern prevents cascade failures if the service is unavailable. Images stream directly, no full file buffering in the backend.
 
 ### Kafka + Temporal Pipeline
-Login and logout events publish to Redpanda, partitioned by language (`es → 0`, `en → 1`) to demonstrate deterministic routing and consumer locality. In a high-scale production environment, `user_uuid` would be used instead to ensure even distribution across partitions. A consumer worker routes events to Temporal's `AuthEventWorkflow`, which logs the event and fires a child `SendNotificationWorkflow` with **ABANDON policy**: the child keeps running after the parent completes.
+Login and logout events publish to Redpanda, partitioned by language (`es -> 0`, `en -> 1`) to demonstrate deterministic routing and consumer locality. In a high-scale production environment, `user_uuid` would be used instead to ensure even distribution across partitions. A consumer worker routes events to Temporal's `AuthEventWorkflow`, which logs the event and fires a child `SendNotificationWorkflow` with **ABANDON policy**: the child keeps running after the parent completes.
 
 Events are published via `asyncio.create_task` for sub-millisecond API response times. The HTTP response returns before Redpanda acknowledgment. For critical-path events where zero-loss is mandated over latency, `await` would be used to ensure delivery before responding. The rest of the wiring is production-grade: explicit partition routing, **manual offset commits** for **at-least-once delivery**, **deterministic workflow IDs** so duplicate Kafka delivery doesn't execute the workflow twice, fire-and-forget child workflows. Swap the mock email activity for a real one and the pipeline is production-ready.
 
 ### Live Pipeline Verification: Grafana
-Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials. Username is always `demo`, today's password is in [this gist](https://gist.github.com/uwuolguin/REPLACE_WITH_GIST_ID). Then create an account on the demo site and log in. The event shows up in the dashboard within seconds.
+Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials. Username is always `demo`, current password is available in the [Kubernetes Deployment Guide](./k8s%20scripts/README.md#grafana-credentials). Then create an account on the demo site and log in. The event shows up in the dashboard within seconds.
 
 What you'll see:
 - The JSON log line with `user_uuid`, `email`, `lang`, `event_type`, `partition`, `offset`
@@ -176,7 +175,7 @@ What you'll see:
 - `mock_email_sent`: child workflow ran independently after parent completed
 - Partition routing: es on 0, en on 1
 
-Full chain: login endpoint → `asyncio.create_task(kafka_producer.publish_event(...))` → Redpanda → consumer offset commit → Temporal `AuthEventWorkflow` → `log_event_activity` → child `SendNotificationWorkflow` → `send_mock_email_activity` → structlog JSON → Promtail scrapes `temporal-worker` → Loki → Grafana.
+Full chain: login endpoint -> `asyncio.create_task(kafka_producer.publish_event(...))` -> Redpanda -> consumer offset commit -> Temporal `AuthEventWorkflow` -> `log_event_activity` -> child `SendNotificationWorkflow` -> `send_mock_email_activity` -> structlog JSON -> Promtail scrapes `temporal-worker` -> Loki -> Grafana.
 
 ### TLS
 Certbot provisions Let's Encrypt certs on the droplet, they get copied to `/home/deploy/certs/` and loaded into Kubernetes as a `tls-secret`. Nginx terminates TLS, sets `X-Forwarded-Proto: https`. Root cron job handles renewal: updates the secret and restarts nginx.
@@ -189,17 +188,18 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 ---
 
-## ⚠️ Known Gaps
+## Known Gaps
 
 - One environment. No dev/staging split.
 - CI/CD is scoped to `prod-*` commit prefixes via GitHub Actions: not a full pipeline.
 - No backups. Local-path PVCs on one node: if the droplet dies, data goes with it.
 - Single point of failure. Single-node k3s means no high availability: if the droplet goes down, the entire stack goes down with it. Remediation: in a production environment this would be deployed across a managed Kubernetes control plane (EKS/GKE) with a multi-AZ node group.
 - `force_rollback` on DB methods is a testing convenience, not a production pattern.
+- **Single-namespace monitoring**: Grafana, Loki, and Promtail run inside the `portfolio` namespace alongside the application. In a real multi-tenant environment, observability infrastructure lives in a dedicated `monitoring` namespace - the same Grafana/Loki stack then serves `portfolio`, `staging`, `payments`, or any other namespace without being coupled to one application. The mechanics: Promtail's `ClusterRole` grants `get/watch/list` on pods cluster-wide, and the `ClusterRoleBinding` maps that role to the `promtail` ServiceAccount in `monitoring`, so it can tail logs from every namespace while running in its own. Keeping them separate also means you can wipe `kubectl delete namespace portfolio` during a clean deploy cycle without taking down observability. For this single-environment demo the separation adds DNS complexity (`loki.monitoring.svc.cluster.local` vs `loki.portfolio.svc.cluster.local`) with no operational benefit, so everything lives in `portfolio`.
 
 ---
 
-## 📦 Pod Breakdown (4GB Droplet)
+## Pod Breakdown (4GB Droplet)
 
 | Pod | Manifest | Actual RAM |
 |-----|----------|-----------|
@@ -222,7 +222,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 ---
 
-## 🚀 Quick Local Preview
+## Quick Local Preview
 
 The full production stack runs on Kubernetes, see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md) for that. If you want a quick local look at the core app (no Kafka, no temporal, no k8s), use this earlier snapshot:
 
@@ -260,88 +260,89 @@ For HTTPS first: **[SSL Setup Guide](./SSL_SETUP.md)**.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 proveo/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml           # Triggers on prod-* commits, SSHs into droplet and runs deploy scripts
-│
-├── backend/                      # FastAPI application
-│   ├── app/
-│   │   ├── database/            # Read/write pools, transactions
-│   │   ├── routers/             # API endpoints
-│   │   ├── auth/                # JWT + CSRF
-│   │   ├── services/            # Image processing, email, translation, circuit breaker
-│   │   ├── schemas/             # Pydantic models
-│   │   ├── middleware/          # CORS, logging, security
-│   │   ├── redis/               # Cache, rate limiting
-│   │   ├── kafka/               # Redpanda producer + consumer worker
-│   │   ├── temporal/            # Workflows, activities, worker
-│   │   ├── templates/           # Email HTML templates
-│   │   ├── utils/               # Validators, exceptions
-│   │   └── tests/               # Pytest test suite
-│   ├── Dockerfile
-│   ├── alembic/                 # Database migrations
-│   └── scripts/                 # Admin tools, seeding, maintenance
-│
-├── image-service/               # Content moderation microservice
-│   ├── main.py                  # FastAPI + TensorFlow
-│   ├── image_validator.py       # Image processing logic
-│   ├── Dockerfile
-│   └── config.py                # Service configuration
-│
-├── k8s/                         # Kubernetes manifests
-│   ├── 00-namespace.yaml        # portfolio namespace
-│   ├── 01-configmap.yaml        # app configuration
-│   ├── 02-secrets.yaml          # secret template, auto-generated by deploy script
-│   ├── 03-pvcs.yaml             # persistent storage (postgres, redis, minio)
-│   ├── 04-postgres-primary.yaml # write database, WAL streaming source
-│   ├── 05-postgres-replica.yaml # read replica, hot standby
-│   ├── 06-redis.yaml            # cache, LRU eviction, 64MB cap
-│   ├── 07-minio.yaml            # S3-compatible object storage
-│   ├── 08-image-service.yaml    # content moderation microservice, TensorFlow
-│   ├── 09-backend.yaml          # FastAPI app, migrations via initContainer
-│   ├── 10-nginx.yaml            # TLS termination + HTTP→HTTPS redirect
-│   ├── 11-redpanda.yaml         # Kafka-compatible broker (StatefulSet)
-│   ├── 12-redpanda-init.yaml    # One-shot Job, creates topics after broker ready
-│   ├── 13-consumer.yaml         # Redpanda consumer, routes events to Temporal
-│   ├── 14-temporal.yaml         # Temporal server + UI
-│   ├── 15-temporal-worker.yaml  # Temporal worker (AuthEventWorkflow)
-│   ├── 16-libretranslate.yaml   # Self-hosted translation service (ES↔EN)
-│   └── 17-monitoring.yaml       # Grafana + Loki + Promtail (temporal-worker logs only)
-│
-├── k8s scripts/                 # Deployment automation
-│   ├── 00-install-k3s.sh
-│   ├── build-and-import-k3s.sh
-│   ├── deploy-k3s-local.sh
-│   ├── set-resend-key.sh
-│   ├── cleanup.sh
-│   └── README.md                # K8s deployment guide
-│
-├── nginx/                       # Reverse proxy + frontend
-│   ├── nginx.conf               # Local dev config (Docker Compose)
-│   ├── Dockerfile
-│   └── frontend/                # Static files
-│
-├── postgres/                    # Custom PostgreSQL image
-│   ├── Dockerfile
-│   ├── init-db.sh               # Creates portfolio, temporal, temporal_visibility
-│   ├── init-ssl.sh              # certbot + Let's Encrypt setup, TLS secret injection into k3s
-│   └── init-pgpass.sh           # passwordless non-interactive connections
-│
-├── docker-compose.yml           # Local development
-├── SSL_SETUP.md                 # Guide to install https
-├── eslint.config.mjs
-└── README.md
+|-- .github/
+|   +-- workflows/
+|       +-- deploy.yml           # Triggers on prod-* commits, SSHs into droplet and runs deploy scripts
+|
+|-- backend/                      # FastAPI application
+|   |-- app/
+|   |   |-- database/            # Read/write pools, transactions
+|   |   |-- routers/             # API endpoints
+|   |   |-- auth/                # JWT + CSRF
+|   |   |-- services/            # Image processing, email, translation, circuit breaker
+|   |   |-- schemas/             # Pydantic models
+|   |   |-- middleware/          # CORS, logging, security
+|   |   |-- redis/               # Cache, rate limiting
+|   |   |-- kafka/               # Redpanda producer + consumer worker
+|   |   |-- temporal/            # Workflows, activities, worker
+|   |   |-- templates/           # Email HTML templates
+|   |   |-- utils/               # Validators, exceptions
+|   |   +-- tests/               # Pytest test suite
+|   |-- Dockerfile
+|   |-- alembic/                 # Database migrations
+|   +-- scripts/                 # Admin tools, seeding, maintenance
+|
+|-- image-service/               # Content moderation microservice
+|   |-- main.py                  # FastAPI + TensorFlow
+|   |-- image_validator.py       # Image processing logic
+|   |-- Dockerfile
+|   +-- config.py                # Service configuration
+|
+|-- k8s/                         # Kubernetes manifests
+|   |-- 00-namespace.yaml        # portfolio namespace
+|   |-- 01-configmap.yaml        # app configuration
+|   |-- 02-secrets.yaml          # secret template, auto-generated by deploy script
+|   |-- 03-pvcs.yaml             # persistent storage (postgres, redis, minio)
+|   |-- 04-postgres-primary.yaml # write database, WAL streaming source
+|   |-- 05-postgres-replica.yaml # read replica, hot standby
+|   |-- 06-redis.yaml            # cache, LRU eviction, 64MB cap
+|   |-- 07-minio.yaml            # S3-compatible object storage
+|   |-- 08-image-service.yaml    # content moderation microservice, TensorFlow
+|   |-- 09-backend.yaml          # FastAPI app, migrations via initContainer
+|   |-- 10-nginx.yaml            # TLS termination + HTTP->HTTPS redirect
+|   |-- 11-redpanda.yaml         # Kafka-compatible broker (StatefulSet)
+|   |-- 12-redpanda-init.yaml    # One-shot Job, creates topics after broker ready
+|   |-- 13-consumer.yaml         # Redpanda consumer, routes events to Temporal
+|   |-- 14-temporal.yaml         # Temporal server + UI
+|   |-- 15-temporal-worker.yaml  # Temporal worker (AuthEventWorkflow)
+|   |-- 16-libretranslate.yaml   # Self-hosted translation service (ES<->EN)
+|   +-- 17-monitoring.yaml       # Grafana + Loki + Promtail (temporal-worker logs only)
+|
+|-- k8s scripts/                 # Deployment automation
+|   |-- 00-install-k3s.sh
+|   |-- build-and-import-k3s.sh
+|   |-- deploy-k3s-local.sh
+|   |-- set-resend-key.sh
+|   |-- rotate-grafana-demo.sh   # kept for reference, rotation now handled by 18-grafana-rotation.yaml CronJob
+|   |-- cleanup.sh
+|   +-- README.md                # K8s deployment guide
+|
+|-- nginx/                       # Reverse proxy + frontend
+|   |-- nginx.conf               # Local dev config (Docker Compose)
+|   |-- Dockerfile
+|   +-- frontend/                # Static files
+|
+|-- postgres/                    # Custom PostgreSQL image
+|   |-- Dockerfile
+|   |-- init-db.sh               # Creates portfolio, temporal, temporal_visibility
+|   |-- init-ssl.sh              # certbot + Let's Encrypt setup, TLS secret injection into k3s
+|   +-- init-pgpass.sh           # passwordless non-interactive connections
+|
+|-- docker-compose.yml           # Local development
+|-- SSL_SETUP.md                 # Guide to install https
+|-- eslint.config.mjs
++-- README.md
 ```
 
 ---
 
-## 📬 Contact
+## Contact
 
-**Andrés Olguín**
+**Andres Olguin**
 
 Email: acos2014600836@gmail.com
 

@@ -5,8 +5,6 @@ set -e
 # Portfolio k3s Deployment Script - DigitalOcean 4GB Droplet
 # Run as regular user with sudo privileges
 # Deploys services SEQUENTIALLY to avoid OOM
-#
-# UPDATED: Now loads Resend API key from .env.secrets
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -185,6 +183,31 @@ if [ "$MISSING" -eq 1 ]; then
     log_error "Run build-and-import-k3s.sh first"
     exit 1
 fi
+
+# =============================================================================
+# Check Grafana password files
+# =============================================================================
+GRAFANA_ADMIN_PASS_FILE="${SCRIPT_DIR}/.grafana-admin-password"
+GRAFANA_DEMO_PASS_FILE="${SCRIPT_DIR}/.grafana-demo-password"
+
+if [ ! -f "$GRAFANA_ADMIN_PASS_FILE" ]; then
+    log_error "Missing: $GRAFANA_ADMIN_PASS_FILE"
+    log_error "Create it before deploying:"
+    log_error "  echo 'your-strong-admin-password' > .grafana-admin-password"
+    log_error "  chmod 600 .grafana-admin-password"
+    exit 1
+fi
+
+if [ ! -f "$GRAFANA_DEMO_PASS_FILE" ]; then
+    log_error "Missing: $GRAFANA_DEMO_PASS_FILE"
+    log_error "Create it before deploying:"
+    log_error "  echo 'your-demo-password' > .grafana-demo-password"
+    log_error "  chmod 600 .grafana-demo-password"
+    exit 1
+fi
+
+GRAFANA_ADMIN_PASS=$(cat "$GRAFANA_ADMIN_PASS_FILE")
+GRAFANA_DEMO_PASS=$(cat "$GRAFANA_DEMO_PASS_FILE")
 
 log_success "All prerequisites OK"
 echo ""
@@ -380,8 +403,6 @@ log_info "Waiting for LibreTranslate — first boot downloads language models, a
 if ! wait_for_pods_ready "app=libretranslate" "portfolio" 300 "LibreTranslate"; then
     log_warn "LibreTranslate not ready — translation will fall back to duplication"
     log_warn "Check: kubectl logs -n portfolio -l app=libretranslate"
-    # Non-fatal: the backend handles translation failures gracefully
-    # by duplicating the source text for the missing language.
 fi
 echo ""
 
@@ -497,6 +518,52 @@ fi
 echo ""
 
 # =============================================================================
+# Monitoring (Grafana + Loki + Promtail)
+# =============================================================================
+log_info "Creating Grafana secrets from password files..."
+
+kubectl create secret generic monitoring-secrets \
+  --from-literal=GF_SECURITY_ADMIN_USER=admin \
+  --from-literal=GF_SECURITY_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASS" \
+  --from-literal=GF_DEMO_PASSWORD="$GRAFANA_DEMO_PASS" \
+  -n portfolio \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+log_success "monitoring-secrets created"
+
+log_info "Deploying monitoring stack (Grafana + Loki + Promtail)..."
+
+# Delete previous init Job if it exists — Jobs are immutable, apply fails if it already exists.
+kubectl delete job grafana-init-users -n portfolio 2>/dev/null || true
+
+kubectl apply -f "$K8S_DIR/17-monitoring.yaml"
+
+if ! wait_for_pods_ready "app=grafana" "portfolio" 120 "Grafana"; then
+    log_error "Grafana failed"
+    kubectl logs -n portfolio -l app=grafana --tail=30 2>/dev/null || true
+    exit 1
+fi
+echo ""
+
+# =============================================================================
+# Grafana User Init (creates demo Viewer user)
+# Job is defined at the bottom of 17-monitoring.yaml — already applied above.
+# =============================================================================
+log_info "Waiting for Grafana user init Job..."
+
+if ! kubectl wait --for=condition=complete job/grafana-init-users -n portfolio --timeout=120s; then
+    log_error "Grafana user init Job failed"
+    kubectl logs -n portfolio -l job-name=grafana-init-users --tail=30 2>/dev/null || true
+    log_warn "Grafana is up but demo user may not have been created"
+    log_warn "Re-run manually:"
+    log_warn "  kubectl delete job grafana-init-users -n portfolio"
+    log_warn "  kubectl apply -f k8s/17-monitoring.yaml"
+else
+    log_success "Grafana users initialized"
+fi
+echo ""
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""
@@ -519,8 +586,8 @@ echo "  ACCESS YOUR APP"
 echo "============================================"
 echo ""
 echo "  Frontend: https://testproveoportfolio.xyz/front-page/front-page.html"
-echo "  API Docs: https://testproveoportfolio.xyz/docs"
 echo "  Health:   https://testproveoportfolio.xyz/health"
+echo "  Grafana:  https://testproveoportfolio.xyz/grafana"
 echo ""
 echo "============================================"
 echo "  NEXT STEPS"
@@ -550,6 +617,10 @@ echo ""
 echo "  6. Monitor memory:"
 echo "     watch 'free -h && echo && kubectl top pods -n portfolio'"
 echo ""
+echo "  7. Grafana demo user password:"
+echo "     cat ${GRAFANA_DEMO_PASS_FILE}"
+echo "     # Add this to the README once confirmed working"
+echo ""
 echo "  Credentials: ${SCRIPT_DIR}/.credentials"
 echo ""
 echo "============================================"
@@ -557,21 +628,23 @@ echo "  MEMORY BUDGET (4GB droplet + 2GB swap)"
 echo "============================================"
 echo ""
 echo "  k3s system:         ~300MB"
-echo "  PostgreSQL primary:  ~192-384MB"
-echo "  PostgreSQL replica:  ~128-256MB"
-echo "  Redis:               ~32-96MB"
-echo "  MinIO:               ~128-256MB"
-echo "  Image Service:       ~384-768MB (TensorFlow NSFW)"
-echo "  Backend:             ~192-512MB"
-echo "  Nginx:               ~32-128MB"
-echo "  Redpanda:            ~512-768MB"
-echo "  Consumer:            ~64-128MB"
-echo "  Temporal server:     ~192-384MB"
-echo "  Temporal UI:         ~64-128MB"
-echo "  Temporal worker:     ~128-256MB"
-echo "  LibreTranslate:      ~256-512MB (en+es models)"
-echo "  Grafana:             (coming soon)"
+echo "  PostgreSQL primary:  ~104Mi actual"
+echo "  PostgreSQL replica:   ~34Mi actual"
+echo "  Redis:                 ~4Mi actual"
+echo "  MinIO:                ~81Mi actual"
+echo "  Image Service:       ~331Mi actual (TensorFlow NSFW)"
+echo "  Backend:              ~79Mi actual"
+echo "  Nginx:                 ~4Mi actual"
+echo "  Redpanda:            ~146Mi actual"
+echo "  Consumer:             ~27Mi actual"
+echo "  Temporal server:      ~85Mi actual"
+echo "  Temporal UI:           ~9Mi actual"
+echo "  Temporal worker:      ~62Mi actual"
+echo "  LibreTranslate:      ~226Mi actual"
+echo "  Loki:                ~128Mi actual"
+echo "  Promtail:             ~64Mi actual"
+echo "  Grafana:             ~128Mi actual"
 echo "  ─────────────────────────────────"
-echo "  Total requests:     ~2604MB"
-echo "  Total limits:       ~4576MB"
-echo "  Available:           4096MB RAM + 2048MB swap"
+echo "  Total pod actual:   ~1376Mi"
+echo "  Node used:           ~2.3Gi (includes k3s, kernel, buff/cache)"
+echo "  Available:            4096MB RAM + 2048MB swap"
