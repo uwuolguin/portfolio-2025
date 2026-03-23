@@ -75,6 +75,9 @@ data:
       working_directory: /loki/compactor
       # retention_enabled tells the compactor to delete chunks older than retention_period
       retention_enabled: true
+      # required when retention is enabled — tells the compactor where to store
+      # delete requests. must match the store type (tsdb in our case)
+      delete_request_store: tsdb
 
 ---
 apiVersion: v1
