@@ -15,7 +15,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 | [https://testproveoportfolio.xyz/front-page/front-page.html](https://testproveoportfolio.xyz/front-page/front-page.html) | Frontend |
 | [https://testproveoportfolio.xyz/grafana](https://testproveoportfolio.xyz/grafana) | Grafana: live pipeline logs |
 
-**Try the live pipeline:** sign up and log in on the frontend, then open Grafana. Your login event will show up within seconds -- if it doesn't, refresh the Grafana tab.
+**Try the live pipeline:** open Grafana first, then sign up and log in on the frontend. Your login event will show up in the dashboard within seconds -- if it doesn't, refresh the Grafana tab.
 
 **Grafana demo credentials:**
 
@@ -167,15 +167,15 @@ Login and logout events publish to Redpanda, partitioned by language (`es -> 0`,
 Events are published via `asyncio.create_task` for sub-millisecond API response times. The HTTP response returns before Redpanda acknowledgment. For critical-path events where zero-loss is mandated over latency, `await` would be used to ensure delivery before responding. The rest of the wiring is production-grade: explicit partition routing, **manual offset commits** for **at-least-once delivery**, **deterministic workflow IDs** so duplicate Kafka delivery doesn't execute the workflow twice, fire-and-forget child workflows. Swap the mock email activity for a real one and the pipeline is production-ready.
 
 ### Live Pipeline Verification: Grafana
-Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials. Username is always `demo`, current password is available in the [Kubernetes Deployment Guide](./k8s%20scripts/README.md#grafana-credentials). Then create an account on the demo site and log in. The event shows up in the dashboard within seconds.
+Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials: username `demo`, password `password`. Then create an account on the demo site and log in. The event shows up in the dashboard within seconds -- if it doesn't, refresh the Grafana tab.
 
 What you'll see:
-- The JSON log line with `user_uuid`, `email`, `lang`, `event_type`, `partition`, `offset`
-- `auth_event_received`: parent workflow ran
-- `mock_email_sent`: child workflow ran independently after parent completed
-- Partition routing: es on 0, en on 1
+- `event_type`: login or logout
+- `email`: the account that triggered the event (anonymous for logouts)
+- `lang`: language the user was browsing in (es or en)
+- `partition`: which Redpanda partition received the event (es -> 0, en -> 1)
 
-Full chain: login endpoint -> `asyncio.create_task(kafka_producer.publish_event(...))` -> Redpanda -> consumer offset commit -> Temporal `AuthEventWorkflow` -> `log_event_activity` -> child `SendNotificationWorkflow` -> `send_mock_email_activity` -> structlog JSON -> Alloy scrapes `temporal-worker` via Kubernetes API -> Loki -> Grafana.
+Full chain: login endpoint -> `asyncio.create_task(kafka_producer.publish_event(...))` -> Redpanda -> consumer offset commit -> Temporal `AuthEventWorkflow` -> `log_event_activity` -> structlog JSON -> Alloy scrapes `temporal-worker` via Kubernetes API -> Loki -> Grafana.
 
 ### TLS
 Certbot provisions Let's Encrypt certs on the droplet, they get copied to `/home/deploy/certs/` and loaded into Kubernetes as a `tls-secret`. Nginx terminates TLS, sets `X-Forwarded-Proto: https`. Root cron job handles renewal: updates the secret and restarts nginx.
@@ -205,22 +205,22 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 | Pod | Manifest | Actual RAM |
 |-----|----------|-----------|
-| `postgres-primary-0` | `04-postgres-primary.yaml` | ~100Mi |
-| `postgres-replica-0` | `05-postgres-replica.yaml` | ~30Mi |
+| `postgres-primary-0` | `04-postgres-primary.yaml` | ~104Mi |
+| `postgres-replica-0` | `05-postgres-replica.yaml` | ~34Mi |
 | `redis-*` | `06-redis.yaml` | ~4Mi |
-| `minio-*` | `07-minio.yaml` | ~69Mi |
-| `image-service-*` | `08-image-service.yaml` | ~327Mi |
-| `backend-*` | `09-backend.yaml` | ~82Mi |
+| `minio-*` | `07-minio.yaml` | ~81Mi |
+| `image-service-*` | `08-image-service.yaml` | ~331Mi |
+| `backend-*` | `09-backend.yaml` | ~79Mi |
 | `nginx-*` | `10-nginx.yaml` | ~4Mi |
-| `redpanda-0` | `11-redpanda.yaml` | ~244Mi |
-| `consumer-*` | `13-consumer.yaml` | ~26Mi |
-| `temporal-*` | `14-temporal.yaml` | ~174Mi |
-| `temporal-ui-*` | `14-temporal.yaml` | ~4Mi |
-| `temporal-worker-*` | `15-temporal-worker.yaml` | ~56Mi |
-| `libretranslate-*` | `16-libretranslate.yaml` | ~159Mi |
-| `loki-*` | `17-monitoring.yaml` | ~49Mi |
-| `alloy-*` | `17-monitoring.yaml` | ~71Mi |
-| `grafana-*` | `17-monitoring.yaml` | ~185Mi |
+| `redpanda-0` | `11-redpanda.yaml` | ~146Mi |
+| `consumer-*` | `13-consumer.yaml` | ~27Mi |
+| `temporal-*` | `14-temporal.yaml` | ~85Mi |
+| `temporal-ui-*` | `14-temporal.yaml` | ~9Mi |
+| `temporal-worker-*` | `15-temporal-worker.yaml` | ~62Mi |
+| `libretranslate-*` | `16-libretranslate.yaml` | ~226Mi |
+| `loki-*` | `17-monitoring.yaml` | ~128Mi |
+| `alloy-*` | `17-monitoring.yaml` | ~64Mi |
+| `grafana-*` | `17-monitoring.yaml` | ~128Mi |
 
 ---
 
