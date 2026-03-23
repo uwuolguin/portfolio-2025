@@ -510,16 +510,6 @@ fi
 echo ""
 
 # =============================================================================
-# Nginx
-# =============================================================================
-log_info "Deploying Nginx..."
-kubectl apply -f "$K8S_DIR/10-nginx.yaml"
-if ! wait_for_pods_ready "app=nginx" "portfolio" 60 "Nginx"; then
-    log_error "Nginx failed"; exit 1
-fi
-echo ""
-
-# =============================================================================
 # Monitoring (Grafana + Loki + Promtail)
 # =============================================================================
 log_info "Creating Grafana secrets from password files..."
@@ -562,6 +552,16 @@ if ! kubectl wait --for=condition=complete job/grafana-init-users -n portfolio -
     log_warn "  kubectl apply -f k8s/17-monitoring.yaml"
 else
     log_success "Grafana users initialized"
+fi
+echo ""
+
+# =============================================================================
+# Nginx
+# =============================================================================
+log_info "Deploying Nginx..."
+kubectl apply -f "$K8S_DIR/10-nginx.yaml"
+if ! wait_for_pods_ready "app=nginx" "portfolio" 60 "Nginx"; then
+    log_error "Nginx failed"; exit 1
 fi
 echo ""
 
