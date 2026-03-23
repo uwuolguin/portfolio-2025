@@ -210,7 +210,7 @@ data:
             # proxy_set_header Host $http_host preserves the original Host header
             # including port if present, which Grafana uses to build redirect URLs.
             location /grafana/ {
-                proxy_pass http://grafana/;
+                proxy_pass http://grafana;
                 proxy_http_version 1.1;
                 proxy_set_header Host $http_host;
                 proxy_set_header X-Real-IP $remote_addr;
