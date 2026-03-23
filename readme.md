@@ -20,7 +20,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 **Grafana demo credentials:**
 
 > **Username:** `demo`
-> **Password:** ask the admin or see the [Kubernetes Deployment Guide](./k8s%20scripts/README.md#grafana-credentials)
+> **Password:** `password`
 
 **A few things to know before poking around:**
 - Email verification uses the Resend free tier, so only the email acos2014600836@gmail.com can receive the verification link. Company creation is restricted to admin-verified users for now, but you can still sign up.
@@ -205,22 +205,22 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 | Pod | Manifest | Actual RAM |
 |-----|----------|-----------|
-| `postgres-primary-0` | `04-postgres-primary.yaml` | ~104Mi |
-| `postgres-replica-0` | `05-postgres-replica.yaml` | ~34Mi |
+| `postgres-primary-0` | `04-postgres-primary.yaml` | ~100Mi |
+| `postgres-replica-0` | `05-postgres-replica.yaml` | ~30Mi |
 | `redis-*` | `06-redis.yaml` | ~4Mi |
-| `minio-*` | `07-minio.yaml` | ~81Mi |
-| `image-service-*` | `08-image-service.yaml` | ~331Mi |
-| `backend-*` | `09-backend.yaml` | ~79Mi |
+| `minio-*` | `07-minio.yaml` | ~69Mi |
+| `image-service-*` | `08-image-service.yaml` | ~327Mi |
+| `backend-*` | `09-backend.yaml` | ~82Mi |
 | `nginx-*` | `10-nginx.yaml` | ~4Mi |
-| `redpanda-0` | `11-redpanda.yaml` | ~146Mi |
-| `consumer-*` | `13-consumer.yaml` | ~27Mi |
-| `temporal-*` | `14-temporal.yaml` | ~85Mi |
-| `temporal-ui-*` | `14-temporal.yaml` | ~9Mi |
-| `temporal-worker-*` | `15-temporal-worker.yaml` | ~62Mi |
-| `libretranslate-*` | `16-libretranslate.yaml` | ~226Mi |
-| `loki-*` | `17-monitoring.yaml` | ~128Mi |
-| `alloy-*` | `17-monitoring.yaml` | ~64Mi |
-| `grafana-*` | `17-monitoring.yaml` | ~128Mi |
+| `redpanda-0` | `11-redpanda.yaml` | ~244Mi |
+| `consumer-*` | `13-consumer.yaml` | ~26Mi |
+| `temporal-*` | `14-temporal.yaml` | ~174Mi |
+| `temporal-ui-*` | `14-temporal.yaml` | ~4Mi |
+| `temporal-worker-*` | `15-temporal-worker.yaml` | ~56Mi |
+| `libretranslate-*` | `16-libretranslate.yaml` | ~159Mi |
+| `loki-*` | `17-monitoring.yaml` | ~49Mi |
+| `alloy-*` | `17-monitoring.yaml` | ~71Mi |
+| `grafana-*` | `17-monitoring.yaml` | ~185Mi |
 
 ---
 
