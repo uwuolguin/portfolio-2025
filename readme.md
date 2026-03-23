@@ -194,9 +194,10 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 - CI/CD is scoped to `prod-*` commit prefixes via GitHub Actions: not a full pipeline.
 - No backups. Local-path PVCs on one node: if the droplet dies, data goes with it.
 - Single point of failure. Single-node k3s means no high availability: if the droplet goes down, the entire stack goes down with it. Remediation: in a production environment this would be deployed across a managed Kubernetes control plane (EKS/GKE) with a multi-AZ node group.
+- Inline documentation: Manifests and scripts have no comments explaining non-obvious values or why a particular configuration was chosen. The goal for this repo is that every config value that isn't self-evident has a comment next to it.
 - `force_rollback` on DB methods is a testing convenience, not a production pattern.
 - **Single-namespace monitoring**: Grafana, Loki, and Alloy run inside the `portfolio` namespace alongside the application. In a real multi-tenant environment, observability infrastructure lives in a dedicated `monitoring` namespace - the same Grafana/Loki stack then serves `portfolio`, `staging`, `payments`, or any other namespace without being coupled to one application. The mechanics: Alloy's `ClusterRole` grants `get/watch/list` on pods cluster-wide, and the `ClusterRoleBinding` maps that role to the `alloy` ServiceAccount in `monitoring`, so it can tail logs from every namespace while running in its own. Keeping them separate also means you can wipe `kubectl delete namespace portfolio` during a clean deploy cycle without taking down observability. For this single-environment demo the separation adds DNS complexity (`loki.monitoring.svc.cluster.local` vs `loki.portfolio.svc.cluster.local`) with no operational benefit, so everything lives in `portfolio`.
-- Inline documentation: Manifests and scripts have no comments explaining non-obvious values or why a particular configuration was chosen. The goal for this repo is that every config value that isn't self-evident has a comment next to it.
+
 
 ---
 
