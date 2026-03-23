@@ -191,19 +191,21 @@ GRAFANA_ADMIN_PASS_FILE="${SCRIPT_DIR}/.grafana-admin-password"
 GRAFANA_DEMO_PASS_FILE="${SCRIPT_DIR}/.grafana-demo-password"
 
 if [ ! -f "$GRAFANA_ADMIN_PASS_FILE" ]; then
-    log_error "Missing: $GRAFANA_ADMIN_PASS_FILE"
-    log_error "Create it before deploying:"
-    log_error "  echo 'your-strong-admin-password' > .grafana-admin-password"
-    log_error "  chmod 600 .grafana-admin-password"
-    exit 1
+    log_info "Grafana admin password file not found — enter it now (input hidden):"
+    read -rsp "  Admin password: " GRAFANA_ADMIN_PASS_INPUT
+    echo ""
+    echo "$GRAFANA_ADMIN_PASS_INPUT" > "$GRAFANA_ADMIN_PASS_FILE"
+    chmod 600 "$GRAFANA_ADMIN_PASS_FILE"
+    log_success "Saved to $GRAFANA_ADMIN_PASS_FILE"
 fi
 
 if [ ! -f "$GRAFANA_DEMO_PASS_FILE" ]; then
-    log_error "Missing: $GRAFANA_DEMO_PASS_FILE"
-    log_error "Create it before deploying:"
-    log_error "  echo 'your-demo-password' > .grafana-demo-password"
-    log_error "  chmod 600 .grafana-demo-password"
-    exit 1
+    log_info "Grafana demo password file not found — enter it now (input hidden):"
+    read -rsp "  Demo password: " GRAFANA_DEMO_PASS_INPUT
+    echo ""
+    echo "$GRAFANA_DEMO_PASS_INPUT" > "$GRAFANA_DEMO_PASS_FILE"
+    chmod 600 "$GRAFANA_DEMO_PASS_FILE"
+    log_success "Saved to $GRAFANA_DEMO_PASS_FILE"
 fi
 
 GRAFANA_ADMIN_PASS=$(cat "$GRAFANA_ADMIN_PASS_FILE")
