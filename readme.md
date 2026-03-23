@@ -13,7 +13,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 | URL | What |
 |-----|------|
 | [https://testproveoportfolio.xyz/front-page/front-page.html](https://testproveoportfolio.xyz/front-page/front-page.html) | Frontend |
-| `https://testproveoportfolio.xyz/grafana` | Grafana: live pipeline logs |
+| [https://testproveoportfolio.xyz/grafana](https://testproveoportfolio.xyz/grafana) | Grafana: live pipeline logs |
 
 **Try the live pipeline:** open Grafana first, then sign up and log in on the frontend. Your login event will show up in the dashboard within seconds.
 
@@ -51,7 +51,7 @@ nginx (TLS - HTTP->HTTPS - rate limiting - security headers)
    |
    |---> /images/*     Image Service (direct, backend bypassed)
    |
-   +---> /grafana/*    Grafana UI (HTTPS, rotating demo credentials)
+   +---> /grafana/*    Grafana UI (HTTPS, static demo credentials)
 ```
 
 ### End-to-End Event Flow: Auth Event Pipeline
@@ -89,8 +89,8 @@ Temporal worker (portfolio-backend image, different CMD)
       |       structlog -> JSON line -> stdout
       |                                |
       |                                v
-      |                         Promtail (DaemonSet)
-      |                           tails /var/log/pods/...
+      |                         Alloy
+      |                           tails pod logs via Kubernetes API
       |                                |
       |                                v
       |                           Loki  ---- indexes JSON fields (level, event,
@@ -109,7 +109,7 @@ Temporal worker (portfolio-backend image, different CMD)
 - **Redpanda** decouples the HTTP request from all downstream processing. The API response returns instantly; the event pipeline runs asynchronously.
 - **Consumer -> Temporal hand-off** makes the workflow durable. If the Temporal server restarts mid-execution, the workflow resumes from the last checkpoint. No event is lost.
 - **Temporal** provides retries, timeouts, and full execution history without any custom retry logic in application code.
-- **Promtail -> Loki -> Grafana** gives observability into workflow execution without instrumenting the application beyond `structlog` JSON output.
+- **Alloy -> Loki -> Grafana** gives observability into workflow execution without instrumenting the application beyond `structlog` JSON output.
 
 ---
 
@@ -140,9 +140,9 @@ Temporal worker (portfolio-backend image, different CMD)
 - **Let's Encrypt**: automated TLS via certbot, auto-renewed via cron
 
 ### Observability
-- **Grafana**: live dashboard, publicly accessible with rotating demo credentials
+- **Grafana**: live dashboard, publicly accessible with static demo credentials
 - **Loki**: log aggregation
-- **Promtail**: scrapes `temporal-worker` pod logs only, routes to Loki
+- **Alloy**: scrapes `temporal-worker` pod logs only via Kubernetes API, routes to Loki
 
 ### AI/ML
 - **TensorFlow 2.15** + **OpenNSFW2**: automated content moderation on upload
@@ -175,13 +175,13 @@ What you'll see:
 - `mock_email_sent`: child workflow ran independently after parent completed
 - Partition routing: es on 0, en on 1
 
-Full chain: login endpoint -> `asyncio.create_task(kafka_producer.publish_event(...))` -> Redpanda -> consumer offset commit -> Temporal `AuthEventWorkflow` -> `log_event_activity` -> child `SendNotificationWorkflow` -> `send_mock_email_activity` -> structlog JSON -> Promtail scrapes `temporal-worker` -> Loki -> Grafana.
+Full chain: login endpoint -> `asyncio.create_task(kafka_producer.publish_event(...))` -> Redpanda -> consumer offset commit -> Temporal `AuthEventWorkflow` -> `log_event_activity` -> child `SendNotificationWorkflow` -> `send_mock_email_activity` -> structlog JSON -> Alloy scrapes `temporal-worker` via Kubernetes API -> Loki -> Grafana.
 
 ### TLS
 Certbot provisions Let's Encrypt certs on the droplet, they get copied to `/home/deploy/certs/` and loaded into Kubernetes as a `tls-secret`. Nginx terminates TLS, sets `X-Forwarded-Proto: https`. Root cron job handles renewal: updates the secret and restarts nginx.
 
 ### Structured Logging
-Every caught exception across every service is JSON via structlog. In the `temporal-worker` pod specifically, uncaught exceptions are also captured as JSON: asyncio loop exceptions via `install_async_exception_handler` and synchronous crashes via `sys.excepthook`. Temporal SDK Python-side logs and Rust core logs are routed through `LogForwardingConfig` and formatted as JSON in that same pod. Gaps: threads, multiprocessing, and OS-level errors that occur before the asyncio worker starts (such as missing env vars resolved at import time) are not guaranteed to be JSON. The `temporal-worker` pod logs are scraped by Promtail and indexed in Loki: queryable live in Grafana.
+Every caught exception across every service is JSON via structlog. In the `temporal-worker` pod specifically, uncaught exceptions are also captured as JSON: asyncio loop exceptions via `install_async_exception_handler` and synchronous crashes via `sys.excepthook`. Temporal SDK Python-side logs and Rust core logs are routed through `LogForwardingConfig` and formatted as JSON in that same pod. Gaps: threads, multiprocessing, and OS-level errors that occur before the asyncio worker starts (such as missing env vars resolved at import time) are not guaranteed to be JSON. The `temporal-worker` pod logs are scraped by Alloy and indexed in Loki: queryable live in Grafana.
 
 ### Frontend
 Vanilla ES6+, no framework, no build step. Components rebuild on state change by clearing and reconstructing the DOM, straightforward and fast for this scale.
@@ -195,7 +195,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 - No backups. Local-path PVCs on one node: if the droplet dies, data goes with it.
 - Single point of failure. Single-node k3s means no high availability: if the droplet goes down, the entire stack goes down with it. Remediation: in a production environment this would be deployed across a managed Kubernetes control plane (EKS/GKE) with a multi-AZ node group.
 - `force_rollback` on DB methods is a testing convenience, not a production pattern.
-- **Single-namespace monitoring**: Grafana, Loki, and Promtail run inside the `portfolio` namespace alongside the application. In a real multi-tenant environment, observability infrastructure lives in a dedicated `monitoring` namespace - the same Grafana/Loki stack then serves `portfolio`, `staging`, `payments`, or any other namespace without being coupled to one application. The mechanics: Promtail's `ClusterRole` grants `get/watch/list` on pods cluster-wide, and the `ClusterRoleBinding` maps that role to the `promtail` ServiceAccount in `monitoring`, so it can tail logs from every namespace while running in its own. Keeping them separate also means you can wipe `kubectl delete namespace portfolio` during a clean deploy cycle without taking down observability. For this single-environment demo the separation adds DNS complexity (`loki.monitoring.svc.cluster.local` vs `loki.portfolio.svc.cluster.local`) with no operational benefit, so everything lives in `portfolio`.
+- **Single-namespace monitoring**: Grafana, Loki, and Alloy run inside the `portfolio` namespace alongside the application. In a real multi-tenant environment, observability infrastructure lives in a dedicated `monitoring` namespace - the same Grafana/Loki stack then serves `portfolio`, `staging`, `payments`, or any other namespace without being coupled to one application. The mechanics: Alloy's `ClusterRole` grants `get/watch/list` on pods cluster-wide, and the `ClusterRoleBinding` maps that role to the `alloy` ServiceAccount in `monitoring`, so it can tail logs from every namespace while running in its own. Keeping them separate also means you can wipe `kubectl delete namespace portfolio` during a clean deploy cycle without taking down observability. For this single-environment demo the separation adds DNS complexity (`loki.monitoring.svc.cluster.local` vs `loki.portfolio.svc.cluster.local`) with no operational benefit, so everything lives in `portfolio`.
 
 ---
 
@@ -217,7 +217,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 | `temporal-worker-*` | `15-temporal-worker.yaml` | ~62Mi |
 | `libretranslate-*` | `16-libretranslate.yaml` | ~226Mi |
 | `loki-*` | `17-monitoring.yaml` | ~128Mi |
-| `promtail-*` | `17-monitoring.yaml` | ~64Mi |
+| `alloy-*` | `17-monitoring.yaml` | ~64Mi |
 | `grafana-*` | `17-monitoring.yaml` | ~128Mi |
 
 ---
@@ -310,14 +310,13 @@ proveo/
 |   |-- 14-temporal.yaml         # Temporal server + UI
 |   |-- 15-temporal-worker.yaml  # Temporal worker (AuthEventWorkflow)
 |   |-- 16-libretranslate.yaml   # Self-hosted translation service (ES<->EN)
-|   +-- 17-monitoring.yaml       # Grafana + Loki + Promtail (temporal-worker logs only)
+|   +-- 17-monitoring.yaml       # Grafana + Loki + Alloy (temporal-worker logs only)
 |
 |-- k8s scripts/                 # Deployment automation
 |   |-- 00-install-k3s.sh
 |   |-- build-and-import-k3s.sh
 |   |-- deploy-k3s-local.sh
 |   |-- set-resend-key.sh
-|   |-- rotate-grafana-demo.sh   # kept for reference, rotation now handled by 18-grafana-rotation.yaml CronJob
 |   |-- cleanup.sh
 |   +-- README.md                # K8s deployment guide
 |

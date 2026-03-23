@@ -1,5 +1,5 @@
 # =============================================================================
-# 17-monitoring.yaml — Grafana + Loki + Promtail + user init Job
+# 17-monitoring.yaml — Grafana + Loki + Alloy + user init Job
 #
 # Namespace: portfolio (same as the app — single environment, no separation needed)
 #
@@ -14,12 +14,18 @@
 #   Admin:  admin / <contents of .grafana-admin-password>
 #   Demo:   demo  / <contents of .grafana-demo-password>  (Viewer only)
 #
+# VERSIONS:
+#   Loki:    3.5.0  (boltdb-shipper + schema v11 deprecated in 3.0, using TSDB + v13)
+#   Alloy:   v1.9.2 (Promtail EOL March 2026, Alloy is the official replacement)
+#   Grafana: 10.2.0
+#
 # MEMORY: ~320Mi actual across all three pods
 # =============================================================================
 
 ---
 # =============================================================================
 # LOKI — stores and indexes the logs
+# Upgraded to 3.5.0 with TSDB storage (boltdb-shipper deprecated in 3.0)
 # =============================================================================
 apiVersion: v1
 kind: ConfigMap
@@ -34,52 +40,41 @@ data:
       http_listen_port: 3100
       grpc_listen_port: 9096
 
-    ingester:
-      lifecycler:
-        address: 127.0.0.1
-        ring:
-          kvstore:
-            store: inmemory
-          replication_factor: 1
-        final_sleep: 0s
-      chunk_idle_period: 1m
-      chunk_retain_period: 30s
-      max_transfer_retries: 0
+    # common block simplifies single-node configuration in Loki 3.x
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
 
     schema_config:
       configs:
         - from: 2026-01-01
-          store: boltdb-shipper
+          store: tsdb
           object_store: filesystem
-          schema: v11
+          schema: v13
           index:
             prefix: index_
             period: 24h
 
-    storage_config:
-      boltdb_shipper:
-        active_index_directory: /loki/boltdb-shipper-active
-        shared_store: filesystem
-      filesystem:
-        directory: /loki/chunks
-
-    compactor:
-      working_directory: /loki/boltdb-shipper-compactor
-      shared_store: filesystem
-
     limits_config:
-      enforce_metric_name: false
       reject_old_samples: true
       reject_old_samples_max_age: 72h
       ingestion_rate_mb: 4
       ingestion_burst_size_mb: 6
-
-    chunk_store_config:
-      max_look_back_period: 72h
-
-    table_manager:
-      retention_deletes_enabled: true
+      # retention_period in limits_config is the Loki 3.x way to set retention
       retention_period: 72h
+
+    compactor:
+      working_directory: /loki/compactor
+      # retention_enabled tells the compactor to delete chunks older than retention_period
+      retention_enabled: true
 
 ---
 apiVersion: v1
@@ -150,7 +145,7 @@ spec:
               cpu: "50m"
       containers:
         - name: loki
-          image: grafana/loki:2.9.0
+          image: grafana/loki:3.5.0
           args:
             - -config.file=/etc/loki/loki.yaml
           ports:
@@ -190,129 +185,162 @@ spec:
 
 ---
 # =============================================================================
-# PROMTAIL — reads logs from the temporal-worker pod only
+# ALLOY — collects logs from the temporal-worker pod and ships to Loki
+#
+# Replaces Promtail (EOL March 2026). Alloy is the official Grafana collector.
+# Uses loki.source.kubernetes which reads from the Kubernetes API directly —
+# no hostPath volume needed, no dependency on the node filesystem layout.
+#
+# Config reference: https://grafana.com/docs/alloy/latest/collect/logs-in-kubernetes/
 # =============================================================================
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: promtail
+  name: alloy
   namespace: portfolio
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: promtail
+  name: alloy
 rules:
   - apiGroups: [""]
-    resources: [nodes, nodes/proxy, services, endpoints, pods]
+    resources: [nodes, nodes/proxy, services, endpoints, pods, pods/log]
     verbs: [get, watch, list]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: promtail
+  name: alloy
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: promtail
+  name: alloy
 subjects:
   - kind: ServiceAccount
-    name: promtail
+    name: alloy
     namespace: portfolio
 
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: promtail-config
+  name: alloy-config
   namespace: portfolio
 data:
-  promtail.yaml: |
-    server:
-      http_listen_port: 9080
-      grpc_listen_port: 0
+  config.alloy: |
+    // Discover all pods in the portfolio namespace
+    discovery.kubernetes "pods" {
+      role = "pod"
+      namespaces {
+        names = ["portfolio"]
+      }
+    }
 
-    positions:
-      filename: /tmp/positions.yaml
+    // Filter to temporal-worker only and set up labels.
+    discovery.relabel "temporal_worker" {
+      targets = discovery.kubernetes.pods.targets
 
-    clients:
-      - url: http://loki.portfolio.svc.cluster.local:3100/loki/api/v1/push
+      // Drop everything that is not the temporal-worker pod
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        action        = "keep"
+        regex         = "temporal-worker"
+      }
 
-    scrape_configs:
-      - job_name: temporal-worker
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names:
-                - portfolio
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        action        = "replace"
+        target_label  = "namespace"
+      }
 
-        pipeline_stages:
-          - json:
-              expressions:
-                event: event
-                level: level
-                workflow_id: workflow_id
-                event_type: event_type
-                lang: lang
-                task_queue: task_queue
-                error: error
-          - labels:
-              level:
-              event:
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        action        = "replace"
+        target_label  = "pod"
+      }
 
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            action: keep
-            regex: temporal-worker
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            target_label: app
-          - source_labels: [__meta_kubernetes_namespace]
-            target_label: namespace
-          - source_labels: [__meta_kubernetes_pod_name]
-            target_label: pod
-          - source_labels: [__meta_kubernetes_pod_container_name]
-            target_label: container
-          - replacement: /var/log/pods/*$1*/*/*.log
-            separator: _
-            source_labels:
-              - __meta_kubernetes_pod_uid
-              - __meta_kubernetes_pod_container_name
-            target_label: __path__
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        action        = "replace"
+        target_label  = "container"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        action        = "replace"
+        target_label  = "app"
+      }
+    }
+
+    // Read logs from the temporal-worker pod via the Kubernetes API.
+    // loki.source.kubernetes streams logs without needing hostPath mounts.
+    loki.source.kubernetes "temporal_worker" {
+      targets    = discovery.relabel.temporal_worker.output
+      forward_to = [loki.process.parse_json.receiver]
+    }
+
+    // Parse JSON log lines and promote level + event as stream labels.
+    // Everything else is available at query time via | json in LogQL.
+    loki.process "parse_json" {
+      stage.json {
+        expressions = {
+          level = "level",
+          event = "event",
+        }
+      }
+
+      stage.labels {
+        values = {
+          level = "",
+          event = "",
+        }
+      }
+
+      forward_to = [loki.write.loki.receiver]
+    }
+
+    // Write to Loki
+    loki.write "loki" {
+      endpoint {
+        url = "http://loki.portfolio.svc.cluster.local:3100/loki/api/v1/push"
+      }
+    }
 
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: promtail
+  name: alloy
   namespace: portfolio
   labels:
-    app: promtail
+    app: alloy
 spec:
   selector:
     matchLabels:
-      app: promtail
+      app: alloy
   template:
     metadata:
       labels:
-        app: promtail
+        app: alloy
     spec:
-      serviceAccountName: promtail
+      serviceAccountName: alloy
       containers:
-        - name: promtail
-          image: grafana/promtail:2.9.0
+        - name: alloy
+          image: grafana/alloy:v1.9.2
           args:
-            - -config.file=/etc/promtail/promtail.yaml
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/tmp/alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+          ports:
+            - containerPort: 12345
+              name: http-metrics
           volumeMounts:
             - name: config
-              mountPath: /etc/promtail
-            - name: varlog
-              mountPath: /var/log
-              readOnly: true
-            - name: varlibdockercontainers
-              mountPath: /var/lib/docker/containers
-              readOnly: true
+              mountPath: /etc/alloy
           resources:
             requests:
               memory: "64Mi"
@@ -323,13 +351,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: promtail-config
-        - name: varlog
-          hostPath:
-            path: /var/log
-        - name: varlibdockercontainers
-          hostPath:
-            path: /var/lib/docker/containers
+            name: alloy-config
 
 ---
 # =============================================================================
@@ -492,47 +514,13 @@ spec:
 # GRAFANA USER INIT — one-shot Job, runs after Grafana is healthy
 #
 # Admin is created automatically by Grafana from GF_SECURITY_ADMIN_* above.
-# This Job creates the demo Viewer user from GF_DEMO_PASSWORD in the secret.
-# Idempotent: if demo user already exists, updates the password to match.
+# Passwords are injected directly from the secret as env vars — no service
+# account, no Kubernetes API calls, no RBAC needed.
 #
 # Re-run manually:
 #   kubectl delete job grafana-init-users -n portfolio
 #   kubectl apply -f k8s/17-monitoring.yaml
 # =============================================================================
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: grafana-init
-  namespace: portfolio
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: grafana-init
-  namespace: portfolio
-rules:
-- apiGroups: [""]
-  resources: ["secrets"]
-  resourceNames: ["monitoring-secrets"]
-  verbs: ["get"]
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: grafana-init
-  namespace: portfolio
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: grafana-init
-subjects:
-- kind: ServiceAccount
-  name: grafana-init
-  namespace: portfolio
-
----
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -542,7 +530,6 @@ spec:
   backoffLimit: 5
   template:
     spec:
-      serviceAccountName: grafana-init
       restartPolicy: OnFailure
       containers:
       - name: init
@@ -554,21 +541,6 @@ spec:
           apk add --no-cache curl > /dev/null 2>&1
 
           GRAFANA="http://grafana.portfolio.svc.cluster.local:3000"
-          K8S="https://kubernetes.default.svc"
-          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-          CACERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-          SECRET_URL="$K8S/api/v1/namespaces/portfolio/secrets/monitoring-secrets"
-
-          SECRET_JSON=$(curl -sf --cacert "$CACERT" \
-            -H "Authorization: Bearer $TOKEN" "$SECRET_URL")
-
-          ADMIN_PASS=$(echo "$SECRET_JSON" \
-            | grep -o '"GF_SECURITY_ADMIN_PASSWORD":"[^"]*"' \
-            | cut -d'"' -f4 | base64 -d)
-
-          DEMO_PASS=$(echo "$SECRET_JSON" \
-            | grep -o '"GF_DEMO_PASSWORD":"[^"]*"' \
-            | cut -d'"' -f4 | base64 -d)
 
           echo "Waiting for Grafana..."
           until curl -sf -u "admin:${ADMIN_PASS}" "$GRAFANA/api/health" > /dev/null 2>&1; do
@@ -584,38 +556,36 @@ spec:
             USER_ID=$(curl -sf -u "admin:${ADMIN_PASS}" \
               "$GRAFANA/api/users/lookup?loginOrEmail=demo" \
               | grep -o '"id":[0-9]*' | cut -d: -f2)
-
-            curl -sf \
-              -u "admin:${ADMIN_PASS}" \
-              -H "Content-Type: application/json" \
-              -X PUT \
+            curl -sf -u "admin:${ADMIN_PASS}" \
+              -H "Content-Type: application/json" -X PUT \
               -d "{\"password\":\"${DEMO_PASS}\"}" \
               "$GRAFANA/api/admin/users/${USER_ID}/password" > /dev/null
-
-            echo "Demo user already exists - password updated (user ID: $USER_ID)"
+            echo "Demo user updated (user ID: $USER_ID)"
           else
-            curl -sf \
-              -u "admin:${ADMIN_PASS}" \
-              -H "Content-Type: application/json" \
-              -X POST \
+            curl -sf -u "admin:${ADMIN_PASS}" \
+              -H "Content-Type: application/json" -X POST \
               -d "{\"name\":\"Demo\",\"email\":\"demo@local\",\"login\":\"demo\",\"password\":\"${DEMO_PASS}\",\"OrgId\":1}" \
               "$GRAFANA/api/admin/users" > /dev/null
-
             USER_ID=$(curl -sf -u "admin:${ADMIN_PASS}" \
               "$GRAFANA/api/users/lookup?loginOrEmail=demo" \
               | grep -o '"id":[0-9]*' | cut -d: -f2)
-
-            curl -sf \
-              -u "admin:${ADMIN_PASS}" \
-              -H "Content-Type: application/json" \
-              -X PATCH \
+            curl -sf -u "admin:${ADMIN_PASS}" \
+              -H "Content-Type: application/json" -X PATCH \
               -d "{\"role\":\"Viewer\"}" \
               "$GRAFANA/api/orgs/1/users/${USER_ID}" > /dev/null
-
             echo "Demo user created as Viewer (user ID: $USER_ID)"
           fi
-
-          echo "Grafana user init complete"
+        env:
+          - name: ADMIN_PASS
+            valueFrom:
+              secretKeyRef:
+                name: monitoring-secrets
+                key: GF_SECURITY_ADMIN_PASSWORD
+          - name: DEMO_PASS
+            valueFrom:
+              secretKeyRef:
+                name: monitoring-secrets
+                key: GF_DEMO_PASSWORD
         resources:
           requests:
             memory: "32Mi"
