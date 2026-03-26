@@ -329,8 +329,8 @@ proveo/
 |
 |-- postgres/                    # Custom PostgreSQL image
 |   |-- Dockerfile
-|   |-- init-db.sh               # Creates portfolio, temporal, temporal_visibility
-|   |-- init-ssl.sh              # certbot + Let's Encrypt setup, TLS secret injection into k3s
+|   |-- init-db.sh               # Creates temporal and temporal_visibility databases
+|   |-- init-ssl.sh              # Configures SSL using pre-mounted certs (postgresql.ssl.conf + pg_hba symlink)
 |   +-- init-pgpass.sh           # passwordless non-interactive connections
 |
 |-- docker-compose.yml           # Local development
