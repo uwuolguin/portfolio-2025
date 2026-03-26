@@ -15,7 +15,7 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 | [https://testproveoportfolio.xyz/front-page/front-page.html](https://testproveoportfolio.xyz/front-page/front-page.html) | Frontend |
 | [https://testproveoportfolio.xyz/grafana](https://testproveoportfolio.xyz/grafana) | Grafana: live pipeline logs |
 
-**Try the live pipeline:** open Grafana first, then sign up and log in on the frontend. Your login event will show up in the dashboard within seconds -- if it doesn't, refresh the Grafana tab.
+**Try the live pipeline:** Sign up and log in on the frontend, open grafana and your login event will show up in the dashboard within seconds -- if it doesn't, refresh the Grafana tab.
 
 **Grafana demo credentials:**
 
