@@ -200,32 +200,44 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 
 ---
-
 ## Pod Breakdown (4GB Droplet)
 
 | Pod | Manifest | Actual RAM |
 |-----|----------|-----------|
 | `postgres-primary-0` | `04-postgres-primary.yaml` | ~104Mi |
-| `postgres-replica-0` | `05-postgres-replica.yaml` | ~34Mi |
-| `redis-*` | `06-redis.yaml` | ~4Mi |
-| `minio-*` | `07-minio.yaml` | ~81Mi |
+| `postgres-replica-0` | `05-postgres-replica.yaml` | ~37Mi |
+| `redis-*` | `06-redis.yaml` | ~3Mi |
+| `minio-*` | `07-minio.yaml` | ~90Mi |
 | `image-service-*` | `08-image-service.yaml` | ~331Mi |
-| `backend-*` | `09-backend.yaml` | ~79Mi |
-| `nginx-*` | `10-nginx.yaml` | ~4Mi |
-| `redpanda-0` | `11-redpanda.yaml` | ~146Mi |
-| `consumer-*` | `13-consumer.yaml` | ~27Mi |
-| `temporal-*` | `14-temporal.yaml` | ~85Mi |
-| `temporal-ui-*` | `14-temporal.yaml` | ~9Mi |
-| `temporal-worker-*` | `15-temporal-worker.yaml` | ~62Mi |
-| `libretranslate-*` | `16-libretranslate.yaml` | ~226Mi |
-| `loki-*` | `17-monitoring.yaml` | ~128Mi |
-| `alloy-*` | `17-monitoring.yaml` | ~64Mi |
-| `grafana-*` | `17-monitoring.yaml` | ~128Mi |
-| **Total (pods)** | | **~1,512Mi (~1.48GB)** |
-| **Available (RAM)** | | **4,096Mi (4GB)** |
-| **Available (RAM + swap)** | | **6,144Mi (6GB)** |
-| **Headroom (RAM only)** | | **~2,584Mi (~2.52GB, 63% free)** |
-| **Headroom (RAM + swap)** | | **~4,632Mi (~4.52GB, 75% free)** |
+| `backend-*` | `09-backend.yaml` | ~78Mi |
+| `nginx-*` | `10-nginx.yaml` | ~3Mi |
+| `redpanda-0` | `11-redpanda.yaml` | ~148Mi |
+| `consumer-*` | `13-consumer.yaml` | ~26Mi |
+| `temporal-*` | `14-temporal.yaml` | ~98Mi |
+| `temporal-ui-*` | `14-temporal.yaml` | ~6Mi |
+| `temporal-worker-*` | `15-temporal-worker.yaml` | ~53Mi |
+| `libretranslate-*` | `16-libretranslate.yaml` | ~122Mi |
+| `loki-*` | `17-monitoring.yaml` | ~71Mi |
+| `alloy-*` | `17-monitoring.yaml` | ~57Mi |
+| `grafana-*` | `17-monitoring.yaml` | ~100Mi |
+| **Subtotal (pods)** | | **~1,327Mi** |
+| **System overhead** | k3s, containerd, dockerd, journald | **~1,131Mi** |
+| **Process total** | matches `free -h` used | **~2,458Mi (~2.4GB, 63%)** |
+| | | |
+| **buff/cache** | kernel page cache — reclaimed under pressure, but PostgreSQL, Redpanda, and Loki actively benefit from it staying warm; evicting it has a real performance cost | **~1,638Mi** |
+| **Available** | RAM Linux can hand out before touching swap | **~1,434Mi** |
+| **Swap used / total** | already dipping in slightly — a signal, not an alarm | **215Mi / 2,048Mi** |
+| **Total RAM** | | **3,891Mi (3.8GB physical)** |
+
+### Sizing Takeaway
+
+| Scenario | Recommendation |
+|----------|---------------|
+| **Replicate this exact stack** | 4GB is the minimum. The 215Mi swap usage means you're already at the edge under idle load. |
+| **Add one more heavy service** | Upgrade to **8GB**. You have ~1.4GB available but buff/cache will compete for it. |
+| **Production with real traffic** | **8GB minimum**, ideally **16GB** — traffic spikes cause PostgreSQL and Redpanda to buffer aggressively, and you want that cache to stay warm rather than get evicted. |
+| **Could you run this on 2GB?** | No. Process usage alone is 2.4GB; you'd be deep in swap and performance would degrade badly. |
+---
 
 ## Quick Local Preview
 
