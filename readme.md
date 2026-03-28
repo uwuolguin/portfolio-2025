@@ -224,19 +224,19 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 | **System overhead** | k3s, containerd, dockerd, journald | **~1,131Mi** |
 | **Process total** | matches `free -h` used | **~2,458Mi (~2.4GB, 63%)** |
 | | | |
-| **buff/cache** | kernel page cache — reclaimed under pressure, but PostgreSQL, Redpanda, and Loki actively benefit from it staying warm; evicting it has a real performance cost | **~1,638Mi** |
+| **buff/cache** | kernel page cache, reclaimed under pressure, but PostgreSQL, Redpanda, and Loki actively benefit from it staying warm; evicting it has a real performance cost | **~1,638Mi** |
 | **Available** | RAM Linux can hand out before touching swap | **~1,434Mi** |
-| **Swap used / total** | already dipping in slightly — a signal, not an alarm | **215Mi / 2,048Mi** |
+| **Swap used / total** | system is already dipping into swap under low traffic, a signal, not an alarm | **215Mi / 2,048Mi** |
 | **Total RAM** | | **3,891Mi (3.8GB physical)** |
 
 ### Sizing Takeaway
 
 | Scenario | Recommendation |
 |----------|---------------|
-| **Replicate this exact stack** | 4GB is the minimum. The 215Mi swap usage means you're already at the edge under idle load. |
-| **Add one more heavy service** | Upgrade to **8GB**. You have ~1.4GB available but buff/cache will compete for it. |
-| **Production with real traffic** | **8GB minimum**, ideally **16GB** — traffic spikes cause PostgreSQL and Redpanda to buffer aggressively, and you want that cache to stay warm rather than get evicted. |
-| **Could you run this on 2GB?** | No. Process usage alone is 2.4GB; you'd be deep in swap and performance would degrade badly. |
+| **Replicate this exact stack** | 4GB is the absolute minimum. The system is already using 215Mi of swap under low traffic, which means there is no real headroom. A minimum of **6GB is recommended** to keep the stack stable without relying on swap. |
+| **Add one more heavy service** | **8GB** is recommended. buff/cache will compete for the remaining available RAM under any meaningful load. |
+| **Production with real traffic** | **8GB minimum**, ideally **16GB**. Traffic spikes cause PostgreSQL and Redpanda to buffer aggressively, and the kernel cache needs room to stay warm rather than get evicted. |
+| **Could this run on 2GB?** | No. Process usage alone is 2.4GB under low traffic; the system would be deep in swap and performance would degrade badly. |
 ---
 
 ## Quick Local Preview
