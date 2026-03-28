@@ -224,7 +224,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 | **System overhead** | k3s, containerd, dockerd, journald | **~1,131Mi** |
 | **Process total** | matches `free -h` used | **~2,458Mi (~2.4GB, 63%)** |
 | | | |
-| **buff/cache** | kernel page cache, reclaimed under pressure, but PostgreSQL, Redpanda, and Loki actively benefit from it staying warm; evicting it has a real performance cost | **~1,638Mi** |
+| **buff/cache** | The kernel uses buff/cache to store frequently accessed data from disk in RAM so it does not have to read from disk again. The more of it there is, the faster the system feels. It gets freed automatically when a process needs more RAM, so it is never wasted. Trying to clear it manually gives a false sense of free memory and actually slows the system down. | **~1,638Mi** |
 | **Available** | RAM Linux can hand out before touching swap | **~1,434Mi** |
 | **Swap used / total** | system is already dipping into swap under low traffic, a signal, not an alarm | **215Mi / 2,048Mi** |
 | **Total RAM** | | **3,891Mi (3.8GB physical)** |
