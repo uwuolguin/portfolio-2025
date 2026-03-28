@@ -221,8 +221,11 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 | `loki-*` | `17-monitoring.yaml` | ~128Mi |
 | `alloy-*` | `17-monitoring.yaml` | ~64Mi |
 | `grafana-*` | `17-monitoring.yaml` | ~128Mi |
-
----
+| **Total (pods)** | | **~1,512Mi (~1.48GB)** |
+| **Available (RAM)** | | **4,096Mi (4GB)** |
+| **Available (RAM + swap)** | | **6,144Mi (6GB)** |
+| **Headroom (RAM only)** | | **~2,584Mi (~2.52GB, 63% free)** |
+| **Headroom (RAM + swap)** | | **~4,632Mi (~4.52GB, 75% free)** |
 
 ## Quick Local Preview
 
