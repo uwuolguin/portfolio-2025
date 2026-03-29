@@ -30,6 +30,14 @@ spec:
   selector:
     matchLabels:
       app: minio
+  # ── Recreate, not RollingUpdate ────────────────────────────────────────────
+  # minio-data is a ReadWriteOnce PVC — only one pod can mount it at a time.
+  # Same deadlock risk as Redis: RollingUpdate would try to start the new pod
+  # before killing the old one, both fight over the RWO PVC, deploy hangs.
+  # Recreate gives a few seconds of MinIO downtime during deploy. Image uploads
+  # will fail transiently but the app handles that with a circuit breaker.
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:

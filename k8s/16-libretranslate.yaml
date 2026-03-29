@@ -44,11 +44,18 @@ spec:
   selector:
     matchLabels:
       app: libretranslate
+  # ── Recreate, not RollingUpdate ────────────────────────────────────────────
+  # libretranslate-models-data is a ReadWriteOnce PVC.
+  # The previous config had RollingUpdate with maxSurge:1 maxUnavailable:0 —
+  # the worst possible combination for a RWO PVC. It guarantees deadlock:
+  # Kubernetes creates the new pod (surge +1), both old and new pods try to
+  # mount the same RWO PVC, new pod gets stuck in ContainerCreating forever,
+  # and maxUnavailable:0 prevents Kubernetes from killing the old pod to
+  # break the deadlock. The deploy hangs until the readiness probe timeout.
+  # Recreate solves this: old pod is killed first, PVC is released, new pod
+  # mounts it cleanly. Brief downtime on translation during deploy only.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    type: Recreate
   template:
     metadata:
       labels:

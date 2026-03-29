@@ -110,6 +110,9 @@ spec:
     app: loki
 
 ---
+# Loki is a StatefulSet — handles RWO PVC correctly by design.
+# StatefulSets update pods one at a time and keep the same PVC per pod,
+# so there is no mount conflict during rolling updates.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -420,6 +423,15 @@ spec:
   selector:
     matchLabels:
       app: grafana
+  # ── Recreate, not RollingUpdate ────────────────────────────────────────────
+  # grafana-data is a ReadWriteOnce PVC — only one pod can mount it at a time.
+  # RollingUpdate (the default when no strategy is set) would try to start the
+  # new Grafana pod before killing the old one. Both pods fight over the same
+  # RWO PVC, the new pod gets stuck in ContainerCreating, and the deploy hangs.
+  # Recreate kills the old pod first, releases the PVC, then starts the new pod.
+  # Grafana is not in the hot path — brief downtime during deploy is acceptable.
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -518,6 +530,10 @@ spec:
 # Admin is created automatically by Grafana from GF_SECURITY_ADMIN_* above.
 # Passwords are injected directly from the secret as env vars — no service
 # account, no Kubernetes API calls, no RBAC needed.
+#
+# This Job is deleted and recreated on every rolling deploy because Jobs are
+# immutable in Kubernetes — kubectl apply fails if an existing completed Job
+# is in the namespace. rolling-deploy.sh handles the delete before apply.
 #
 # Re-run manually:
 #   kubectl delete job grafana-init-users -n portfolio

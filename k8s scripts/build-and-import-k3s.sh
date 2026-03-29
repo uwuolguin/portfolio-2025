@@ -4,6 +4,13 @@ set -e
 # =============================================================================
 # Build and Import Images to k3s on DigitalOcean Droplet
 # Run as regular user with sudo privileges
+#
+# NO_CACHE flag:
+#   NO_CACHE=true ./build-and-import-k3s.sh   → passes --no-cache to every build
+#   ./build-and-import-k3s.sh                  → uses Docker layer cache (faster)
+#
+# The GitHub Actions deploy workflow always sets NO_CACHE=true to guarantee
+# no stale layer sneaks through between deploys.
 # =============================================================================
 
 RED='\033[0;31m'
@@ -27,7 +34,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Sanity check: docker-compose.yml is a reliable landmark for the repository root. If it exists, it means we are in the correct location, and the Docker files required by this script are most likely present.
+# Sanity check: docker-compose.yml is a reliable landmark for the repository root.
 if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
     log_error "Cannot find docker-compose.yml in repo root: $REPO_ROOT"
     exit 1
@@ -35,10 +42,25 @@ fi
 
 cd "$REPO_ROOT"
 
+# =============================================================================
+# NO_CACHE flag
+# =============================================================================
+NO_CACHE_FLAG=""
+if [ "${NO_CACHE:-false}" = "true" ]; then
+    NO_CACHE_FLAG="--no-cache"
+    log_warn "NO_CACHE=true — all Docker layer cache will be ignored"
+    log_warn "Build times will be significantly longer (10-20 min for image-service)"
+fi
+
 echo "=================================="
 echo "Build & Import Images to k3s"
 echo "=================================="
 echo "Repo root: $(pwd)"
+if [ -n "$NO_CACHE_FLAG" ]; then
+    echo "Cache:     DISABLED (--no-cache)"
+else
+    echo "Cache:     enabled"
+fi
 echo ""
 
 # Determine if docker needs sudo
@@ -65,7 +87,7 @@ echo ""
 # Backend
 # -------------------------------------------------------------------------
 log_info "Building backend image..."
-$DOCKER_CMD build -t portfolio-backend:latest ./backend
+$DOCKER_CMD build $NO_CACHE_FLAG -t portfolio-backend:latest ./backend
 log_success "Backend image built"
 echo ""
 
@@ -80,7 +102,7 @@ $DOCKER_CMD builder prune -f --filter "until=1m" 2>/dev/null || true
 # Image service
 # -------------------------------------------------------------------------
 log_info "Building image-service..."
-$DOCKER_CMD build -t portfolio-image-service:latest ./image-service
+$DOCKER_CMD build $NO_CACHE_FLAG -t portfolio-image-service:latest ./image-service
 log_success "Image service built"
 echo ""
 
@@ -95,7 +117,7 @@ $DOCKER_CMD builder prune -f --filter "until=1m" 2>/dev/null || true
 # PostgreSQL (custom image with pg_cron)
 # -------------------------------------------------------------------------
 log_info "Building postgres image (pg_cron enabled)..."
-$DOCKER_CMD build -t portfolio-postgres:16 ./postgres
+$DOCKER_CMD build $NO_CACHE_FLAG -t portfolio-postgres:16 ./postgres
 log_success "Postgres image built"
 echo ""
 
@@ -110,7 +132,7 @@ $DOCKER_CMD builder prune -f --filter "until=1m" 2>/dev/null || true
 # Nginx
 # -------------------------------------------------------------------------
 log_info "Building nginx..."
-$DOCKER_CMD build -t portfolio-nginx:latest ./nginx
+$DOCKER_CMD build $NO_CACHE_FLAG -t portfolio-nginx:latest ./nginx
 log_success "Nginx built"
 echo ""
 

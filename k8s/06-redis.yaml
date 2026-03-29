@@ -26,6 +26,16 @@ spec:
   selector:
     matchLabels:
       app: redis
+  # ── Recreate, not RollingUpdate ────────────────────────────────────────────
+  # redis-data is a ReadWriteOnce PVC — only one pod can mount it at a time.
+  # RollingUpdate (the default) tries to start the new pod BEFORE killing the
+  # old one. Both pods fight over the same RWO PVC, new pod gets stuck in
+  # ContainerCreating, and the deploy deadlocks.
+  # Recreate kills the old pod first, then starts the new one. Brief Redis
+  # downtime during deploy is acceptable — the app falls back gracefully and
+  # the window is seconds, not minutes.
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -39,7 +49,7 @@ spec:
             - --maxmemory
             - "64mb"
             - --maxmemory-policy
-            #LRU is Least Recently Used
+            # LRU is Least Recently Used
             - allkeys-lru
           ports:
             - containerPort: 6379

@@ -1,15 +1,5 @@
 ---
-# local-path is k3s's built-in storage provisioner.
-# It creates directories on the node's local disk (under /var/lib/rancher/k3s/storage/).
-# Simple and NOT replicated — if the node dies, the data is lost.
-# For production, consider Longhorn, Rook-Ceph, or DigitalOcean Block Storage,
-# or schedule periodic backups (e.g., via cronjobs) to external storage
-# such as S3, GCS, or NFS. This is usually done once a day or every few hours,
-# depending on how critical the data is. Even with local replication, this strategy
-# provides an additional disaster recovery safety net if the node completely fails.
-# Important: data lives on one specific node. If you scale to multiple nodes,
-# a Pod can only schedule on the node where its PVC resides.
-# For a single-node droplet, this is acceptable.
+# Single-node local storage, fast and simple, but if the droplet dies the data goes with it. Fine for one node, breaks if you scale to multiple since pods can only schedule where their PVC lives. For production: add periodic pg_dump backups to S3 or use Longhorn/DigitalOcean Block Storage.
 
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -20,10 +10,13 @@ metadata:
     app: postgres-primary
 spec:
   accessModes:
+      #one pod per node can mount at a time this PVC
     - ReadWriteOnce
   resources:
     requests:
       storage: 5Gi
+  # k3s creates a directory on the node's local disk for this PVC
+  # lives under /var/lib/rancher/k3s/storage/ — nothing external, no network storage
   storageClassName: local-path
 ---
 apiVersion: v1

@@ -85,7 +85,7 @@ Both files are static. Set them once, they never change. The deploy script reads
 ./deploy-k3s-local.sh
 ```
 
-The script handles everything in order: reads the password files, creates `monitoring-secrets`, deploys Grafana, waits for it to be healthy, then runs `17-grafana-init-users.yaml` as a one-shot Job that creates the demo Viewer user via the Grafana HTTP API. Admin is created automatically by Grafana from the secret env vars.
+The script handles everything in order: reads the password files, creates `monitoring-secrets`, deploys Grafana, waits for it to be healthy, then runs the grafana-init-users Job (embedded in `17-monitoring.yaml`) that creates the demo Viewer user via the Grafana HTTP API. Admin is created automatically by Grafana from the secret env vars.
 
 After deploy the script prints:
 ```
@@ -180,13 +180,13 @@ If k3s is wiped and redeployed (`./cleanup.sh` + `./deploy-k3s-local.sh`), the f
 
 **Admin** is created automatically by Grafana on startup from the `GF_SECURITY_ADMIN_USER` and `GF_SECURITY_ADMIN_PASSWORD` env vars in `monitoring-secrets`. No action needed.
 
-**Demo** (Viewer) is created by `17-grafana-init-users.yaml`, a one-shot Job that runs as part of deploy after Grafana is confirmed healthy. The Job calls the Grafana HTTP API to create the user and set the Viewer role. Idempotent: if the user already exists on redeploy, it updates the password to match the file.
+**Demo** (Viewer) is created by the `grafana-init-users` Job defined at the bottom of `17-monitoring.yaml`. It runs as part of deploy after Grafana is confirmed healthy, calls the Grafana HTTP API to create the user and set the Viewer role. Idempotent: if the user already exists on redeploy, it updates the password to match the file.
 
 ### Re-run User Init Manually
 
 ```bash
 kubectl delete job grafana-init-users -n portfolio
-kubectl apply -f k8s/17-grafana-init-users.yaml
+kubectl apply -f k8s/17-monitoring.yaml
 kubectl wait --for=condition=complete job/grafana-init-users -n portfolio --timeout=120s
 kubectl logs -n portfolio -l job-name=grafana-init-users
 ```
@@ -391,6 +391,96 @@ kubectl exec -n portfolio postgres-primary-0 -- \
 # Expected: temporal and temporal_visibility databases listed
 ```
 
+### 7. Redis
+
+```bash
+# Verify Redis is running and accepting connections
+kubectl exec -n portfolio deployment/redis -- redis-cli ping
+# Expected: PONG
+
+# Check memory usage vs configured 64MB cap
+kubectl exec -n portfolio deployment/redis -- redis-cli info memory | grep -E "used_memory_human|maxmemory_human"
+# Expected: used_memory_human: ~4M, maxmemory_human: 64.00M
+
+# Check eviction policy (should be allkeys-lru)
+kubectl exec -n portfolio deployment/redis -- redis-cli config get maxmemory-policy
+# Expected: allkeys-lru
+```
+
+### 8. MinIO
+
+```bash
+# Check MinIO health
+kubectl port-forward -n portfolio svc/minio 9000:9000 &
+sleep 2
+curl http://localhost:9000/minio/health/ready
+# Expected: HTTP 200
+
+# Access MinIO console (browser UI)
+kubectl port-forward -n portfolio svc/minio 9001:9001
+# Then open http://localhost:9001 via SSH tunnel
+# Credentials: minioadmin / <MINIO_PASSWORD from .credentials>
+
+# Verify images bucket exists
+kubectl logs -n portfolio deployment/image-service | grep -i "bucket\|minio\|connected"
+```
+
+### 9. LibreTranslate
+
+```bash
+# Check service is healthy — first boot takes 2-3 min to download models
+kubectl get pods -n portfolio -l app=libretranslate
+# STATUS: Running means models are loaded and /health passes
+
+# Check startup progress (model download on first boot)
+kubectl logs -n portfolio deployment/libretranslate -f
+# Look for: "Loaded" or "Running on http://0.0.0.0:5000"
+
+# Test a translation directly inside the cluster
+kubectl exec -n portfolio deployment/backend --   curl -s -X POST http://libretranslate:5000/translate   -H "Content-Type: application/json"   -d '{"q":"hello","source":"en","target":"es","format":"text"}'
+# Expected: {"translatedText":"hola"}
+
+# Test the reverse
+kubectl exec -n portfolio deployment/backend --   curl -s -X POST http://libretranslate:5000/translate   -H "Content-Type: application/json"   -d '{"q":"hola","source":"es","target":"en","format":"text"}'
+# Expected: {"translatedText":"hello"}
+
+# List available language pairs
+kubectl exec -n portfolio deployment/backend --   curl -s http://libretranslate:5000/languages | python3 -m json.tool
+# Expected: en and es entries only (LT_LOAD_ONLY=en,es)
+```
+
+### 10. Grafana + Loki + Alloy
+
+```bash
+# Verify all three pods are running
+kubectl get pods -n portfolio -l app=grafana
+kubectl get pods -n portfolio -l app=loki
+kubectl get pods -n portfolio -l app=alloy
+
+# Check Loki is ready to receive logs
+kubectl port-forward -n portfolio svc/loki 3100:3100 &
+sleep 2
+curl http://localhost:3100/ready
+# Expected: ready
+
+# Check Loki has received logs (query last 5 minutes)
+curl -s "http://localhost:3100/loki/api/v1/query_range"   --data-urlencode 'query={app="temporal-worker"}'   --data-urlencode 'limit=5' | python3 -m json.tool | grep '"values"'
+# Expected: array of log lines if temporal-worker has been active
+
+# Check Alloy is scraping the temporal-worker pod
+kubectl logs -n portfolio -l app=alloy | grep -i "temporal\|loki\|error"
+
+# Access Grafana publicly (no port-forward needed)
+# https://testproveoportfolio.xyz/grafana/
+# Admin:  admin / <contents of .grafana-admin-password>
+# Demo:   demo  / password
+
+# Or via port-forward:
+kubectl port-forward -n portfolio svc/grafana 3000:3000
+# SSH tunnel from laptop: ssh -L 3000:localhost:3000 deploy@<droplet-ip>
+# Open: http://localhost:3000
+```
+
 ---
 
 ## Common Commands
@@ -464,7 +554,10 @@ kubectl logs -n portfolio deployment/backend -f
 kubectl logs -n portfolio deployment/temporal-worker -f
 kubectl logs -n portfolio deployment/consumer -f
 kubectl logs -n portfolio deployment/image-service -f
+kubectl logs -n portfolio deployment/libretranslate -f
 kubectl logs -n portfolio redpanda-0 -f
+kubectl logs -n portfolio -l app=loki -f
+kubectl logs -n portfolio -l app=alloy -f
 ```
 
 ### Access Services via Port-Forward
@@ -482,6 +575,14 @@ kubectl port-forward -n portfolio svc/temporal-ui 8888:8080
 
 # Grafana (bypasses nginx - direct tunnel to grafana pod)
 kubectl port-forward -n portfolio svc/grafana 3000:3000
+
+# LibreTranslate (bypasses nginx - direct tunnel to libretranslate pod)
+kubectl port-forward -n portfolio svc/libretranslate 5000:5000
+# Test: curl -X POST http://localhost:5000/translate -H "Content-Type: application/json" #         -d '{"q":"hello","source":"en","target":"es","format":"text"}'
+
+# Loki (bypasses nginx - direct tunnel to loki pod)
+kubectl port-forward -n portfolio svc/loki 3100:3100
+# Test: curl http://localhost:3100/ready
 ```
 
 ---
@@ -501,6 +602,19 @@ kubectl scale deployment temporal-worker -n portfolio --replicas=3
 kubectl scale statefulset redpanda -n portfolio --replicas=3
 kubectl exec -n portfolio redpanda-0 -- rpk cluster rebalance
 ```
+
+### Services That Cannot Be Horizontally Scaled in This Setup
+
+| Service | Why |
+|---------|-----|
+| `redis` | ReadWriteOnce PVC — only one pod can mount it. Horizontal scaling requires Redis Cluster mode + ReadWriteMany storage |
+| `minio` | ReadWriteOnce PVC — only one pod can mount it. Horizontal scaling requires MinIO distributed mode across separate PVCs |
+| `libretranslate` | ReadWriteOnce PVC for model cache — only one pod can mount it. Multiple pods would each need their own PVC and re-download models |
+| `loki` | StatefulSet with ReadWriteOnce PVC — single-node mode by design. Scaling requires Loki distributed mode |
+| `grafana` | ReadWriteOnce PVC for its SQLite database — multiple pods would conflict on the same DB file |
+
+All five use `strategy: Recreate` (or StatefulSet rolling) rather than `RollingUpdate` precisely
+because of the RWO PVC constraint — new pod cannot start until old pod releases the mount.
 
 ---
 
@@ -576,6 +690,94 @@ kubectl exec -n portfolio redpanda-0 -- \
   rpk topic list --brokers=localhost:9092
 ```
 
+### LibreTranslate Not Starting or Slow to Start
+
+```bash
+# First boot downloads en+es language models (~200MB) — this takes 2-3 minutes
+# The startupProbe blocks traffic for up to 240s (24 x 10s) to allow for this
+kubectl logs -n portfolio deployment/libretranslate -f
+# Look for: "Running on http://0.0.0.0:5000" to confirm models are loaded
+
+# If it stays in ContainerCreating or CrashLoopBackOff:
+kubectl describe pod -n portfolio -l app=libretranslate
+
+# PVC permission issue — fix-permissions initContainer should handle this,
+# but if the chown failed for any reason:
+kubectl exec -n portfolio deployment/libretranslate -- ls -la   /home/libretranslate/.local/share/argos-translate
+# Everything should be owned by UID 1032
+
+# Force restart to re-run fix-permissions initContainer
+kubectl rollout restart deployment/libretranslate -n portfolio
+```
+
+### Image Service Model Not Loading
+
+```bash
+# TensorFlow NSFW model loads on startup — takes ~30s after container starts
+# Health endpoint returns unhealthy until model is loaded
+kubectl logs -n portfolio deployment/image-service -f
+# Look for: "model_loaded: true" or "NSFW model loaded"
+
+# If model never loads and pod keeps restarting, it is likely OOM
+# The TensorFlow model requires ~500MB — check for eviction
+kubectl get events -n portfolio --sort-by=.lastTimestamp | grep -i "image-service\|oom\|evict"
+free -h
+# If swap is exhausted and RAM is full, other pods may need to be scaled down first
+
+# Check health endpoint directly
+kubectl port-forward -n portfolio svc/image-service 8080:8080 &
+sleep 2
+curl http://localhost:8080/health
+# nsfw.model_loaded should be true before the service accepts image uploads
+```
+
+### Redis Not Starting
+
+```bash
+kubectl logs -n portfolio deployment/redis --tail=30
+
+# Redis uses Recreate strategy because of the RWO PVC.
+# If it gets stuck in Terminating during a redeploy, the old pod
+# is holding the PVC mount — wait for it to fully terminate.
+kubectl get pods -n portfolio -l app=redis -w
+# Wait until old pod is gone before new one can mount the PVC
+```
+
+### MinIO Not Starting
+
+```bash
+kubectl logs -n portfolio deployment/minio --tail=30
+
+# Same RWO PVC issue as Redis — Recreate strategy means old pod must
+# die before new pod can mount minio-data.
+kubectl get pods -n portfolio -l app=minio -w
+
+# If bucket is missing after restart (should not happen — data persists on PVC):
+kubectl logs -n portfolio deployment/image-service | grep -i "bucket\|does not exist"
+# Image service creates the bucket on startup if it does not exist
+```
+
+### Loki Not Receiving Logs
+
+```bash
+# Check Loki is ready
+kubectl logs -n portfolio -l app=loki --tail=30
+
+# Check Alloy is running and not erroring
+kubectl logs -n portfolio -l app=alloy --tail=30
+# Look for connection errors to Loki or permission errors on pod log access
+
+# Verify Alloy has ClusterRole permissions
+kubectl get clusterrolebinding alloy -o yaml | grep -A5 "subjects"
+
+# Alloy only scrapes temporal-worker pods — confirm the pod label matches
+kubectl get pods -n portfolio -l app=temporal-worker --show-labels
+# Must have: app=temporal-worker
+
+# Re-apply monitoring stack to reset Alloy config
+kubectl rollout restart daemonset/alloy -n portfolio
+```
+
 ### kubectl Permission Denied
 
 ```bash
@@ -612,7 +814,7 @@ sudo rm -rf /var/lib/rancher/k3s/storage/*
 ```bash
 # Re-run the init Job
 kubectl delete job grafana-init-users -n portfolio
-kubectl apply -f k8s/17-grafana-init-users.yaml
+kubectl apply -f k8s/17-monitoring.yaml
 kubectl wait --for=condition=complete job/grafana-init-users -n portfolio --timeout=120s
 kubectl logs -n portfolio -l job-name=grafana-init-users
 ```
@@ -626,22 +828,21 @@ kubectl logs -n portfolio -l job-name=grafana-init-users
 | `00-namespace.yaml` | Creates `portfolio` namespace |
 | `01-configmap.yaml` | App configuration |
 | `02-secrets.yaml` | Documentation only - secrets auto-generated by deploy script |
-| `03-pvcs.yaml` | Persistent storage (5GB PG, 10GB MinIO, 512MB Redis) |
-| `04-postgres-primary.yaml` | **Primary database** - writes, replication source |
-| `05-postgres-replica.yaml` | **Read replica** - streaming replication |
+| `03-pvcs.yaml` | Persistent storage (5GB PG primary + replica, 10GB MinIO, 512MB Redis, 1GB LibreTranslate) |
+| `04-postgres-primary.yaml` | **Primary database** - writes, pg_cron, WAL streaming source |
+| `05-postgres-replica.yaml` | **Read replica** - streaming replication, hot standby |
 | `06-redis.yaml` | Cache (64MB maxmemory, LRU eviction) |
 | `07-minio.yaml` | Object storage for images |
 | `08-image-service.yaml` | **NSFW detection service** - TensorFlow model |
 | `09-backend.yaml` | FastAPI app (migrations via initContainer) |
-| `10-nginx.yaml` | Reverse proxy, gzip, rate limiting, security headers |
+| `10-nginx.yaml` | Reverse proxy, TLS termination, gzip, rate limiting, security headers |
 | `11-redpanda.yaml` | **Kafka-compatible event broker** - StatefulSet, persistent storage |
 | `12-redpanda-init.yaml` | **One-shot Job** - creates topics after broker is confirmed healthy |
 | `13-consumer.yaml` | **Consumer worker** - polls Redpanda, routes events to Temporal |
 | `14-temporal.yaml` | **Temporal server + UI** - durable workflow execution, PostgreSQL persistence |
 | `15-temporal-worker.yaml` | **Temporal worker** - executes AuthEventWorkflow and SendNotificationWorkflow |
-| `16-libretranslate.yaml` | Self-hosted translation service (ES/EN) |
-| `17-monitoring.yaml` | **Grafana + Loki + Promtail** - observability stack, all in portfolio namespace |
-| `17-grafana-init-users.yaml` | **One-shot Job** - creates Grafana demo Viewer user after Grafana is healthy |
+| `16-libretranslate.yaml` | Self-hosted translation service (ES/EN only, ~196Mi RAM) |
+| `17-monitoring.yaml` | **Grafana + Loki + Alloy** - observability stack + Grafana user init Job |
 
 ---
 
@@ -649,7 +850,7 @@ kubectl logs -n portfolio -l job-name=grafana-init-users
 
 1. **StatefulSets**: postgres-primary, postgres-replica, redpanda - stable network identity, ordered startup, per-replica storage
 2. **Deployments**: Stateless services (backend, image-service, nginx, temporal, temporal-worker)
-3. **Jobs**: One-shot configuration tasks (redpanda-init topic creation)
+3. **Jobs**: One-shot configuration tasks (redpanda-init topic creation, grafana-init-users)
 4. **Services**: ClusterIP for internal communication, LoadBalancer for external access
 5. **InitContainers**: Wait for dependencies, run migrations, bootstrap replica from primary
 6. **ConfigMaps/Secrets**: Separate config from code, auto-generated credentials
@@ -664,6 +865,7 @@ kubectl logs -n portfolio -l job-name=grafana-init-users
 15. **Structured logging**: Every log line including Temporal SDK internals and uncaught exceptions routed to JSON via structlog
 16. **pg_hba mixed auth policy**: Both SSL and non-SSL TCP accepted - encryption enforced at the application layer per service, not globally at the database
 17. **Grafana RBAC**: Two-user model with static admin (created from env vars) and Viewer demo user (created by a one-shot init Job via HTTP API), both sourced from files on the droplet that survive k3s wipes
+18. **Recreate vs RollingUpdate**: Deployments with ReadWriteOnce PVCs use Recreate strategy to avoid mount deadlocks — old pod releases the PVC before the new one starts
 
 ---
 
@@ -680,15 +882,16 @@ kubectl logs -n portfolio -l job-name=grafana-init-users
 
 ## Volume / VolumeMount Order (Kubernetes Note)
 
-1. **Volumes (`volumes:`)**: Created before any container starts. Includes PVCs, `emptyDir`, and ConfigMaps.
+1. **Volumes (`volumes:`)**: Declared in the pod spec. PVCs already exist (created by `03-pvcs.yaml`), emptyDir is provisioned fresh by Kubernetes when the pod is scheduled.
 2. **VolumeMounts**: Per-container mappings. Kubernetes mounts volumes at specified paths before the container starts.
-3. **InitContainers**: Run after volumes exist and are mounted. Can write to volumes to prepare data or certificates.
+3. **InitContainers**: Run after volumes are mounted. Can write to volumes to prepare data or certificates.
 4. **Main containers**: Run after all initContainers complete. See whatever initContainers wrote to the volumes.
 
 ## Memory Budget (4GB Droplet)
 
 Actual measurements from `kubectl top pods` on a running cluster, alongside
-configured requests/limits. Use `kubectl top pods -n portfolio` to verify on your deployment.
+configured requests/limits from the manifests. Use `kubectl top pods -n portfolio`
+to verify on your deployment.
 
 ```
 Component              Actual     Request    Limit
@@ -706,20 +909,21 @@ consumer                 27Mi      64Mi      128Mi
 temporal                 85Mi     256Mi      512Mi
 temporal-ui               9Mi      64Mi      128Mi
 temporal-worker          62Mi     128Mi      256Mi
-libretranslate          226Mi     256Mi      512Mi
+libretranslate          226Mi     196Mi      384Mi   (en+es models only)
 loki                    128Mi     128Mi      256Mi
-promtail                 64Mi      64Mi      128Mi
+alloy                    57Mi      64Mi      128Mi   (replaced Promtail, EOL March 2026)
 grafana                 128Mi     128Mi      256Mi
 --------------------------------------------------
-Current actual total   ~1376Mi
+Current actual total   ~1305Mi
 Current node used       ~2.3Gi   (includes k3s overhead, kernel, buff/cache)
 --------------------------------------------------
-Total requests          ~2768Mi
-Total limits            ~5332Mi
+Total requests          ~2628Mi
+Total limits            ~5152Mi
 Available                4096Mi RAM + 2048Mi swap
 ```
 
 > The gap between actual pod usage and node used is k3s system
 > processes, kernel buffers, and page cache - normal and expected.
-> Image service is the heaviest pod at 399Mi actual - TensorFlow keeps the
+> Image service is the heaviest pod at ~331Mi actual - TensorFlow keeps the
 > model loaded in memory at all times.
+> libretranslate actual varies: ~60Mi cold, ~226Mi with models warm.
