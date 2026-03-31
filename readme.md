@@ -1,13 +1,5 @@
 # Proveo: B2B Provider Marketplace
 
-A full-stack marketplace platform consolidating five years of professional experience into a single deployable project. Every component in this stack reflects tools used in production at some point in my career: PostgreSQL replication, Kafka event streaming, Temporal workflows, Kubernetes, Automated Content Moderation (Computer Vision), and observability.
-
-The domain is a B2B marketplace where companies list their services. Simple enough to build as a side project, with enough operational surface area to make the infrastructure decisions meaningful.
-
-Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/staging split, one environment, manual deploys, except for commits prefixed with `prod-`, which trigger a GitHub Actions pipeline that runs the deployment scripts automatically. The prefix-based trigger avoids burning GitHub Actions minutes on work-in-progress commits.
-
----
-
 ## Live Demo
 
 | URL | What |
@@ -25,6 +17,16 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 **A few things to know before poking around:**
 - Email verification uses the Resend free tier, so only the email acos2014600836@gmail.com can receive the verification link. Company creation is restricted to admin-verified users for now, but you can still sign up.
 - Private/incognito window recommended. Use passwords that do not relate to the ones you normally use, even though passwords are hashed.
+
+---
+
+## What This Is
+
+A full-stack marketplace platform consolidating five years of professional experience into a single deployable project. Every component in this stack reflects tools used in production at some point in my career: PostgreSQL replication, Kafka event streaming, Temporal workflows, Kubernetes, Automated Content Moderation (Computer Vision), and observability.
+
+The domain is a B2B marketplace where companies list their services. Simple enough to build as a side project, with enough operational surface area to make the infrastructure decisions meaningful.
+
+Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/staging split, one environment, manual deploys, except for commits prefixed with `prod-`, which trigger a GitHub Actions pipeline that runs the deployment scripts automatically. The prefix-based trigger avoids burning GitHub Actions minutes on work-in-progress commits.
 
 ---
 

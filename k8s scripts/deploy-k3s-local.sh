@@ -510,7 +510,7 @@ fi
 echo ""
 
 # =============================================================================
-# Monitoring (Grafana + Loki + Promtail)
+# Monitoring (Grafana + Loki + Alloy)
 # =============================================================================
 log_info "Creating Grafana secrets from password files..."
 
@@ -523,7 +523,7 @@ kubectl create secret generic monitoring-secrets \
 
 log_success "monitoring-secrets created"
 
-log_info "Deploying monitoring stack (Grafana + Loki + Promtail)..."
+log_info "Deploying monitoring stack (Grafana + Loki + Alloy)..."
 
 # Delete previous init Job if it exists — Jobs are immutable, apply fails if it already exists.
 kubectl delete job grafana-init-users -n portfolio 2>/dev/null || true
@@ -644,7 +644,7 @@ echo "  Temporal UI:           ~9Mi actual"
 echo "  Temporal worker:      ~62Mi actual"
 echo "  LibreTranslate:      ~226Mi actual"
 echo "  Loki:                ~128Mi actual"
-echo "  Promtail:             ~64Mi actual"
+echo "  Alloy:                ~64Mi actual"
 echo "  Grafana:             ~128Mi actual"
 echo "  ─────────────────────────────────"
 echo "  Total pod actual:   ~1376Mi"
