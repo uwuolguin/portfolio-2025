@@ -485,6 +485,8 @@ spec:
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+            - name: PGPASSFILE
+              value: /var/lib/postgresql/data/pgdata/.pgpass
           args:
             - postgres
             - -c
