@@ -44,7 +44,7 @@
 #   postgres-certs
 #     emptyDir written by ssl-certgen, read-only by the main container.
 #     Regenerated on every pod restart.
-#     https://kubernetes.io/docs/concepts/storage/volumes/ (search: emptyDir)
+#     https://kubernetes.io/docs/concepts/storage/volumes/#emptydir
 #
 # =============================================================================
 # BOOT LIFECYCLE
@@ -95,12 +95,20 @@
 #
 #   hub.docker.com/_/postgres (section: "How to extend this image") and
 #   github.com/docker-library/postgres/blob/master/docker-entrypoint.sh
-#   document the PG_VERSION check used by the official entrypoint — same
-#   file, same source of truth.
+#   document the PG_VERSION check used by the official entrypoint.
+#
+#   find "$PGDATA" -mindepth 1 -delete is used instead of rm -rf "$PGDATA"/*
+#   because the shell glob * does not expand dotfiles (POSIX spec §2.13):
+#     https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html
+#   pg_basebackup requires its target directory to be completely empty and
+#   aborts on any survivor including dotfiles left by a partial run:
+#     https://www.postgresql.org/docs/16/app-pgbasebackup.html
+#   find -mindepth 1 deletes everything including dotfiles without removing
+#   the directory itself, which is the correct target state.
 #
 #     if [ -f "$PGDATA/PG_VERSION" ]; then
 #       [ -f "$PGDATA/standby.signal" ] && exit 0
-#       rm -rf "$PGDATA"/*
+#       find "$PGDATA" -mindepth 1 -delete
 #     fi
 #
 # WAIT FOR PRIMARY
@@ -115,9 +123,31 @@
 # REPLICATION SLOT
 #   Creates replica_slot_1 on the primary if it does not already exist.
 #   The slot is the primary's promise to hold WAL until this replica consumes it.
-#   Idempotent: WHERE NOT EXISTS guard makes it safe to run on every pod start.
-#   || true prevents set -e from killing the script if the slot already exists
-#   (race condition if two replica pods somehow ran simultaneously).
+#   Creation and assignment are two separate steps:
+#     - This psql call creates the slot on the primary (active_pid is NULL,
+#       no standby is using it yet).
+#     - primary_slot_name in postgresql.auto.conf is the assignment — when
+#       the replica boots and connects, it claims this slot by name and the
+#       primary locks it to that walsender (active_pid becomes non-NULL).
+#   If the slot is created but primary_slot_name is missing, the primary holds
+#   WAL for it indefinitely with no replica consuming it — disk fills up.
+#   If primary_slot_name is set but the slot was never created, the replica
+#   gets: FATAL: replication slot "replica_slot_1" does not exist.
+#
+#   Physical replication slots track one standby's WAL position (restart_lsn)
+#   and are held exclusively by one walsender at a time via active_pid.
+#   A second standby attempting to connect to the same active slot receives:
+#     ERROR: replication slot "..." is active for PID <n>
+#   Slots cannot be shared between standbys:
+#     https://www.postgresql.org/docs/16/catalog-pg-replication-slots.html
+#   This StatefulSet runs replicas:1 so the single-slot design works.
+#   If replicas > 1 ever, each pod needs its own slot derived from its hostname:
+#     replica_slot_$(hostname | tr '-' '_')
+#
+#   WHERE NOT EXISTS makes this idempotent — if the slot already exists the
+#   SELECT returns 0 rows, pg_create_physical_replication_slot is never called,
+#   and no error is raised. || true handles the narrow TOCTOU window between
+#   the NOT EXISTS check and the actual creation call.
 #
 #     psql -h postgres-primary -U "$POSTGRES_USER" -d postgres -c \
 #       "SELECT pg_create_physical_replication_slot('replica_slot_1')
@@ -127,38 +157,65 @@
 #
 # BASE BACKUP
 #   pg_basebackup copies the entire primary database into PGDATA.
-#   This is the most memory-intensive moment in the replica lifecycle —
-#   it buffers WAL stream + file writes simultaneously (128Mi/256Mi limits).
+#   The replica cannot start streaming WAL without a base snapshot to apply
+#   it on top of — pg_basebackup provides that snapshot.
+#   This is the most memory-intensive moment in the replica lifecycle:
+#   it buffers the WAL stream and file writes simultaneously.
 #
 #   Flags:
-#     -Fp               plain format (not tar), files written directly to PGDATA
-#     -Xs               stream WAL in parallel during the copy so no changes
-#                       are missed between backup start and finish
-#     -R                writes primary_conninfo into postgresql.auto.conf and
-#                       creates standby.signal automatically
-#     -P                shows progress
+#     -Fp               plain format (not tar), files written directly to PGDATA.
+#                       The replica needs a runnable data directory immediately
+#                       after init — a tarball inside PGDATA would not work.
+#     -R                creates standby.signal and appends a partial
+#                       primary_conninfo to postgresql.auto.conf.
+#                       The appended conninfo is incomplete (no sslmode,
+#                       no application_name, no slot name). postgresql.auto.conf
+#                       is fully overwritten after the backup — see below.
+#                       standby.signal from -R is kept as-is.
+#                       https://www.postgresql.org/docs/16/app-pgbasebackup.html
+#     -P                shows progress in pod logs.
 #     --checkpoint=fast forces an immediate checkpoint on the primary so the
 #                       backup starts from a clean state rather than waiting
-#                       for the next scheduled checkpoint
-#     --wal-method=stream same as -Xs, explicit for clarity
+#                       for the next scheduled checkpoint (up to 5 minutes).
+#                       https://www.postgresql.org/docs/16/app-pgbasebackup.html
+#     --wal-method=stream opens a second connection to the primary and streams
+#                       WAL in parallel with the file copy. Guarantees no WAL
+#                       gap between backup start and finish without requiring
+#                       a separate WAL archive.
+#                       https://www.postgresql.org/docs/16/app-pgbasebackup.html
 #
 #     pg_basebackup \
 #       -h postgres-primary \
 #       -U "$POSTGRES_USER" \
 #       -D "$PGDATA" \
-#       -Fp -Xs -R -P \
+#       -Fp -R -P \
 #       --checkpoint=fast \
 #       --wal-method=stream
 #
 # PG_HBA OVERWRITE
-#   pg_basebackup copied the primary's pg_hba.conf. We overwrite it with
-#   replica-specific rules. cat > overwrites, not appends.
-#   The primary's pg_hba.conf is managed via a symlink to pg_hba.ssl.conf
-#   (written by 01-init-ssl.sh) — that symlink does not survive pg_basebackup,
-#   so we write a flat file here instead.
-#   chown postgres:postgres (UID 999) required — postgres refuses to start
-#   if config files are not owned by its own user.
-#   chmod 600 — no group or world access.
+#   pg_basebackup physically copied the primary's pg_hba.conf. On the primary
+#   that file is a symlink to pg_hba.ssl.conf (written by 01-init-ssl.sh).
+#   Symlinks do not survive pg_basebackup — the copy is a flat file containing
+#   the primary's rule set. We overwrite it with replica-specific rules.
+#   cat > overwrites, not appends.
+#
+#   Rule breakdown:
+#     local                   unix socket — used by pg_isready probes and
+#                             local psql sessions inside the container.
+#     host 127.0.0.1 / ::1   plain TCP from localhost only — also used by
+#                             probes. Must be host not hostssl because the
+#                             probe does not negotiate TLS.
+#     hostssl 0.0.0.0/0       SSL-required TCP from any IP — used by the
+#     hostssl ::/0            backend app connecting via the ClusterIP Service.
+#     hostssl replication     SSL-required replication connections — used by
+#                             the walsender streaming WAL from the primary and
+#                             by pg_basebackup during init.
+#
+#   chown postgres:postgres (UID 999): postgres refuses to start if config
+#   files are not owned by its own OS user:
+#     https://www.postgresql.org/docs/16/runtime-config-file-locations.html
+#   chmod 600: no group or world access. PostgreSQL warns if pg_hba.conf
+#   is group- or world-readable.
 #
 #     cat > "$PGDATA/pg_hba.conf" <<EOF
 #     local   all   all                         scram-sha-256
@@ -172,35 +229,98 @@
 #     chown postgres:postgres "$PGDATA/pg_hba.conf"
 #     chmod 600 "$PGDATA/pg_hba.conf"
 #
+# PGPASS FOR REPLICATION CONNECTION
+#   The replication password is written to $PGDATA/.pgpass instead of into
+#   primary_conninfo. Storing a password in postgresql.auto.conf means it
+#   lands in plaintext on the PVC, appears in any PVC snapshot or backup,
+#   and is logged by PostgreSQL on startup as part of primary_conninfo.
+#   .pgpass is the documented libpq mechanism for credential storage.
+#   All libpq clients — including the walsender receiver that maintains the
+#   streaming connection — honour PGPASSFILE and ~/.pgpass:
+#     https://www.postgresql.org/docs/16/libpq-pgpass.html
+#   Format: hostname:port:database:username:password
+#   The database field for replication connections is the keyword replication.
+#   postgres home is /var/lib/postgresql so $PGDATA/.pgpass is not ~/.pgpass;
+#   chown postgres:postgres ensures the postgres process can read it.
+#
+#     echo "postgres-primary:5432:replication:$POSTGRES_USER:$POSTGRES_PASSWORD" \
+#       > "$PGDATA/.pgpass"
+#     chmod 600 "$PGDATA/.pgpass"
+#     chown postgres:postgres "$PGDATA/.pgpass"
+#
 # POSTGRESQL.AUTO.CONF
-#   cat >> appends to what -R already wrote. Sets replica-specific settings:
+#   postgresql.auto.conf is written by PostgreSQL tooling (ALTER SYSTEM,
+#   pg_basebackup -R) and always overrides postgresql.conf for any key
+#   present in both. Settings written here are authoritative.
 #
-#     hot_standby          allows the replica to serve reads while in recovery
-#                          mode. without this the replica rejects all queries
-#                          during WAL replay — it would be useless for read traffic.
-#     primary_conninfo     how to connect to the primary to stream WAL.
-#                          uses postgres-primary Kubernetes Service DNS, SSL required.
-#     primary_slot_name    which replication slot to use. the slot holds WAL
-#                          on the primary until this replica confirms consumption.
-#     recovery_target_timeline  follow the latest timeline. relevant if the primary
-#                          ever fails over — the replica will follow the new timeline
-#                          rather than getting stuck on the old one.
+#   Full overwrite (cat >) not append (cat >>):
+#   -R already appended its own primary_conninfo before this block runs.
+#   Appending ours produces two primary_conninfo keys. PostgreSQL uses the
+#   last occurrence of any duplicate key:
+#     https://www.postgresql.org/docs/16/config-setting.html
+#   So the duplicate technically works — but if the append is interrupted
+#   (disk full, SIGKILL mid-write), the replica starts with -R's incomplete
+#   conninfo: no sslmode=require, no application_name, no slot name. The
+#   replica connects without SSL, gets rejected by hostssl in pg_hba.conf,
+#   and silently fails to stream WAL. Full overwrite eliminates the orphaned
+#   duplicate and makes this the single source of truth.
 #
-#     cat >> "$PGDATA/postgresql.auto.conf" <<EOF
+#   Settings:
 #     hot_standby = on
-#     primary_conninfo = 'host=postgres-primary port=5432 user=... sslmode=require application_name=replica1'
+#       Allows the replica to serve reads while replaying WAL. Without this
+#       the replica rejects all queries during recovery — useless for reads.
+#       https://www.postgresql.org/docs/16/hot-standby.html
+#
+#     primary_conninfo
+#       Connection string the walsender receiver uses to stream WAL from the
+#       primary. sslmode=require matches the hostssl replication rule in
+#       pg_hba.conf. application_name=replica1 identifies this standby in
+#       pg_stat_replication on the primary. Password is omitted — libpq
+#       resolves it from $PGDATA/.pgpass written above.
+#       https://www.postgresql.org/docs/16/runtime-config-replication.html#GUC-PRIMARY-CONNINFO
+#
+#     primary_slot_name = 'replica_slot_1'
+#       This is the assignment half of slot setup (creation is the psql call
+#       above). On first connection the replica tells the primary it wants
+#       slot replica_slot_1. The primary locks it to that walsender process.
+#       Without this the primary has no obligation to retain WAL for this
+#       replica and may recycle segments it still needs.
+#       https://www.postgresql.org/docs/16/runtime-config-replication.html#GUC-PRIMARY-SLOT-NAME
+#
+#     recovery_target_timeline = 'latest'
+#       Every failover (standby promoted to primary) starts a new timeline.
+#       Without this the replica refuses to follow WAL from a new timeline
+#       and gets stuck after a failover. 'latest' tells it to always follow
+#       the most recent timeline available from primary_conninfo.
+#       https://www.postgresql.org/docs/16/runtime-config-wal.html#GUC-RECOVERY-TARGET-TIMELINE
+#
+#     cat > "$PGDATA/postgresql.auto.conf" <<EOF
+#     hot_standby = on
+#     primary_conninfo = 'host=postgres-primary port=5432 user=$POSTGRES_USER sslmode=require application_name=replica1'
 #     primary_slot_name = 'replica_slot_1'
 #     recovery_target_timeline = 'latest'
 #     EOF
+#     chown postgres:postgres "$PGDATA/postgresql.auto.conf"
+#     chmod 600 "$PGDATA/postgresql.auto.conf"
 #
 # STANDBY SIGNAL + PERMISSIONS
-#   standby.signal tells postgres to enter recovery mode on startup.
-#   Without this file postgres sees a full initialized PGDATA and boots
-#   as a standalone primary — it would start accepting writes and silently
-#   break replication with no error.
-#   chmod 700 on PGDATA — directories need the execute bit to be traversable.
-#   chmod 600 would prevent even the postgres process from entering its own
-#   data directory.
+#   standby.signal was already created by -R. touch is kept as an explicit
+#   safety net: if a future postgres image changes -R's behavior this line
+#   remains the guarantee that the file exists. touch on an existing file
+#   updates mtime only — documented no-op:
+#     https://pubs.opengroup.org/onlinepubs/9699919799/utilities/touch.html
+#
+#   Without standby.signal, postgres sees a full initialized PGDATA and boots
+#   as a standalone primary — accepts writes, ignores primary_conninfo,
+#   silently breaks replication with no error:
+#     https://www.postgresql.org/docs/16/warm-standby.html#STANDBY-SERVER-OPERATION
+#
+#   chmod 700 on PGDATA: the execute bit on a directory is the traverse bit.
+#   Without it no process can enter the directory or open any file inside it
+#   regardless of the file's own permissions. chmod 600 would prevent the
+#   postgres process from entering its own data directory.
+#   initdb sets PGDATA to 0700 for this reason:
+#     https://www.postgresql.org/docs/16/creating-cluster.html
 #
 #     touch "$PGDATA/standby.signal"
 #     chmod 700 "$PGDATA"
@@ -297,7 +417,7 @@ spec:
 
               if [ -f "$PGDATA/PG_VERSION" ]; then
                 [ -f "$PGDATA/standby.signal" ] && exit 0
-                rm -rf "$PGDATA"/*
+                find "$PGDATA" -mindepth 1 -delete
               fi
 
               until pg_isready -h postgres-primary -U "$POSTGRES_USER"; do
@@ -314,7 +434,7 @@ spec:
                 -h postgres-primary \
                 -U "$POSTGRES_USER" \
                 -D "$PGDATA" \
-                -Fp -Xs -R -P \
+                -Fp -R -P \
                 --checkpoint=fast \
                 --wal-method=stream
 
@@ -327,23 +447,29 @@ spec:
               hostssl replication all 0.0.0.0/0         scram-sha-256
               hostssl replication all ::/0              scram-sha-256
               EOF
-
               chown postgres:postgres "$PGDATA/pg_hba.conf"
               chmod 600 "$PGDATA/pg_hba.conf"
 
-              cat >> "$PGDATA/postgresql.auto.conf" <<EOF
+              echo "postgres-primary:5432:replication:$POSTGRES_USER:$POSTGRES_PASSWORD" \
+                > "$PGDATA/.pgpass"
+              chmod 600 "$PGDATA/.pgpass"
+              chown postgres:postgres "$PGDATA/.pgpass"
+
+              cat > "$PGDATA/postgresql.auto.conf" <<EOF
               hot_standby = on
-              primary_conninfo = 'host=postgres-primary port=5432 user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=require application_name=replica1'
+              primary_conninfo = 'host=postgres-primary port=5432 user=$POSTGRES_USER sslmode=require application_name=replica1'
               primary_slot_name = 'replica_slot_1'
               recovery_target_timeline = 'latest'
               EOF
+              chown postgres:postgres "$PGDATA/postgresql.auto.conf"
+              chmod 600 "$PGDATA/postgresql.auto.conf"
 
               touch "$PGDATA/standby.signal"
               chmod 700 "$PGDATA"
 
           volumeMounts:
             - name: postgres-data
-              mountPath: /var/lib/postgresql/data  # node disk: /var/lib/rancher/k3s/storage/pvc-<uid>_portfolio_postgres-replica-data/
+              mountPath: /var/lib/postgresql/data
           resources:
             requests:
               memory: "128Mi"
@@ -369,9 +495,9 @@ spec:
             - ssl_key_file=/var/lib/postgresql/certs/server.key
           volumeMounts:
             - name: postgres-data
-              mountPath: /var/lib/postgresql/data  # node disk: /var/lib/rancher/k3s/storage/pvc-<uid>_portfolio_postgres-replica-data/
+              mountPath: /var/lib/postgresql/data
             - name: postgres-certs
-              mountPath: /var/lib/postgresql/certs  # node tmpfs: emptyDir, not a PVC, no path under k3s/storage/
+              mountPath: /var/lib/postgresql/certs
               readOnly: true
           livenessProbe:
             exec:
@@ -393,9 +519,6 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
           resources:
-            # Replica is read-only: no writes, no WAL generation, no pg_cron.
-            # Less memory pressure than primary — 128Mi/256Mi is appropriate.
-            # Primary uses 192Mi/384Mi because it handles writes + replication overhead.
             requests:
               memory: "128Mi"
               cpu: "100m"
