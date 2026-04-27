@@ -1,3 +1,78 @@
+# ════════════════════════════════════════════════════════════════════════════
+# minio.yaml — MinIO Service + Deployment for the portfolio namespace
+# ════════════════════════════════════════════════════════════════════════════
+#
+# ── Why Recreate strategy? ───────────────────────────────────────────────────
+# minio-data is a ReadWriteOnce (RWO) PVC — only one pod can mount it at a
+# time. RollingUpdate starts the new pod before killing the old one, both
+# fight over the RWO PVC, new pod hangs in ContainerCreating, deploy deadlocks.
+# Recreate kills the old pod first. Brief MinIO downtime during deploy is
+# acceptable — the app handles transient upload failures with a circuit breaker.
+#
+# ── MinIO command ────────────────────────────────────────────────────────────
+# minio server /data
+#   Starts MinIO in single-node single-drive mode, serving buckets out of
+#   /data (the mounted PVC). Not distributed — fine for a portfolio, would
+#   need erasure-coded multi-drive setup for production redundancy.
+#
+# --console-address :9001
+#   Pins the web UI (the browser dashboard) to port 9001. Without this flag
+#   MinIO picks a random port for the console on every start, which breaks
+#   the Service selector. The S3-compatible API always stays on 9000.
+#   Two ports, two purposes:
+#     · 9000 — S3 API (what your app talks to for bucket ops)
+#     · 9001 — Console UI (human-facing dashboard, not in the critical path)
+#
+# ── Environment variables ─────────────────────────────────────────────────────
+# MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+#   The root (admin) credentials. MinIO uses these to bootstrap access —
+#   equivalent to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY when your app
+#   talks to it via the S3 SDK. Pulled from the portfolio-secrets Secret so
+#   they never appear in the manifest.
+#
+# ── Health endpoints ──────────────────────────────────────────────────────────
+# MinIO exposes two dedicated health endpoints on the API port (9000):
+#   · /minio/health/live  — liveness: is the process alive and not deadlocked?
+#                           Returns 200 if MinIO is running at all.
+#                           Failure → kubelet restarts the pod.
+#   · /minio/health/ready — readiness: is MinIO ready to serve traffic?
+#                           Returns 200 only after MinIO has finished init,
+#                           loaded config, and can actually handle requests.
+#                           Failure → pod pulled from Service endpoints.
+#   readiness has a shorter period (10s vs 15s) so the pod joins the Service
+#   quickly after start without routing traffic to a half-initialised instance.
+#
+# ── Resource sizing ───────────────────────────────────────────────────────────
+# requests (128Mi / 50m): scheduler reservation. MinIO is heavier than Redis
+#   at idle — it indexes bucket metadata in memory on startup.
+# limits (256Mi / 300m): hard ceiling. MinIO can spike CPU during multipart
+#   uploads and memory during large directory listings. 300m cpu keeps it from
+#   starving neighbours; 256Mi is enough headroom for normal portfolio traffic.
+#
+# ── Image notice ─────────────────────────────────────────────────────────────
+# minio/minio:latest refers to an officially archived and unmaintained image.
+# The MinIO open-source repository was archived on April 25, 2026 following
+# a deliberate, staged withdrawal: admin console removed (May 2025), binary
+# distributions halted (Oct 2025), maintenance mode declared (Dec 2025),
+# repository archived (Feb 2026), final read-only status (Apr 2026).
+# The image will not disappear from Docker Hub but will never receive updates,
+# bug fixes, or security patches. A known privilege escalation CVE from the
+# final Oct 2025 release remains unpatched.
+#
+# This is acceptable for an internal, non-public portfolio deployment where
+# the service is ClusterIP-only and the blast radius of a compromise is
+# limited to bucket contents.
+#
+# If this ever becomes a production concern, alternatives are:
+#   · pgsty/minio        — community fork, drop-in replacement, same API,
+#                          CVEs patched, admin console restored. Swap the
+#                          image tag and nothing else changes.
+#   · garage             — lightweight, Apache licensed, good S3 parity
+#   · SeaweedFS          — more moving parts but handles massive file counts
+#   · AIStor             — MinIO Inc.'s commercial successor. Starts at a
+#                          price point that implies they are not interested
+#                          in your business unless you have a budget to match.
+# ════════════════════════════════════════════════════════════════════════════
 ---
 apiVersion: v1
 kind: Service
@@ -30,12 +105,6 @@ spec:
   selector:
     matchLabels:
       app: minio
-  # ── Recreate, not RollingUpdate ────────────────────────────────────────────
-  # minio-data is a ReadWriteOnce PVC — only one pod can mount it at a time.
-  # Same deadlock risk as Redis: RollingUpdate would try to start the new pod
-  # before killing the old one, both fight over the RWO PVC, deploy hangs.
-  # Recreate gives a few seconds of MinIO downtime during deploy. Image uploads
-  # will fail transiently but the app handles that with a circuit breaker.
   strategy:
     type: Recreate
   template:

@@ -22,9 +22,6 @@ metadata:
   name: backend
   namespace: portfolio
 spec:
-  # =========================================================================
-  # 1 replica for 2GB droplet - scale to 2 on 4GB+ droplet
-  # =========================================================================
   replicas: 1
   selector:
     matchLabels:

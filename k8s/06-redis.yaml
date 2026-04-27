@@ -1,3 +1,51 @@
+# ════════════════════════════════════════════════════════════════════════════
+# redis.yaml — Redis Service + Deployment for the portfolio namespace
+# ════════════════════════════════════════════════════════════════════════════
+#
+# ── Why Recreate strategy? ───────────────────────────────────────────────────
+# redis-data is a ReadWriteOnce (RWO) PVC — only one pod can mount it at a
+# time. RollingUpdate (the default) starts the new pod BEFORE killing the old
+# one. Both pods fight over the same RWO PVC, the new pod gets stuck in
+# ContainerCreating, and the deploy deadlocks.
+# Recreate kills the old pod first, then starts the new one. Brief Redis
+# downtime during deploy is acceptable — the app falls back gracefully and the
+# window is seconds, not minutes.
+#
+# ── Redis command flags ──────────────────────────────────────────────────────
+# --maxmemory 64mb
+#   Hard cap on how much RAM Redis will use for data. Once hit, Redis rejects
+#   writes (or evicts keys, depending on the policy below). Keeps the pod
+#   inside its memory limit and prevents the OOMKiller from nuking it.
+#
+# --maxmemory-policy allkeys-lru
+#   What Redis does when maxmemory is reached. "allkeys-lru" means:
+#     · allkeys  — apply eviction to EVERY key, not just ones with a TTL set
+#     · lru      — Least Recently Used: evict the key that hasn't been touched
+#                  the longest first
+#   Good default for a cache: hot keys survive, cold keys get dropped
+#   automatically without the app needing to manage TTLs explicitly.
+#   Other common choices for reference:
+#     · volatile-lru   — LRU but only among keys that have a TTL (safer if
+#                        Redis holds a mix of cache + persistent data)
+#     · allkeys-lfu    — Least Frequently Used instead of least recently used
+#     · noeviction     — reject writes instead of evicting (good for queues,
+#                        bad for pure caches)
+#
+# ── Probes (redis-cli ping) ──────────────────────────────────────────────────
+# redis-cli ping sends Redis the PING command and expects "+PONG" back.
+# It's the canonical Redis health check — cheap, built-in, no extra tooling.
+#   · livenessProbe  — if PING fails repeatedly, kubelet restarts the pod
+#   · readinessProbe — if PING fails, pod is pulled from Service endpoints so
+#                      no traffic is routed to an unready instance
+#
+# ── Resource sizing ──────────────────────────────────────────────────────────
+# requests (32Mi / 25m): what the scheduler reserves on the node. Low so the
+#   pod fits on small nodes without blocking other workloads.
+# limits (96Mi / 200m): hard ceiling. Memory limit is set above maxmemory
+#   (64mb) to leave headroom for Redis's own process overhead (AOF buffers,
+#   client connections, Lua, etc.). Hitting the memory limit = OOMKill;
+#   hitting maxmemory = controlled eviction. We want the latter.
+# ════════════════════════════════════════════════════════════════════════════
 ---
 apiVersion: v1
 kind: Service
@@ -26,14 +74,6 @@ spec:
   selector:
     matchLabels:
       app: redis
-  # ── Recreate, not RollingUpdate ────────────────────────────────────────────
-  # redis-data is a ReadWriteOnce PVC — only one pod can mount it at a time.
-  # RollingUpdate (the default) tries to start the new pod BEFORE killing the
-  # old one. Both pods fight over the same RWO PVC, new pod gets stuck in
-  # ContainerCreating, and the deploy deadlocks.
-  # Recreate kills the old pod first, then starts the new one. Brief Redis
-  # downtime during deploy is acceptable — the app falls back gracefully and
-  # the window is seconds, not minutes.
   strategy:
     type: Recreate
   template:
@@ -49,7 +89,6 @@ spec:
             - --maxmemory
             - "64mb"
             - --maxmemory-policy
-            # LRU is Least Recently Used
             - allkeys-lru
           ports:
             - containerPort: 6379

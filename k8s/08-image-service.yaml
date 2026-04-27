@@ -15,7 +15,6 @@ spec:
       name: http
   selector:
     app: image-service
-  sessionAffinity: None
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -23,10 +22,6 @@ metadata:
   name: image-service
   namespace: portfolio
 spec:
-  # =========================================================================
-  # 1 replica for 2GB droplet - NSFW model uses ~500MB+ per instance
-  # Scale to 2 on a 4GB+ droplet to demonstrate load balancing
-  # =========================================================================
   replicas: 1
   selector:
     matchLabels:
@@ -74,10 +69,6 @@ spec:
                 configMapKeyRef:
                   name: portfolio-config
                   key: MINIO_SECURE
-            # ===============================================================
-            # NSFW DETECTION - ENABLED (will use swap heavily on 2GB)
-            # TensorFlow model requires ~500MB RAM per instance
-            # ===============================================================
             - name: NSFW_ENABLED
               value: "true"
           livenessProbe:

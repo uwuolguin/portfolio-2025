@@ -39,35 +39,131 @@ metadata:
 data:
   nginx.conf: |
     events {
-        worker_connections 512;
-        use epoll;
-        multi_accept on;
+    # Max simultaneous connections per worker process.
+    # 512 is conservative — fine for a portfolio app with low traffic.
+    # No worker_processes directive in this config means nginx defaults to 1 worker,
+    # so total max connections = 1 worker x 512 = 512 simultaneous connections.
+    worker_connections 512;
+
+    # nginx workers run a single-threaded event loop. Instead of spawning a thread
+    # per connection (expensive), one worker watches thousands of connections and
+    # reacts to whichever ones have data ready — that's the event loop pattern.
+    #
+    # epoll is the Linux kernel syscall that makes this viable:
+    #   - you register your sockets with the kernel once (A socket is the kernel object that represents one end of a network connection.)
+    #   - call epoll_wait() to block until ANY of them are ready
+    #   - kernel returns ONLY the ready ones — O(1) regardless of connection count
+    #
+    # The older alternatives (select/poll) required passing ALL fds on every call
+    # and the kernel scanned all of them — O(n), falls apart at thousands of connections.
+    #
+    # So epoll is not the event loop itself, it's the kernel primitive underneath it:
+    #
+    #   while true:
+    #       ready_fds = epoll_wait(...)  <- epoll: block until something is ready
+    #       for fd in ready_fds:
+    #           handle(fd)              <- event loop: handle whatever is ready
+    #
+    # Without this directive nginx falls back to select(), which is much slower.
+    use epoll;
+
+    # When epoll wakes the worker up (a connection is ready), accept ALL pending
+    # connections in one shot rather than one at a time.
+    # Reduces the number of times the worker has to loop back and call epoll_wait()
+    # again, lowering syscall overhead under bursts of traffic.
+    multi_accept on;
     }
 
     http {
+        # Maps file extensions to MIME types (e.g. .html → text/html, .js → application/javascript).
+        # Without this everything gets served as application/octet-stream and browsers won't execute JS.
         include /etc/nginx/mime.types;
+
+        # Fallback MIME type for anything not in mime.types.
         default_type application/octet-stream;
 
+        # socket without copying it through userspace (nginx) first.
+        # disk -> kernel buffer -> Network Interface Card  (instead of disk -> kernel -> nginx -> kernel -> NIC)
+        # Mainly benefits static file serving — no effect on proxied responses.
         sendfile on;
+
+        # Tells the kernel (via TCP_CORK on Linux) to hold packets until they reach
+        # the full segment size (MSS, ~1460 bytes) before sending.
+        # Goal is throughput — fewer, fuller packets means less header overhead on the wire.
         tcp_nopush on;
+
+        # Disables Nagle's algorithm, which buffers small packets waiting to fill them.
+        # Goal is latency — send data immediately rather than waiting to coalesce.
+        #
+        # tcp_nopush and tcp_nodelay have opposite intentions (delay vs. send immediately)
+        # and nginx manages the trade-off dynamically:
+        #   1. tcp_nopush active while sending headers + file body → builds full packets
+        #   2. tcp_nopush released at end of transfer (TCP_CORK flag removed)
+        #   3. tcp_nodelay forces the remaining tail data out immediately, saving up to 200ms
+        #
+        # Source (nginx official docs): https://docs.nginx.com/nginx/admin-guide/web-server/serving-static-content/
+        # Source (deep dive into kernel TCP stack): https://gist.github.com/fdv/8542918
         tcp_nodelay on;
+
+        # How long to keep idle keep-alive connections open.
+        # 15s is a reasonable balance — long enough to reuse for multiple requests,
+        # short enough not to waste file descriptors on dead clients.
         keepalive_timeout 15;
+
+        # Max requests allowed on a single keep-alive connection before nginx closes it.
         keepalive_requests 100;
+
+        # Close connections that time out mid-request instead of leaving them in a
+        # half-open limbo. Frees file descriptors faster.
         reset_timedout_connection on;
+
+        # Don't include the nginx version number in error pages or response headers.
+        # "Server: nginx" is fine; "Server: nginx/1.25.3" gives attackers a target.
         server_tokens off;
 
+        # Buffer size for reading the request body in memory.
+        # If the body exceeds this, nginx spills it to a temp file on disk.
         client_body_buffer_size 1M;
+
+        # Hard ceiling on incoming request body size (can be overridden per-location, this is in http).
         client_max_body_size 10M;
+
+        # Buffer for reading request headers.
         client_header_buffer_size 1k;
+
+        # Larger buffer pool for unusually long headers (e.g. cookies, JWT tokens).
+        # 4 buffers x 8 KB each.
         large_client_header_buffers 4 8k;
+
+        # Max time between successive reads of the request body.
+        # If a client goes silent mid-upload for longer than this, nginx drops it.
         client_body_timeout 10s;
+
+        # Same idea, but for reading request headers.
         client_header_timeout 10s;
+
+        # Max time between successive writes to the client.
+        # If the client can't receive data for longer than this, nginx closes the connection.
         send_timeout 10s;
 
+        # Gzip is a compression algorithm.Gzip is a compression algorithm. When nginx sends a response 
+        # back to the client, instead of sending the raw bytes it compresses them first — the client receives 
+        # a smaller payload, decompresses it, and renders it.
         gzip on;
+
+        # Add "Vary: Accept-Encoding" so caches serve the right version to clients
+        # that don't support gzip.
         gzip_vary on;
+
+        # Compression level 1-9. 6 is the standard sweet spot: good compression,
+        # not much CPU cost. Level 9 barely improves ratio but costs a lot more CPU.
         gzip_comp_level 6;
+
+        # Don't bother compressing tiny responses — overhead isn't worth it.
         gzip_min_length 1000;
+
+        # Only compress these MIME types. Binary formats (images, video) are already
+        # compressed and would get larger, not smaller.
         gzip_types
             text/plain
             text/css
@@ -78,23 +174,36 @@ data:
             application/xml+rss
             text/javascript
             image/svg+xml;
+
+        # IE6 has a broken gzip implementation — skip compression for those clients.
         gzip_disable "msie6";
 
+        # Shared memory zone for rate limiting static file requests by IP.
+        # 10m = ~160,000 IP state entries. rate=10r/s = max 10 requests/sec per IP.
         limit_req_zone $binary_remote_addr zone=static_limit:10m rate=10r/s;
+
+        # Shared memory zone for capping simultaneous open connections per IP.
         limit_conn_zone $binary_remote_addr zone=addr_conn:10m;
 
-        # Used by the Grafana location to handle both regular HTTP and websocket
-        # upgrade requests in the same block. When $http_upgrade is empty (normal
-        # HTTP), Connection is set to close. When it is "websocket", Connection
-        # is set to upgrade. Without this, a static "upgrade" value breaks regular
-        # HTTP proxying and a static "" value breaks websockets.
+        # Grafana needs WebSocket support for live dashboards. nginx can't use a
+        # static Connection header because:
+        #   - "upgrade" breaks normal HTTP proxying (upstream ignores it)
+        #   - ""        breaks WebSocket upgrades (no upgrade signal sent)
+        #
+        # This map dynamically sets Connection based on whether the client sent
+        # an "Upgrade: websocket" header:
+        #   - normal HTTP request  -> $http_upgrade is "" -> Connection: close
+        #   - websocket handshake  -> $http_upgrade is "websocket" -> Connection: upgrade
         map $http_upgrade $connection_upgrade {
             default upgrade;
             ''      close;
         }
 
+        # nginx round-robins across these if you later add more servers.
         upstream backend {
             server backend:8000;
+            # Keep 16 idle connections to the backend alive in the pool.
+            # Avoids the TCP 3-way handshake overhead on every single request.
             keepalive 16;
         }
 
@@ -105,88 +214,141 @@ data:
 
         upstream grafana {
             server grafana:3000;
+            # Grafana traffic is lighter; 4 idle connections is plenty.
             keepalive 4;
         }
 
-        # ── HTTP: only used to pass ACME challenges and redirect everything else ──
+        # ── HTTP server — port 80 ──
+        # Only purpose: ACME challenges (Let's Encrypt cert renewal) and
+        # redirecting everything else to HTTPS.
         server {
             listen 80;
             server_name _;
 
+            # certbot writes challenge files here during cert renewal.
+            # Must be reachable over plain HTTP before the cert exists.
             location /.well-known/acme-challenge/ {
                 root /var/www/certbot;
             }
 
+            # Redirect everything else to HTTPS permanently.
+            # $host preserves the hostname; $request_uri preserves path + query string.
             location / {
                 return 301 https://$host$request_uri;
             }
         }
 
-        # ── HTTPS: TLS terminates here, all real traffic is handled here ──
+        # ── HTTPS server — port 443 ──
+        # TLS terminates here. All real application traffic is handled in this block.
         server {
             listen 443 ssl http2;
             server_name _;
 
             ssl_certificate     /etc/nginx/certs/tls.crt;
             ssl_certificate_key /etc/nginx/certs/tls.key;
+
+            # Only allow TLS 1.2 and 1.3. TLS 1.0/1.1 are deprecated and
+            # vulnerable to attacks like POODLE and BEAST.
             ssl_protocols       TLSv1.2 TLSv1.3;
+
+            # Prefer strong cipher suites; disallow unauthenticated (aNULL) and
+            # MD5-based ciphers.
             ssl_ciphers         HIGH:!aNULL:!MD5;
+
+            # Cache SSL session parameters server-side so returning clients can
+            # resume without a full handshake. 10m ~ 40,000 sessions.
             ssl_session_cache   shared:SSL:10m;
             ssl_session_timeout 10m;
 
+            # Cap simultaneous open connections per IP at 20.
+            # Prevents a single client from holding too many connections open.
             limit_conn addr_conn 20;
 
+            # Prevent this site from being embedded in an iframe (clickjacking protection).
             add_header X-Frame-Options "DENY" always;
+
+            # Prevent browsers from sniffing the MIME type of a response.
+            # Without this, a browser might execute a .txt file as JavaScript.
             add_header X-Content-Type-Options "nosniff" always;
+
+            # Activate the browser's built-in XSS filter.
             add_header X-XSS-Protection "1; mode=block" always;
+
+            # Send full URL for same-origin requests, only the origin for cross-origin,
+            # nothing for HTTP->HTTPS downgrades.
             add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
+            # Block access to dot-files (.git, .env, .htaccess, etc.).
             location ~ /\. {
                 deny all;
                 return 404;
             }
 
+            # Static frontend.
+            # Rate limit: allow 10 req/s sustained, burst up to 20 with no delay.
+            # "nodelay" means nginx accepts burst requests immediately or returns 503
+            # once the burst queue fills — it doesn't artificially slow them.
+            #
+            # alias replaces the location prefix with the given path.
+            # root would append the full URI instead — use alias when the URI
+            # prefix and the disk path don't match 1:1.
+            #
+            # root  /x;  + request /files/logos/a.png = /x/files/logos/a.png  (appends full URI)
+            # alias /x/;  + request /files/logos/a.png = /x/a.png             (strips prefix, appends remainder)
             location / {
                 limit_req zone=static_limit burst=20 nodelay;
                 root /usr/share/nginx/html;
+                # Try exact URI, then as a directory, then return 403.
+                # 403 instead of 404 so attackers can't enumerate paths.
                 try_files $uri $uri/ =403;
             }
 
+            # Logo files — long-lived immutable cache.
+            # alias replaces the URI prefix: /files/logos/x.png -> /usr/share/nginx/html/files/logos/x.png
             location /files/logos/ {
                 limit_req zone=static_limit burst=20 nodelay;
                 alias /usr/share/nginx/html/files/logos/;
                 expires 30d;
+                # "immutable" = browser won't even send a conditional request during
+                # those 30 days. Good for content-hashed filenames.
                 add_header Cache-Control "public, immutable";
             }
 
+            # Test/preview pictures — short-lived cache, no immutable flag since files may change.
             location /files/test_pictures/ {
                 alias /usr/share/nginx/html/files/test_pictures/;
                 expires 1d;
                 add_header Cache-Control "public";
             }
 
+            # Image processing service.
             location /images/ {
                 proxy_pass http://image_service;
                 proxy_http_version 1.1;
+                # Clear Connection header so the upstream doesn't see the client's
+                # keep-alive — nginx manages its own persistent connection separately.
                 proxy_set_header Connection "";
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header Host              $host;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
-                proxy_connect_timeout 5s;
-                proxy_send_timeout 10s;
-                proxy_read_timeout 30s;
+                # Image processing can be slow — allow more time.
+                proxy_connect_timeout 5s;   # TCP handshake to upstream
+                proxy_send_timeout    10s;  # Sending the request to upstream
+                proxy_read_timeout    30s;  # Waiting for upstream to respond
             }
 
+            # FastAPI / Swagger docs — proxied directly, no special config needed.
             location /docs {
                 proxy_pass http://backend;
                 proxy_http_version 1.1;
                 proxy_set_header Connection "";
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header Host            $host;
+                proxy_set_header X-Real-IP       $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             }
 
+            # OpenAPI schema endpoint — used by the Swagger UI above.
             location /openapi.json {
                 proxy_pass http://backend;
                 proxy_http_version 1.1;
@@ -194,65 +356,94 @@ data:
                 proxy_set_header Host $host;
             }
 
-            # ── Grafana UI ──
-            # Grafana must be configured with:
-            #   GF_SERVER_ROOT_URL = https://testproveoportfolio.xyz/grafana/
+            # Grafana UI.
+            #
+            # Grafana container MUST have these env vars set:
+            #   GF_SERVER_ROOT_URL            = https://<your-domain>/grafana/
             #   GF_SERVER_SERVE_FROM_SUB_PATH = true
-            # Without those two env vars, Grafana loads the page but all asset
-            # requests (JS, CSS, fonts) go to /public/... instead of
-            # /grafana/public/... and the UI comes up blank.
+            # Without them, Grafana builds asset URLs relative to / instead of
+            # /grafana/, so JS/CSS files 404 and the UI comes up blank.
             #
-            # The trailing slash on proxy_pass (http://grafana/) is intentional:
-            # it strips the /grafana prefix before forwarding to Grafana, so
-            # Grafana receives / instead of /grafana/ and its own router works
-            # correctly. Without it, Grafana would see /grafana/login and return 404.
+            # No trailing slash on proxy_pass — nginx forwards the full original URI
+            # unchanged, so Grafana receives /grafana/... and its own sub-path routing
+            # handles it. With a trailing slash nginx would strip /grafana and Grafana
+            # would see / instead of /grafana/ and its router would break.
             #
-            # proxy_set_header Host $http_host preserves the original Host header
-            # including port if present, which Grafana uses to build redirect URLs.
+            # $http_host (not $host) preserves the port if present. Grafana uses this
+            # to build redirect URLs during login flows.
             location /grafana/ {
                 proxy_pass http://grafana;
                 proxy_http_version 1.1;
-                proxy_set_header Host $http_host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header Host              $http_host;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
                 # $connection_upgrade is set by the map above:
-                # regular HTTP -> close, websocket upgrade -> upgrade
-                proxy_set_header Upgrade $http_upgrade;
+                # normal HTTP -> Connection: close
+                # WebSocket   -> Connection: upgrade
+                proxy_set_header Upgrade    $http_upgrade;
                 proxy_set_header Connection $connection_upgrade;
             }
 
-            # ── Auth endpoints: separate block for tighter body size limit ──
-            # Regex location takes priority over the prefix location /api/ below,
-            # so login/signup/resend-verification are handled here exclusively.
+            # Auth endpoints — stricter body size limit.
+            #
+            # Regex locations (~) have higher priority than prefix locations (like /api/
+            # below), so login/signup/resend-verification land here exclusively and never
+            # fall through to the general /api/ block.
+            #
+            # 1 MB body limit (vs 10 MB for general API) — auth payloads are tiny.
+            # Extended read timeout covers slow outbound email sends or heavy bcrypt hashing.
             location ~ ^/api/v1/users/(login|signup|resend-verification) {
                 proxy_pass http://backend;
                 proxy_http_version 1.1;
                 proxy_set_header Connection "";
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header Host              $host;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
-                proxy_read_timeout 300s;
+                proxy_read_timeout   300s;
                 client_max_body_size 1M;
             }
 
-            # ── General API: all other /api/ traffic lands here ──
+            # General API — all /api/ traffic that didn't match the auth regex above.
+            #
+            # TRAILING SLASH NORMALISATION
+            # FastAPI routes are defined without trailing slashes. When Starlette sees a
+            # request with a trailing slash it issues a 307 redirect, which causes the
+            # browser to fire a second request — stripping cookies and custom headers
+            # (X-CSRF-Token, X-Forwarded-Proto) in the process, so the request arrives
+            # unauthenticated and responses come back empty.
+            #
+            # This rewrite strips the trailing slash server-side BEFORE the request
+            # reaches FastAPI. Clients never see the redirect; all headers survive intact.
+            #
+            # Regex breakdown: rewrite ^(/api/.*)/$ $1 last;
+            #   ^(/api/.*)  capture everything from /api/ to the last non-slash character
+            #   )/$         trailing slash is outside the capture group — matched but NOT kept
+            #   $1          replacement: the captured path without the trailing slash
+            #   last        re-run nginx location matching internally with the new URL;
+            #               zero client roundtrips, all headers and cookies preserved
             location /api/ {
-
                 rewrite ^(/api/.*)/$ $1 last;
+
                 proxy_pass http://backend;
                 proxy_http_version 1.1;
                 proxy_set_header Connection "";
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header Host              $host;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
-                proxy_read_timeout 300s;
+                # Long timeout for slow endpoints (reports, exports, heavy queries).
+                proxy_read_timeout   300s;
+                # Allow uploads up to 10 MB (images, documents, etc.).
                 client_max_body_size 10M;
-                client_body_timeout 10s;
+                # Drop clients that pause mid-upload for more than 10s.
+                client_body_timeout  10s;
             }
 
+            # Health check endpoint.
+            # Used by Kubernetes liveness and readiness probes (see Deployment spec below).
+            # access_log off keeps frequent probe hits out of the access log.
             location = /health {
                 access_log off;
                 add_header Content-Type text/plain;
@@ -313,6 +504,7 @@ spec:
             - name: tls-certs
               mountPath: /etc/nginx/certs
               readOnly: true
+          # k8s kills the pod and restarts it if this fails.
           livenessProbe:
             httpGet:
               path: /health
@@ -320,6 +512,7 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
+          # k8s stops sending traffic to the pod until this passes.
           readinessProbe:
             httpGet:
               path: /health
@@ -344,8 +537,8 @@ spec:
         #     --cert=/home/deploy/certs/fullchain.pem \
         #     --key=/home/deploy/certs/privkey.pem \
         #     -n portfolio
-        # Kubernetes then injects the secret as files into the container at
-        # /etc/nginx/certs/ — that is the only way to get files into a running
+        # Kubernetes injects the secret as files into the container at
+        # /etc/nginx/certs/ — the only way to get files into a running
         # container without baking them into the image.
         - name: tls-certs
           secret:
