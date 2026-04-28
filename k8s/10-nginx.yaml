@@ -54,7 +54,7 @@ data:
     #   - call epoll_wait() to block until ANY of them are ready
     #   - kernel returns ONLY the ready ones — O(1) regardless of connection count
     #
-    # The older alternatives (select/poll) required passing ALL fds on every call
+    # The older alternatives (select/poll) required passing ALL fds  (file descriptors) on every call
     # and the kernel scanned all of them — O(n), falls apart at thousands of connections.
     #
     # So epoll is not the event loop itself, it's the kernel primitive underneath it:
@@ -82,27 +82,54 @@ data:
         # Fallback MIME type for anything not in mime.types.
         default_type application/octet-stream;
 
-        # socket without copying it through userspace (nginx) first.
-        # disk -> kernel buffer -> Network Interface Card  (instead of disk -> kernel -> nginx -> kernel -> NIC)
-        # Mainly benefits static file serving — no effect on proxied responses.
+        # ─────────────────────────────────────────────────────────────
+        # sendfile + TCP optimizations (Linux-specific behavior)
+        # ─────────────────────────────────────────────────────────────
+
+        # Enables zero-copy file transmission:
+        #   disk → kernel → NIC (no userspace copy through nginx)
+        # Only applies to static file serving (not proxy/fastcgi responses).
         sendfile on;
 
-        # Tells the kernel (via TCP_CORK on Linux) to hold packets until they reach
-        # the full segment size (MSS, ~1460 bytes) before sending.
-        # Goal is throughput — fewer, fuller packets means less header overhead on the wire.
+        # Enables TCP_CORK (via tcp_nopush) while sending responses.
+        #
+        # Effect:
+        # - Kernel buffers outgoing data and tries to build full TCP segments (≈ MSS)
+        # - Reduces number of packets → better throughput and lower header overhead
+        #
+        # Important:
+        # - This does NOT strictly wait for full MSS; kernel may flush:
+        #     • when buffer is large enough
+        #     • after a timeout (~200ms)
+        #     • when cork is explicitly removed
+        #
+        # NGINX behavior:
+        # - Turns TCP_CORK ON during response transmission (especially with sendfile)
+        # - Turns it OFF near the end of the response to flush data
         tcp_nopush on;
 
-        # Disables Nagle's algorithm, which buffers small packets waiting to fill them.
-        # Goal is latency — send data immediately rather than waiting to coalesce.
+        # Disables Nagle's algorithm (TCP_NODELAY).
         #
-        # tcp_nopush and tcp_nodelay have opposite intentions (delay vs. send immediately)
-        # and nginx manages the trade-off dynamically:
-        #   1. tcp_nopush active while sending headers + file body → builds full packets
-        #   2. tcp_nopush released at end of transfer (TCP_CORK flag removed)
-        #   3. tcp_nodelay forces the remaining tail data out immediately, saving up to 200ms
+        # Effect:
+        # - Small packets are sent immediately instead of being buffered
+        # - Improves latency, especially for:
+        #     • keepalive connections
+        #     • small responses
+        #     • final chunk of a response
         #
-        # Source (nginx official docs): https://docs.nginx.com/nginx/admin-guide/web-server/serving-static-content/
-        # Source (deep dive into kernel TCP stack): https://gist.github.com/fdv/8542918
+        # Interaction with tcp_nopush:
+        # - They do NOT conflict in practice because nginx uses them in phases:
+        #
+        #   1) During bulk transfer:
+        #        TCP_CORK ON  (tcp_nopush) → batch data into larger packets
+        #
+        #   2) At end of response:
+        #        TCP_CORK OFF → kernel flushes buffered data
+        #        TCP_NODELAY ON → ensures remaining small data is sent immediately
+        #
+        # Result:
+        # - High throughput during transfer
+        # - Low latency for the final bytes (avoids ~200ms delay from Nagle/delayed ACK)
         tcp_nodelay on;
 
         # How long to keep idle keep-alive connections open.
@@ -146,7 +173,7 @@ data:
         # If the client can't receive data for longer than this, nginx closes the connection.
         send_timeout 10s;
 
-        # Gzip is a compression algorithm.Gzip is a compression algorithm. When nginx sends a response 
+        # Gzip is a compression algorithm. When nginx sends a response 
         # back to the client, instead of sending the raw bytes it compresses them first — the client receives 
         # a smaller payload, decompresses it, and renders it.
         gzip on;
@@ -480,6 +507,11 @@ metadata:
   namespace: portfolio
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: nginx
@@ -537,8 +569,10 @@ spec:
         #     --cert=/home/deploy/certs/fullchain.pem \
         #     --key=/home/deploy/certs/privkey.pem \
         #     -n portfolio
+        # tls is a type of secret in k8s, look into the docs and you will get the above structure
         # Kubernetes injects the secret as files into the container at
-        # /etc/nginx/certs/ — the only way to get files into a running
+        # /etc/nginx/certs/ (the path is guaranteed when using tls type (the etxt before tls-name in this case))
+        # — the only way to get files into a running
         # container without baking them into the image.
         - name: tls-certs
           secret:
