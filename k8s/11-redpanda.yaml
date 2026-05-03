@@ -1,3 +1,5 @@
+# This yaml file is far from what you would see in a real production environment, but is useful enough
+# to get an idea on how to use this tool properly.  
 apiVersion: v1
 kind: Service
 metadata:
@@ -6,15 +8,21 @@ metadata:
   labels:
     app: redpanda
 spec:
+  # ClusterIP = internal only. Other pods reach this broker via DNS:
+  #   redpanda:9092  (Kafka protocol)
+  #   redpanda:9644  (Admin API)
+  # No external exposure needed — only internal services produce/consume.
   type: ClusterIP
   ports:
     - port: 9092
       targetPort: 9092
       protocol: TCP
+      # Kafka wire protocol — producers and consumers connect here
       name: kafka
     - port: 9644
       targetPort: 9644
       protocol: TCP
+      # Redpanda Admin API — used by rpk for health checks and management
       name: admin
   selector:
     app: redpanda
@@ -26,6 +34,9 @@ metadata:
   namespace: portfolio
 spec:
   serviceName: redpanda
+  # Single broker for development. To scale horizontally later, increase replicas
+  # and run `rpk cluster rebalance` to spread partitions across new brokers.
+  # Each replica gets its own PVC automatically via volumeClaimTemplates.
   replicas: 1
   selector:
     matchLabels:
@@ -42,18 +53,158 @@ spec:
             - rpk
             - redpanda
             - start
+            # Disables hardware tuning (thread affinity, busy-poll, disk I/O poll)
+            # that assumes bare metal. Required in containers where CPU is shared.
             - --overprovisioned
+            # Run a single Seastar shard (1 worker thread). Matches the container
+            # CPU limits and avoids shard contention.
             - --smp=1
+            # Internal Redpanda memory allocator limit.
             - --memory=512M
+            # Disables OS memory reservation. Without this, Redpanda reserves too
+            # much memory for the OS and the container gets OOM-killed.
             - --reserve-memory=0M
+            # ─── WHERE TO LISTEN ──────────────────────────────────────────────
+            #
+            # This tells the Redpanda process which network address to bind to
+            # inside the container. Binding means "open a socket and wait for
+            # incoming TCP connections on this address and port".
+            #
+            # 0.0.0.0 is not a real IP address — it is a special instruction to
+            # the Linux kernel that means "listen on ALL network interfaces this
+            # container has". A container typically has:
+            #
+            #     lo        127.0.0.1   (loopback, internal only)
+            #     eth0      10.x.x.x    (the pod's real cluster IP)
+            #
+            # If you bound to 127.0.0.1 instead, only processes inside the same
+            # container could reach Redpanda. Other pods couldn't connect at all.
+            # If you bound to the specific eth0 IP, it would break every time the
+            # pod restarts because Kubernetes assigns a new IP each time.
+            # 0.0.0.0 solves both problems — it works regardless of what IP the
+            # pod gets, and it accepts connections from anywhere.
+            #
+            # The "internal://" prefix is a listener NAME, not a protocol.
+            # In Redpanda v24.2+ the old PLAINTEXT:// prefix was replaced with
+            # named listeners. The name "internal" is arbitrary — you could call
+            # it "banana://" — but it must match exactly between --kafka-addr and
+            # --advertise-kafka-addr. Redpanda uses the name to pair them up.
+            # The name also lets you define multiple listeners with different
+            # security configs (e.g. internal:// for pods, external:// for
+            # internet traffic) and apply TLS only to the external one.
             - --kafka-addr
             - internal://0.0.0.0:9092
+            # ─── WHAT TO TELL CLIENTS ─────────────────────────────────────────
+            #
+            # This is a completely separate concern from --kafka-addr above.
+            # --kafka-addr is an instruction to the OS: "bind here".
+            # --advertise-kafka-addr is an instruction to clients: "reconnect here".
+            #
+            # To understand why both exist, you need to understand the Kafka
+            # two-step connection flow:
+            #
+            # STEP 1 — BOOTSTRAP
+            #     The producer/consumer has one hardcoded address in its config,
+            #     e.g. "redpanda:9092". It connects there just to ask:
+            #     "give me the cluster metadata". The broker responds with a map:
+            #
+            #         partition 0 → broker 1 → <advertise-addr-of-broker-1>
+            #         partition 1 → broker 2 → <advertise-addr-of-broker-2>
+            #         partition 2 → broker 3 → <advertise-addr-of-broker-3>
+            #
+            #     The address embedded in that map IS the advertise-kafka-addr.
+            #
+            # STEP 2 — REAL CONNECTION
+            #     The client disconnects from the bootstrap broker and reconnects
+            #     directly to whichever broker owns the partition it needs, using
+            #     the address it just received in the metadata map.
+            #
+            # WHY THIS BREAKS WITHOUT THE ADVERTISE FLAG
+            #     If you didn't set --advertise-kafka-addr, Redpanda would put
+            #     its bind address (0.0.0.0:9092) into the metadata response.
+            #     The client would receive "reconnect to 0.0.0.0:9092" which is
+            #     meaningless outside the container — 0.0.0.0 is not a routable
+            #     address. The bootstrap would succeed (step 1 works fine) but
+            #     the real connection would fail (step 2 blows up). This is the
+            #     exact failure mode described as "bootstrap succeeds but
+            #     publishing fails silently" — your producer connects, gets no
+            #     error, but records never arrive.
+            #
+            # WHY "redpanda:9092" WORKS HERE
+            #     "redpanda" is the name of the Kubernetes Service defined at the
+            #     top of this file. Kubernetes runs an internal DNS server that
+            #     resolves "redpanda" to the ClusterIP of that Service from any
+            #     pod in the same namespace. So every producer and consumer pod
+            #     can resolve and reach "redpanda:9092" regardless of which node
+            #     they're scheduled on or what IP they got assigned.
+            #
+            # IN A REAL MULTI-BROKER CLUSTER (e.g. 3 EC2 machines)
+            #     Every broker has the same --kafka-addr (0.0.0.0:9092) because
+            #     the bind instruction is identical on all machines.
+            #     But each broker has a UNIQUE --advertise-kafka-addr:
+            #
+            #         broker 1: --advertise-kafka-addr=10.0.1.10:9092
+            #         broker 2: --advertise-kafka-addr=10.0.1.11:9092
+            #         broker 3: --advertise-kafka-addr=10.0.1.12:9092
+            #
+            #     This is exactly why the two flags must exist separately — you
+            #     write the same config template for every broker and only swap
+            #     the advertise address per machine. The bind address is always
+            #     the same, the advertise address is always unique.
+            #
+            #     In this project there is only one broker so the bootstrap broker
+            #     and the partition leader are always the same node — the advertise
+            #     address just points back to itself via the Service DNS name.
+            #
+            # LISTENER NAME MUST MATCH
+            #     Both flags use "internal://". Redpanda pairs them by name. If
+            #     --kafka-addr says "internal://" and --advertise-kafka-addr says
+            #     "external://" Redpanda will refuse to start because it cannot
+            #     find a matching pair.
             - --advertise-kafka-addr
             - internal://redpanda:9092
+            # ─── PANDAPROXY (HTTP REST interface) ─────────────────────────────
+            #
+            # Redpanda ships with a built-in HTTP proxy called Pandaproxy that
+            # lets you produce and consume messages over plain HTTP/JSON instead
+            # of the binary Kafka protocol. Useful for debugging — you can curl
+            # directly against it without needing a Kafka client library.
+            #
+            # The bind-vs-advertise pattern is identical to --kafka-addr above:
+            #
+            #     --pandaproxy-addr          = where to listen (0.0.0.0 = all interfaces)
+            #     --advertise-pandaproxy-addr = what to tell clients to reconnect to
+            #
+            # The application (your FastAPI backend) does NOT use this. It uses
+            # the Kafka binary protocol on port 9092 via a proper Kafka client
+            # library. This proxy exists purely so you can do things like:
+            #
+            #     curl http://redpanda:8082/topics
+            #     curl -X POST http://redpanda:8082/topics/orders \
+            #          -H "Content-Type: application/vnd.kafka.json.v2+json" \
+            #          -d '{"records":[{"value":"test"}]}'
+            #
+            # from inside the cluster during development without spinning up a
+            # separate debug tool.
             - --pandaproxy-addr
             - internal://0.0.0.0:8082
             - --advertise-pandaproxy-addr
             - internal://redpanda:8082
+            # ─── --node-id (intentionally omitted) ────────────────────────────
+            #
+            # In older Redpanda versions (before v24.2) every broker required a
+            # manually assigned --node-id flag to identify itself in the cluster.
+            # You had to set node-id=0 for the first broker, node-id=1 for the
+            # second, and so on — and you had to get it right because mismatches
+            # would corrupt cluster state.
+            #
+            # In v24.2+ this was removed. Redpanda now derives the node ID
+            # automatically from the StatefulSet pod ordinal — redpanda-0 becomes
+            # node 0, redpanda-1 becomes node 1, etc. Kubernetes guarantees these
+            # ordinals are stable and unique, so Redpanda can rely on them safely.
+            #
+            # If you pass --node-id explicitly on v24.2+ the broker will refuse
+            # to start with a parse error. It is left out here intentionally.
           ports:
             - containerPort: 9092
               name: kafka
@@ -62,17 +213,20 @@ spec:
             - containerPort: 8082
               name: proxy
           livenessProbe:
+            # Detects crashes or deadlocks and triggers a container restart.
             exec:
               command:
                 - rpk
                 - cluster
                 - health
                 - --api-urls=localhost:9644
-            initialDelaySeconds: 30
+            initialDelaySeconds: 30  # Redpanda needs time to start before being probed
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 5
           readinessProbe:
+            # Determines when the broker is ready to accept connections.
+            # k8s stops sending traffic to the pod until this passes.
             exec:
               command:
                 - rpk
@@ -85,318 +239,80 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              memory: "512Mi"
+              memory: "512Mi"  # Matches --memory=512M passed to Redpanda internally
               cpu: "100m"
             limits:
-              memory: "768Mi"
+              memory: "768Mi"  # Headroom above 512M for the JVM-adjacent runtime overhead
               cpu: "500m"
+              # CPU is time-shared by Linux. Even with --smp=1, the kernel may
+              # throttle the process according to the cgroup CPU limit.
           volumeMounts:
             - name: redpanda-data
               mountPath: /var/lib/redpanda/data
+              # This is where all partition data lives on disk inside the container:
+              #
+              #     /var/lib/redpanda/data/
+              #         orders-0/          ← partition directory
+              #             *.log          ← append-only log segments
+              #             *.index        ← offset-to-byte-position maps
+              #         payments-0/
+              #             *.log
+              #             *.index
+              #
+              # Without a real persistent volume backing this path, everything
+              # is lost the moment the pod restarts.
   volumeClaimTemplates:
+    # ─── HOW PVCs GET CREATED AUTOMATICALLY ──────────────────────────────────
+    #
+    # This block is a STAMP. Every time Kubernetes creates a new Redpanda pod
+    # it uses this template to stamp out a dedicated PVC for that pod.
+    #
+    # The naming convention is always:
+    #     <template-name>-<statefulset-name>-<ordinal>
+    #
+    # So with replicas: 1 you get:
+    #     redpanda-data-redpanda-0
+    #
+    # Scale to 4 and Kubernetes stamps out the rest automatically:
+    #     redpanda-data-redpanda-0
+    #     redpanda-data-redpanda-1
+    #     redpanda-data-redpanda-2
+    #     redpanda-data-redpanda-3
+    #
+    # Each broker gets its own private disk. Two brokers cannot share a disk
+    # because they write to their partition logs independently and concurrently
+    # — sharing would corrupt the log segments immediately.
+    #
+    # Docs: https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#volume-claim-templates
+    #
+    # ─── PVCs SURVIVE POD RESTARTS AND DELETIONS ─────────────────────────────
+    #
+    # If broker 0 crashes, Kubernetes restarts it and reattaches it to the same
+    # redpanda-data-redpanda-0 PVC. All log segments are still there.
+    #
+    # If you scale DOWN from 4 to 2, the PVCs for broker 2 and broker 3 are NOT
+    # deleted automatically. You have to clean them up manually. Kubernetes does
+    # this on purpose to protect you from accidental data loss.
+    #
+    # Docs: https://kubernetes.io/docs/concepts/storage/persistent-volumes/
+    #
+    # ─── local-path StorageClass ─────────────────────────────────────────────
+    #
+    # Tells Kubernetes HOW to provision the actual disk. local-path creates a
+    # directory on the node's local filesystem. Fast, but the data is tied to
+    # that node — if the pod moves to a different node its data does not follow.
+    # Fine for dev. In production swap this for a network-backed StorageClass:
+    #
+    #     AWS:   gp3
+    #     GCP:   premium-rwo
+    #     Azure: managed-premium
+    #
+    # Redpanda storage docs: https://docs.redpanda.com/current/manage/kubernetes/k-manage-resources/
     - metadata:
         name: redpanda-data
       spec:
-        accessModes: ["ReadWriteOnce"]
+        accessModes: ["ReadWriteOnce"]  # One broker, one disk. No sharing.
         storageClassName: local-path
         resources:
           requests:
-            storage: 2Gi
-# -----------------------------------------------------------------------------
-# Redpanda Single-Node StatefulSet (Development Configuration)
-#
-# This file deploys a lightweight Redpanda Kafka-compatible broker in Kubernetes.
-#
-# Architecture overview:
-#
-# 1. Service
-#    Creates an internal ClusterIP service called "redpanda".
-#    Other pods can reach the broker using:
-#       redpanda:9092  (Kafka protocol)
-#
-#
-# 2. StatefulSet
-#    Deploys a persistent Redpanda broker with stable identity and storage.
-#    StatefulSet is used instead of Deployment because message brokers require:
-#
-#        • Stable network identity (redpanda-0, redpanda-1, ...)
-#        • Stable persistent disks
-#        • Ordered startup and recovery
-#
-#    StatefulSet also enables automatic per-node storage through
-#    `volumeClaimTemplates`.
-#
-#
-# -----------------------------------------------------------------------------
-# Why Redpanda uses volumeClaimTemplates instead of the shared pvc.yaml file
-# -----------------------------------------------------------------------------
-#
-# Other services in this project define PVCs in a separate file:
-#
-#   postgres-primary-data
-#   postgres-replica-data
-#   redis-data
-#   minio-data
-#
-# Those systems are currently deployed as single nodes.
-#
-# Redpanda is different: it is designed to scale horizontally by adding brokers.
-#
-# Example cluster:
-#
-#     redpanda-0
-#     redpanda-1
-#     redpanda-2
-#     redpanda-3
-#
-# Each broker must have its own disk because it stores partition logs locally.
-#
-# StatefulSet automatically generates one PVC per broker:
-#
-#     redpanda-data-redpanda-0
-#     redpanda-data-redpanda-1
-#     redpanda-data-redpanda-2
-#
-# This happens automatically when scaling replicas.
-#
-#
-# -----------------------------------------------------------------------------
-# How Kafka / Redpanda partition distribution works
-# -----------------------------------------------------------------------------
-#
-# Topics are split into partitions.
-#
-# Example topic:
-#
-#     topic: orders
-#
-#         partition 0
-#         partition 1
-#         partition 2
-#         partition 3
-#
-# Partitions are the unit of parallelism.
-#
-# Example with ONE broker:
-#
-#     redpanda-0
-#         orders-p0
-#         orders-p1
-#         orders-p2
-#         orders-p3
-#
-#
-# Example with FOUR brokers (ideal distribution):
-#
-#     redpanda-0 → orders-p0
-#     redpanda-1 → orders-p1
-#     redpanda-2 → orders-p2
-#     redpanda-3 → orders-p3
-#
-# This spreads:
-#
-#     • disk I/O
-#     • CPU work
-#     • network traffic
-#
-# across machines, increasing throughput.
-#
-#
-# -----------------------------------------------------------------------------
-# IMPORTANT: scaling brokers does NOT automatically redistribute partitions
-# -----------------------------------------------------------------------------
-#
-# If the cluster originally runs with one broker:
-#
-#     redpanda-0
-#         p0 p1 p2 p3
-#
-# and the StatefulSet is scaled to:
-#
-#     redpanda-0
-#     redpanda-1
-#     redpanda-2
-#     redpanda-3
-#
-# The existing partitions remain on redpanda-0.
-#
-# The new brokers will initially be empty.
-#
-# This is intentional to avoid automatic large data movements.
-#
-#
-# -----------------------------------------------------------------------------
-# NOTE TO FUTURE ME
-# -----------------------------------------------------------------------------
-#
-# If you scale this cluster and want to spread partitions across brokers
-# for better performance, run a rebalance operation.
-#
-# Example:
-#
-#     rpk cluster rebalance
-#
-# This redistributes partitions so the load is balanced.
-#
-# Desired result:
-#
-#     redpanda-0 → partition 0
-#     redpanda-1 → partition 1
-#     redpanda-2 → partition 2
-#     redpanda-3 → partition 3
-#
-# Do this if the system grows and there is budget for additional nodes.
-#
-#
-# -----------------------------------------------------------------------------
-# 3. Redpanda runtime configuration
-# -----------------------------------------------------------------------------
-#
-#    --overprovisioned
-#        Disables hardware tuning (thread affinity, busy-poll, disk I/O poll)
-#        that assumes bare metal. Required in containers where CPU is shared.
-#        NOTE: --mode dev-container is only valid with `rpk redpanda start`.
-#        This manifest calls `redpanda start` directly, so --overprovisioned
-#        and --reserve-memory=0M are still the correct flags here.
-#
-#    --smp=1
-#        Runs a single Seastar shard (1 worker thread). This matches the
-#        container CPU limits and avoids shard contention.
-#
-#    --memory=512M
-#        Internal Redpanda memory allocator limit.
-#
-#    --reserve-memory=0M
-#        Disables OS memory reservation. Required in small containers
-#        where Redpanda would otherwise reserve too much for the OS.
-#
-#    --node-id (removed)
-#        Was a required flag in older Redpanda versions. Removed in v24.2+
-#        — the broker now assigns its own ID automatically from the
-#        StatefulSet ordinal. Passing it explicitly causes a parse error.
-#
-#    --kafka-addr / --advertise-kafka-addr
-#        Two different concerns:
-#
-#        --kafka-addr     = WHERE TO LISTEN (bind address)
-#        --advertise-addr = WHAT TO TELL CLIENTS (reconnect address)
-#
-#        Kafka uses a two-step connection flow:
-#            1. Producer connects to any broker as bootstrap.
-#            2. That broker responds with cluster metadata:
-#               "partition X is on broker Y, reconnect to <advertise-addr>"
-#            3. Producer disconnects and reconnects to the correct broker.
-#
-#        The advertise address is what gets sent in step 2.
-#        If it is wrong, the bootstrap succeeds but publishing fails.
-#
-#        --kafka-addr internal://0.0.0.0:9092
-#            In v24.2+ PLAINTEXT:// was replaced with named listeners.
-#            0.0.0.0 still means listen on all interfaces inside the container.
-#
-#        --advertise-kafka-addr internal://redpanda:9092
-#            The stable Kubernetes Service DNS name. Clients receive this
-#            address in metadata responses and use it to reconnect.
-#            Listener name must match --kafka-addr.
-#
-#        In a real multi-broker cluster on AWS (3 EC2 machines):
-#
-#            Broker 1: --kafka-addr=0.0.0.0:9092
-#                      --advertise-kafka-addr=10.0.1.10:9092   ← unique private IP
-#
-#            Broker 2: --kafka-addr=0.0.0.0:9092
-#                      --advertise-kafka-addr=10.0.1.11:9092
-#
-#            Broker 3: --kafka-addr=0.0.0.0:9092
-#                      --advertise-kafka-addr=10.0.1.12:9092
-#
-#        The bind instruction (0.0.0.0) is identical on every machine.
-#        The advertise address is unique per machine.
-#        This is why the two flags must exist separately — you write the same
-#        config template for every broker and only swap the advertise address.
-#
-#        In this project there is only one broker so bootstrap and partition
-#        leader are always the same node — the advertise address points back
-#        to itself via the Service DNS name.
-#
-#    --pandaproxy-addr / --advertise-pandaproxy-addr
-#        Same bind vs advertise pattern and same named-listener syntax
-#        as --kafka-addr. Applied to the HTTP REST proxy.
-#        Not used by the application directly — kept for debugging via curl.
-#
-#    --set=redpanda.auto_create_topics_enabled=false
-#        Prevents automatic topic creation. Topics must be created explicitly
-#        via the init Job (12-redpanda-init.yaml). This catches typos — a
-#        misspelled topic name would otherwise silently create a new empty
-#        topic instead of failing loudly.
-#
-#    NOTE: The admin API (port 9644) has no --advertise flag because it uses
-#    a direct connection model with no metadata redirect step. rpk connects
-#    once and stays — no bootstrap handshake, no "reconnect elsewhere."
-#    It binds to 0.0.0.0:9644 by default without any flag needed.
-#
-#
-# -----------------------------------------------------------------------------
-# 4. Ports
-# -----------------------------------------------------------------------------
-#
-#    9092  → Kafka protocol (client producers / consumers)
-#    9644  → Redpanda Admin API (cluster health, management)
-#    8082  → Pandaproxy REST interface
-#
-#
-# -----------------------------------------------------------------------------
-# 5. Health Probes
-# -----------------------------------------------------------------------------
-#
-# Kubernetes runs:
-#
-#     rpk cluster health --api-urls localhost:9644
-#
-# against the admin API to verify broker health.
-#
-# readinessProbe
-#     Determines when the broker is ready to accept connections.
-#
-# livenessProbe
-#     Detects crashes or deadlocks and restarts the container.
-#
-#
-# -----------------------------------------------------------------------------
-# 6. Resource Management
-# -----------------------------------------------------------------------------
-#
-# Requests:
-#
-#     cpu: 100m
-#     memory: 512Mi
-#
-# Limits:
-#
-#     cpu: 500m
-#     memory: 768Mi
-#
-# CPU is time-shared by Linux. Even though Redpanda runs a single shard,
-# the kernel may throttle the process according to the cgroup CPU limits.
-#
-#
-# -----------------------------------------------------------------------------
-# 7. Persistent Storage
-# -----------------------------------------------------------------------------
-#
-# StatefulSet creates a PersistentVolumeClaim using the "local-path"
-# StorageClass.
-#
-# Data directory inside container:
-#
-#     /var/lib/redpanda/data
-#
-# Storage size requested:
-#
-#     2Gi
-#
-# This directory stores Kafka log segments and metadata.
-# Persistent volumes ensure data survives pod restarts.
-#
-# -----------------------------------------------------------------------------
----
+            storage: 2Gi  # Per broker. 4 brokers = 8Gi total across the cluster.

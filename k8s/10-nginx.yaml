@@ -212,6 +212,7 @@ data:
         # Shared memory zone for capping simultaneous open connections per IP.
         limit_conn_zone $binary_remote_addr zone=addr_conn:10m;
 
+        # Reference: https://grafana.com/tutorials/run-grafana-behind-a-proxy/
         # Grafana needs WebSocket support for live dashboards. nginx can't use a
         # static Connection header because:
         #   - "upgrade" breaks normal HTTP proxying (upstream ignores it)
