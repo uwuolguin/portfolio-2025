@@ -3,7 +3,7 @@
 #
 # Uses temporalio/auto-setup which:
 #   1. Runs schema migrations against postgres-primary on first boot
-#   2. Creates two databases: temporal + temporal_visibility
+#   2. Connects to two databases: temporal + temporal_visibility
 #   3. Starts the Temporal frontend/history/matching/worker services
 #      all-in-one (suitable for single-node demo deployments)
 #
@@ -78,17 +78,18 @@ data:
   LOG_LEVEL: "warn"
 
   # ── Namespace (auto-created on first boot) ───────────────────────────────────
-  # DEFAULT_NAMESPACE and DEFAULT_NAMESPACE_RETENTION are handled by the
+  # DEFAULT_NAMESPACE is handled by the
   # auto-setup entrypoint script.
   # Source: https://temporal.io/blog/auto-setup
   DEFAULT_NAMESPACE: "default"
+  # 1 here means 1 day
   DEFAULT_NAMESPACE_RETENTION: "1"
 
   # ── UI ───────────────────────────────────────────────────────────────────────
   TEMPORAL_CORS_ORIGINS: "http://localhost:8080"
   TEMPORAL_UI_PORT: "8080"
-  # Tell auto-setup to connect with SSL — matches your hostssl pg_hba rules
-  SKIP_DB_CREATE: "true"   # databases already exist, skip creation
+  SKIP_DB_CREATE: "true"
+
 ---
 # ── Temporal server Deployment ────────────────────────────────────────────────
 #
@@ -103,18 +104,15 @@ data:
 #   - temporal-sql-tool     (schema migration runner)
 #   - an entrypoint script  (runs migrations, then starts the server)
 #
-# On first boot against an empty DB:
-#   1. Creates databases temporal + temporal_visibility
-#   2. Applies all schema migrations
-#   3. Starts all Temporal internal services (frontend, history, matching, worker)
-#
-# On subsequent boots: detects schema is current, skips migrations, starts server.
+# On boot: applies any pending schema migrations, then starts all Temporal
+# internal services (frontend, history, matching, worker).
 # Source: deepwiki.com/temporalio/temporal/8.4-database-schema-management
 #
 # No initContainer needed — auto-setup polls postgres internally before
 # running migrations.
 # Source: github.com/temporalio/temporal/issues/2322
 #
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -209,6 +207,7 @@ spec:
 #   kubectl port-forward -n portfolio svc/temporal-ui 8080:8080
 # Then browse to http://localhost:8080 from your laptop via SSH tunnel.
 #
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

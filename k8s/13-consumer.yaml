@@ -1,7 +1,7 @@
 # 13-consumer.yaml — Redpanda consumer worker
 # Reuses the backend image. No separate build needed.
 # The only difference from the backend pod is the command: python run_consumer.py
-
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

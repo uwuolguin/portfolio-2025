@@ -15,7 +15,7 @@
 #   in-flight activities to finish before exiting.
 #   terminationGracePeriodSeconds=60 gives it time to drain.
 # =============================================================================
-
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,8 +32,10 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1         # briefly 2 workers during rollout — Temporal deduplicates tasks
-      maxUnavailable: 0   # old worker stays up until new one is polling
+      # briefly 2 workers during rollout — Temporal deduplicates tasks
+      maxSurge: 1
+      # old worker stays up until new one is polling
+      maxUnavailable: 0   
 
   template:
     metadata:

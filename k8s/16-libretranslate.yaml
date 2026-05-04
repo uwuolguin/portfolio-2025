@@ -14,7 +14,7 @@
 # liveness/readiness until /health passes. Handles slow first-boot model
 # download without inflating initialDelaySeconds on every subsequent restart.
 # =============================================================================
-
+---
 apiVersion: v1
 kind: Service
 metadata:

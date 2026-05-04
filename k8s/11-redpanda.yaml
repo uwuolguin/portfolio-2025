@@ -1,5 +1,6 @@
 # This yaml file is far from what you would see in a real production environment, but is useful enough
-# to get an idea on how to use this tool properly.  
+# to get an idea on how to use this tool properly.
+---
 apiVersion: v1
 kind: Service
 metadata:

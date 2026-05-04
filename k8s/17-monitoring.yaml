@@ -545,6 +545,7 @@ metadata:
   name: grafana-init-users
   namespace: portfolio
 spec:
+  ttlSecondsAfterFinished: 300
   backoffLimit: 5
   template:
     spec:
