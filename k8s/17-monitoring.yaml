@@ -26,7 +26,19 @@
 # =============================================================================
 # LOKI — stores and indexes the logs
 # Upgraded to 3.5.0 with TSDB storage (boltdb-shipper deprecated in 3.0)
-# =============================================================================
+#
+# Loki TSDB indexes ONLY labels/streams, not full log contents.
+# Query flow is roughly:
+#   LogQL label selector -> TSDB index lookup -> matching streams/chunks
+#   -> fetch compressed chunks from object storage -> scan/filter log lines
+#
+# Internally the TSDB index behaves closer to an inverted index/postings-list
+# system (similar to Prometheus TSDB/Lucene concepts) than a classic mutable
+# B-tree SQL index. Immutable index blocks + chunk metadata allow efficient
+# distributed queries and query sharding.
+#
+# High-cardinality labels (request_id, random UUIDs, per-user labels, etc.)
+# can explode index size and hurt query/storage performance.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -34,48 +46,138 @@ metadata:
   namespace: portfolio
 data:
   loki.yaml: |
+    # auth_enabled: false disables multi-tenancy. All logs go into a single
+    # "fake" tenant. Required for single-node deployments — if true, every
+    # push/query request must include an X-Scope-OrgID header.
+    # https://grafana.com/docs/loki/latest/configure/#auth_enabled
     auth_enabled: false
 
     server:
       http_listen_port: 3100
       grpc_listen_port: 9096
 
-    # common block simplifies single-node configuration in Loki 3.x
+    # The common block is a Loki 3.x convenience that sets shared defaults
+    # for path_prefix, storage, replication_factor, and ring — avoiding
+    # repetition across the ingester, compactor, and ruler sections.
+    # loki rules are alerts you can set fro example when too many 500 errors are present in the records.
+    # https://grafana.com/docs/loki/latest/configure/#common
     common:
       path_prefix: /loki
       storage:
         filesystem:
           chunks_directory: /loki/chunks
           rules_directory: /loki/rules
+      # replication_factor: 1 is correct for single-node. Values > 1 require
+      # multiple ingesters and a distributed ring (Consul or etcd).
+      # https://grafana.com/docs/loki/latest/configure/#common
       replication_factor: 1
       ring:
+        # instance_addr: 127.0.0.1 advertises this Loki instance as localhost
+        # inside the ring. This is correct only for a single-node deployment:
+        # there are no other ingesters/distributors that need to reach this node
+        # over the network. In a distributed cluster this would be the pod IP,
+        # service DNS name, or host IP so other Loki nodes can coordinate writes,
+        # replication, ownership, and health through the ring.
+        #
+        # kvstore: inmemory stores ring state only in this process' RAM.
+        # Correct for single-node Loki because there is no distributed cluster
+        # state to share or coordinate. Multi-node Loki requires a shared ring
+        # backend (memberlist/Consul/etcd) so nodes can agree on:
+        #   - which ingesters are alive
+        #   - which node owns which hash ranges/streams
+        #   - where replicas live
+        #   - where distributors should route writes
+        #
+        # Without a shared distributed kvstore, each node would have an isolated,
+        # inconsistent view of the ring and clustering would break.
+        # https://grafana.com/docs/loki/latest/configure/#ring
         instance_addr: 127.0.0.1
         kvstore:
           store: inmemory
 
+    # schema_config defines HOW Loki organises log data on disk/object storage:
+    #   - which index backend to use (tsdb vs old boltdb-shipper)
+    #   - which object store holds chunks/indexes (filesystem, S3, GCS, etc.)
+    #   - which schema version defines the on-disk layout
+    #   - how index tables/blocks are partitioned over time
+    #
+    # Loki stores logs in two major pieces:
+    #   1. compressed log chunks (actual log lines)
+    #   2. indexes mapping labels/streams -> chunk references
+    #
+    # schema_config tells Loki how to interpret BOTH pieces for a given time range.
+    # This matters because storage formats evolve across Loki versions.
+    #
+    # Multiple schema entries are allowed because old logs may have been written
+    # using different backends or layouts. Loki selects the correct schema entry
+    # dynamically based on the log timestamp being queried.
+    #
+    # Example:
+    #   logs from 2025 -> boltdb-shipper + schema v11
+    #   logs from 2026 -> TSDB + schema v13
+    #
+    # During queries Loki transparently reads both formats, allowing migrations
+    # without reindexing or deleting historical data.
+    #
+    # Adding a new schema entry is the standard migration path when changing:
+    #   - index backend
+    #   - object storage backend
+    #   - schema version
+    #
+    # IMPORTANT:
+    # Never modify old schema entries retroactively once data exists.
+    # Existing chunks/indexes were physically written using that layout.
+    # Changing old entries can make historical logs unreadable.
+    #
+    # The `from:` date acts as a cutover point:
+    # logs with timestamps >= from use that schema entry.
+    #
+    # https://grafana.com/docs/loki/latest/configure/storage/#schema-config
     schema_config:
       configs:
         - from: 2026-01-01
+          # store: tsdb is the current index backend as of Loki 3.0.
+          # boltdb-shipper was deprecated in 3.0 and removed in a later release.
+          # https://grafana.com/docs/loki/latest/operations/storage/tsdb/
           store: tsdb
           object_store: filesystem
+          # schema: v13 is required for TSDB. v11/v12 only worked with boltdb-shipper.
+          # https://grafana.com/docs/loki/latest/configure/storage/#schema-versions
           schema: v13
           index:
             prefix: index_
+            # period: 24h creates one index table per day. The only supported
+            # value for TSDB — weekly periods are a boltdb-shipper concept.
+            # https://grafana.com/docs/loki/latest/operations/storage/tsdb/#index-period
             period: 24h
 
     limits_config:
+      # reject_old_samples blocks ingestion of logs older than
+      # reject_old_samples_max_age. Prevents backfill from bloating the index
+      # and keeps query performance predictable.
+      # https://grafana.com/docs/loki/latest/configure/#limits_config
       reject_old_samples: true
       reject_old_samples_max_age: 72h
+      # ingestion_rate_mb and ingestion_burst_size_mb are per-tenant rate limits
+      # on how fast logs can be pushed to Loki. With auth_enabled: false there
+      # is effectively one tenant, so this is a global ingest cap.
+      # https://grafana.com/docs/loki/latest/operations/request-validation-rate-limits/
       ingestion_rate_mb: 4
       ingestion_burst_size_mb: 6
-      # retention_period in limits_config is the Loki 3.x way to set retention
+      # retention_period in limits_config is the Loki 3.x way to configure
+      # how long logs are kept. The compactor enforces this — it will not
+      # delete anything unless retention_enabled: true is also set below.
+      # https://grafana.com/docs/loki/latest/operations/storage/retention/
       retention_period: 72h
 
     compactor:
       working_directory: /loki/compactor
-      # retention_enabled tells the compactor to delete chunks older than retention_period
+      # retention_enabled: true activates the compactor's deletion loop.
+      # Without this, retention_period above is ignored and logs accumulate forever.
+      # https://grafana.com/docs/loki/latest/operations/storage/retention/#configuring-the-retention-period
       retention_enabled: true
-      # filesystem matches the object_store defined in schema_config above
+      # delete_request_store must match the object_store in schema_config.
+      # https://grafana.com/docs/loki/latest/configure/#compactor
       delete_request_store: filesystem
 
 ---
@@ -110,9 +212,10 @@ spec:
     app: loki
 
 ---
-# Loki is a StatefulSet — handles RWO PVC correctly by design.
-# StatefulSets update pods one at a time and keep the same PVC per pod,
-# so there is no mount conflict during rolling updates.
+# Loki is a StatefulSet — StatefulSets update pods one at a time and guarantee
+# that the same pod name always gets the same PVC, so there is no mount conflict
+# during rolling updates with a ReadWriteOnce volume.
+# https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -132,9 +235,10 @@ spec:
         app: loki
     spec:
       initContainers:
-        # local-path provisioner creates the PVC directory as root.
-        # chown to UID/GID 10001 (loki user) before the main process starts
-        # so Loki can write chunks and index files.
+        # local-path provisioner creates the PVC directory owned by root.
+        # Loki runs as UID/GID 10001 and will fail to write chunks or index
+        # files unless ownership is fixed before the main container starts.
+        # https://github.com/grafana/loki/blob/main/production/docker/Dockerfile
         - name: fix-permissions
           image: busybox:1.36
           command: ["sh", "-c", "chown -R 10001:10001 /loki"]
@@ -161,6 +265,9 @@ spec:
               mountPath: /etc/loki
             - name: loki-data
               mountPath: /loki
+          # /ready returns HTTP 200 once Loki has finished loading the index
+          # and is ready to accept push and query requests.
+          # https://grafana.com/docs/loki/latest/reference/api/#identify-ready-loki-instance
           readinessProbe:
             httpGet:
               path: /ready
@@ -195,8 +302,7 @@ spec:
 # Replaces Promtail (EOL March 2026). Alloy is the official Grafana collector.
 # Uses loki.source.kubernetes which reads from the Kubernetes API directly —
 # no hostPath volume needed, no dependency on the node filesystem layout.
-#
-# Config reference: https://grafana.com/docs/alloy/latest/collect/logs-in-kubernetes/
+# https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/
 # =============================================================================
 apiVersion: v1
 kind: ServiceAccount
@@ -205,6 +311,10 @@ metadata:
   namespace: portfolio
 
 ---
+# ClusterRole grants Alloy read access to pod metadata and log streams
+# across the entire cluster. loki.source.kubernetes calls the Kubernetes
+# API to stream pod logs — it needs pods/log at minimum.
+# https://grafana.com/docs/alloy/latest/collect/logs-in-kubernetes/#set-up-rbac
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -236,7 +346,9 @@ metadata:
   namespace: portfolio
 data:
   config.alloy: |
-    // Discover all pods in the portfolio namespace
+    // discovery.kubernetes scrapes pod metadata from the Kubernetes API.
+    // role = "pod" returns one target per running container.
+    // https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.kubernetes/
     discovery.kubernetes "pods" {
       role = "pod"
       namespaces {
@@ -244,17 +356,23 @@ data:
       }
     }
 
-    // Filter to temporal-worker only and set up labels.
+    // discovery.relabel filters and relabels targets before log collection.
+    // Relabeling runs against the __meta_kubernetes_* labels that
+    // discovery.kubernetes attaches to each target.
+    // https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.relabel/
     discovery.relabel "temporal_worker" {
       targets = discovery.kubernetes.pods.targets
 
-      // Drop everything that is not the temporal-worker pod
+      // action: keep drops all targets whose label does not match the regex.
+      // Everything that is not the temporal-worker pod is discarded here.
       rule {
         source_labels = ["__meta_kubernetes_pod_label_app"]
         action        = "keep"
         regex         = "temporal-worker"
       }
 
+      // Promote Kubernetes metadata into plain Loki stream labels so they
+      // are queryable in LogQL without parsing the log line.
       rule {
         source_labels = ["__meta_kubernetes_namespace"]
         action        = "replace"
@@ -280,15 +398,23 @@ data:
       }
     }
 
-    // Read logs from the temporal-worker pod via the Kubernetes API.
-    // loki.source.kubernetes streams logs without needing hostPath mounts.
+    // loki.source.kubernetes streams logs from pods via the Kubernetes API
+    // (equivalent to kubectl logs --follow). No hostPath or node filesystem
+    // access required — works correctly inside k3s without privileged mode.
+    // https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/
     loki.source.kubernetes "temporal_worker" {
       targets    = discovery.relabel.temporal_worker.output
       forward_to = [loki.process.parse_json.receiver]
     }
 
-    // Parse JSON log lines and promote level + event as stream labels.
-    // Everything else is available at query time via | json in LogQL.
+    // loki.process runs each log line through a pipeline of stages.
+    // stage.json extracts fields from the JSON log line into internal state.
+    // stage.labels promotes extracted fields into Loki stream labels so they
+    // can be used in LogQL label matchers (e.g. {level="error"}).
+    // Fields NOT promoted here are still queryable via | json in LogQL,
+    // but are not indexed — which keeps cardinality low.
+    // https://grafana.com/docs/alloy/latest/reference/components/loki/loki.process/
+    // https://grafana.com/docs/loki/latest/send-data/promtail/stages/json/
     loki.process "parse_json" {
       stage.json {
         expressions = {
@@ -307,7 +433,9 @@ data:
       forward_to = [loki.write.loki.receiver]
     }
 
-    // Write to Loki
+    // loki.write sends log entries to the Loki push API.
+    // Using the cluster-internal DNS name — no ingress or port-forward needed.
+    // https://grafana.com/docs/alloy/latest/reference/components/loki/loki.write/
     loki.write "loki" {
       endpoint {
         url = "http://loki.portfolio.svc.cluster.local:3100/loki/api/v1/push"
@@ -315,6 +443,10 @@ data:
     }
 
 ---
+# DaemonSet ensures one Alloy pod runs on every node. On a single-node cluster
+# this is equivalent to a single-replica Deployment but is the correct
+# primitive for log collectors — if nodes are added, Alloy scales automatically.
+# https://grafana.com/docs/alloy/latest/set-up/install/kubernetes/
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -338,9 +470,15 @@ spec:
           args:
             - run
             - /etc/alloy/config.alloy
+            # --storage.path is where Alloy persists WAL (write-ahead log) and
+            # component state. /tmp is acceptable here — Alloy will recover from
+            # Loki on restart and the WAL is not the source of truth.
+            # https://grafana.com/docs/alloy/latest/reference/cli/run/
             - --storage.path=/tmp/alloy
             - --server.http.listen-addr=0.0.0.0:12345
           ports:
+            # 12345 exposes Alloy's own metrics and UI for debugging.
+            # https://grafana.com/docs/alloy/latest/troubleshoot/debug/
             - containerPort: 12345
               name: http-metrics
           volumeMounts:
@@ -368,15 +506,24 @@ metadata:
   name: grafana-datasources
   namespace: portfolio
 data:
+  # Provisioned datasources are loaded at startup and cannot be edited or
+  # deleted from the UI — they are managed as code.
+  # https://grafana.com/docs/grafana/latest/administration/provisioning/#datasources
   datasources.yaml: |
     apiVersion: 1
     datasources:
       - name: Loki
         type: loki
+        # access: proxy means Grafana's backend makes the request to Loki,
+        # not the browser. Required when Loki is on a private ClusterIP.
+        # https://grafana.com/docs/grafana/latest/datasources/loki/
         access: proxy
         url: http://loki.portfolio.svc.cluster.local:3100
         isDefault: true
         jsonData:
+          # maxLines caps how many log lines a single query returns in Explore.
+          # Does not affect dashboard panels — those are capped by their own query settings.
+          # https://grafana.com/docs/grafana/latest/datasources/loki/#configure-the-data-source
           maxLines: 1000
 
 ---
@@ -423,13 +570,12 @@ spec:
   selector:
     matchLabels:
       app: grafana
-  # ── Recreate, not RollingUpdate ────────────────────────────────────────────
   # grafana-data is a ReadWriteOnce PVC — only one pod can mount it at a time.
-  # RollingUpdate (the default when no strategy is set) would try to start the
-  # new Grafana pod before killing the old one. Both pods fight over the same
-  # RWO PVC, the new pod gets stuck in ContainerCreating, and the deploy hangs.
-  # Recreate kills the old pod first, releases the PVC, then starts the new pod.
-  # Grafana is not in the hot path — brief downtime during deploy is acceptable.
+  # RollingUpdate would start the new pod before terminating the old one,
+  # causing both to compete for the same RWO volume. The new pod gets stuck
+  # in ContainerCreating indefinitely.
+  # Recreate terminates the old pod first, releases the PVC, then starts the new pod.
+  # https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#recreate-deployment
   strategy:
     type: Recreate
   template:
@@ -438,9 +584,10 @@ spec:
         app: grafana
     spec:
       initContainers:
-        # local-path provisioner creates the PVC directory as root.
-        # chown to UID/GID 472 (grafana user) before the main process starts
-        # so Grafana can write its database and config files.
+        # local-path provisioner creates the PVC directory owned by root.
+        # Grafana runs as UID/GID 472 and cannot write its SQLite database
+        # unless ownership is fixed before the main container starts.
+        # https://github.com/grafana/grafana/blob/main/Dockerfile
         - name: fix-permissions
           image: busybox:1.36
           command: ["sh", "-c", "chown -R 472:472 /var/lib/grafana"]
@@ -461,6 +608,10 @@ spec:
             - containerPort: 3000
               name: http
           env:
+            # GF_SECURITY_ADMIN_USER and GF_SECURITY_ADMIN_PASSWORD set the
+            # built-in admin credentials on first boot. On subsequent boots
+            # Grafana ignores these if the admin user already exists in the DB.
+            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#security
             - name: GF_SECURITY_ADMIN_USER
               valueFrom:
                 secretKeyRef:
@@ -471,22 +622,27 @@ spec:
                 secretKeyRef:
                   name: monitoring-secrets
                   key: GF_SECURITY_ADMIN_PASSWORD
-            # ── Subpath serving: required for nginx /grafana/ proxy ──
-            # Without these two, Grafana builds asset URLs relative to /
-            # (e.g. /public/build/app.js) and the browser gets 404s for
-            # every JS and CSS file — the UI loads blank.
-            # GF_SERVER_ROOT_URL tells Grafana what its full public URL is
-            # so post-login redirects point to the right place.
-            # GF_SERVER_SERVE_FROM_SUB_PATH prefixes all asset paths with
-            # /grafana/ so they resolve correctly through nginx.
+            # GF_SERVER_ROOT_URL tells Grafana its full public URL.
+            # Without this, post-login redirects point to / instead of /grafana/
+            # and OAuth callbacks break.
+            # GF_SERVER_SERVE_FROM_SUB_PATH prefixes all asset URLs with /grafana/
+            # so the browser can resolve JS and CSS through the nginx proxy.
+            # Without it, the UI loads blank — every asset request gets a 404.
+            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#serve_from_sub_path
             - name: GF_SERVER_ROOT_URL
               value: "https://testproveoportfolio.xyz/grafana/"
             - name: GF_SERVER_SERVE_FROM_SUB_PATH
               value: "true"
+            # Disable anonymous access — all users must log in.
+            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-security/configure-authentication/grafana/
             - name: GF_AUTH_ANONYMOUS_ENABLED
               value: "false"
+            # Disable self-registration — accounts are created by the admin only.
+            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-security/configure-authentication/grafana/#allow-sign-up
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
+            # Disable phone-home telemetry and update checks.
+            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#analytics
             - name: GF_ANALYTICS_REPORTING_ENABLED
               value: "false"
             - name: GF_ANALYTICS_CHECK_FOR_UPDATES
@@ -496,6 +652,9 @@ spec:
               mountPath: /var/lib/grafana
             - name: datasources
               mountPath: /etc/grafana/provisioning/datasources
+          # /api/health returns HTTP 200 when Grafana is fully initialised
+          # and its database migrations have completed.
+          # https://grafana.com/docs/grafana/latest/developers/http_api/other/#returns-health-information-about-grafana
           readinessProbe:
             httpGet:
               path: /api/health
@@ -531,9 +690,8 @@ spec:
 # Passwords are injected directly from the secret as env vars — no service
 # account, no Kubernetes API calls, no RBAC needed.
 #
-# This Job is deleted and recreated on every rolling deploy because Jobs are
-# immutable in Kubernetes — kubectl apply fails if an existing completed Job
-# is in the namespace. rolling-deploy.sh handles the delete before apply.
+# Jobs are immutable in Kubernetes — kubectl apply fails if a completed Job
+# already exists in the namespace. rolling-deploy.sh deletes it before apply.
 #
 # Re-run manually:
 #   kubectl delete job grafana-init-users -n portfolio
@@ -545,10 +703,21 @@ metadata:
   name: grafana-init-users
   namespace: portfolio
 spec:
+  # ttlSecondsAfterFinished deletes the Job and its pod automatically after
+  # 5 minutes, keeping the namespace clean without deploy script intervention.
+  # https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
   ttlSecondsAfterFinished: 300
+  # backoffLimit: 5 retries the pod up to 5 times on failure before the Job
+  # is marked as failed. Each retry is a fresh pod — useful here because
+  # Grafana may not be ready immediately and the first curl will fail.
+  # https://kubernetes.io/docs/concepts/workloads/controllers/job/#pod-backoff-failure-policy
   backoffLimit: 5
   template:
     spec:
+      # OnFailure restarts the container in the same pod on non-zero exit.
+      # Never is the other valid option for Jobs — do not use Always (that is
+      # for Deployments and will be rejected here).
+      # https://kubernetes.io/docs/concepts/workloads/controllers/job/#handling-pod-and-container-failures
       restartPolicy: OnFailure
       containers:
       - name: init
@@ -567,6 +736,8 @@ spec:
           done
           echo "Grafana is up"
 
+          # GET /api/users/lookup returns 200 if the user exists, 404 if not.
+          # https://grafana.com/docs/grafana/latest/developers/http_api/user/#get-user-by-login-or-email
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -u "admin:${ADMIN_PASS}" \
             "$GRAFANA/api/users/lookup?loginOrEmail=demo")
@@ -575,12 +746,16 @@ spec:
             USER_ID=$(curl -sf -u "admin:${ADMIN_PASS}" \
               "$GRAFANA/api/users/lookup?loginOrEmail=demo" \
               | grep -o '"id":[0-9]*' | cut -d: -f2)
+            # PUT /api/admin/users/:id/password updates the password for any user.
+            # https://grafana.com/docs/grafana/latest/developers/http_api/admin/#set-user-password
             curl -sf -u "admin:${ADMIN_PASS}" \
               -H "Content-Type: application/json" -X PUT \
               -d "{\"password\":\"${DEMO_PASS}\"}" \
               "$GRAFANA/api/admin/users/${USER_ID}/password" > /dev/null
             echo "Demo user updated (user ID: $USER_ID)"
           else
+            # POST /api/admin/users creates a new global user (server admin endpoint).
+            # https://grafana.com/docs/grafana/latest/developers/http_api/admin/#create-global-user
             curl -sf -u "admin:${ADMIN_PASS}" \
               -H "Content-Type: application/json" -X POST \
               -d "{\"name\":\"Demo\",\"email\":\"demo@local\",\"login\":\"demo\",\"password\":\"${DEMO_PASS}\",\"OrgId\":1}" \
@@ -588,6 +763,9 @@ spec:
             USER_ID=$(curl -sf -u "admin:${ADMIN_PASS}" \
               "$GRAFANA/api/users/lookup?loginOrEmail=demo" \
               | grep -o '"id":[0-9]*' | cut -d: -f2)
+            # PATCH /api/orgs/:orgId/users/:userId sets the user's role within
+            # the org. Viewer can see dashboards but cannot edit or create anything.
+            # https://grafana.com/docs/grafana/latest/developers/http_api/org/#updates-the-given-user
             curl -sf -u "admin:${ADMIN_PASS}" \
               -H "Content-Type: application/json" -X PATCH \
               -d "{\"role\":\"Viewer\"}" \
