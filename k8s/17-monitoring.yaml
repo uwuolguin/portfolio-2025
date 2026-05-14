@@ -311,10 +311,41 @@ metadata:
   namespace: portfolio
 
 ---
-# ClusterRole grants Alloy read access to pod metadata and log streams
-# across the entire cluster. loki.source.kubernetes calls the Kubernetes
-# API to stream pod logs — it needs pods/log at minimum.
-# https://grafana.com/docs/alloy/latest/collect/logs-in-kubernetes/#set-up-rbac
+# =============================================================================
+# RBAC — how Alloy gets permission to call the Kubernetes API
+#
+# Every pod in Kubernetes runs as a ServiceAccount. If you don't specify one,
+# it uses the "default" ServiceAccount in its namespace, which has no API
+# permissions by default.
+#
+# Kubernetes automatically mounts a ServiceAccount token into every pod at:
+#   /var/run/secrets/kubernetes.io/serviceaccount/token
+#
+# That token is a short-lived JWT signed by the cluster's API server. When
+# Alloy calls the Kubernetes API (to list pods, stream logs, etc.) it sends
+# this token in the Authorization header. The API server validates the JWT
+# and checks RBAC to decide if the call is allowed.
+#
+# The three objects below wire this together:
+#
+#   ServiceAccount (alloy)
+#     └─ Identity: gives Alloy a named principal ("alloy" in "portfolio")
+#
+#   ClusterRole (alloy)
+#     └─ Permission set: defines what API calls are allowed and on what resources
+#
+#   ClusterRoleBinding (alloy)
+#     └─ Binding: says "the alloy ServiceAccount has the alloy ClusterRole"
+#
+# Without the binding, the ServiceAccount and ClusterRole exist but are
+# completely disconnected — Alloy would still get 403s on every API call.
+#
+# ClusterRole (not Role) is used because loki.source.kubernetes needs to
+# read pod metadata and log streams cluster-wide, even though the Alloy
+# config later filters down to the "portfolio" namespace in application logic.
+# RBAC does not know or care about your Alloy config — permissions are
+# evaluated at the API server level before your app even sees the response.
+# =============================================================================
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -346,51 +377,143 @@ metadata:
   namespace: portfolio
 data:
   config.alloy: |
-    // discovery.kubernetes scrapes pod metadata from the Kubernetes API.
-    // role = "pod" returns one target per running container.
+    // =============================================================================
+    // ALLOY PIPELINE OVERVIEW
+    //
+    // Alloy is a data pipeline. You wire components together by passing the output
+    // of one into the input of the next. The flow for this config is:
+    //
+    //   discovery.kubernetes   →   discovery.relabel   →   loki.source.kubernetes
+    //                                                              ↓
+    //                                                       loki.process
+    //                                                              ↓
+    //                                                        loki.write
+    //
+    // Step 1 — DISCOVER:  ask the k8s API "what pods exist right now?"
+    // Step 2 — FILTER:    keep only the pods we care about, rename their metadata
+    //                     into labels we actually want to query on in Loki
+    // Step 3 — COLLECT:   open a log stream for each surviving target (like kubectl logs --follow)
+    // Step 4 — PROCESS:   parse each JSON log line, promote fields into Loki stream labels
+    // Step 5 — SHIP:      push batched log entries to Loki's HTTP ingest API
+    // =============================================================================
+
+
+    // =============================================================================
+    // STEP 1 — DISCOVER pods via the Kubernetes API
+    //
+    // discovery.kubernetes continuously watches the k8s API for pods in the given
+    // namespaces. It returns a live list of "targets" — one per running container.
+    //
+    // Each target is a bag of labels. Most are raw k8s metadata prefixed with
+    // __meta_kubernetes_*, for example:
+    //
+    //   __meta_kubernetes_pod_name              = "temporal-worker-7d9f4b-xkzqp"
+    //   __meta_kubernetes_namespace             = "portfolio"
+    //   __meta_kubernetes_pod_label_app         = "temporal-worker"
+    //   __meta_kubernetes_pod_container_name    = "temporal-worker"
+    //   __meta_kubernetes_pod_node_name         = "my-node"
+    //   __address__                             = "10.42.0.17:8080"
+    //   ... (dozens more)
+    //
+    // These __meta_* labels are internal to the discovery/relabel pipeline.
+    // They are NOT automatically forwarded to Loki as stream labels — you have
+    // to explicitly promote the ones you want in discovery.relabel below.
+    //
+    // role = "pod" means one target per container (a pod with 2 containers = 2 targets).
+    // Other roles: "node", "service", "endpoints", "ingress" — not needed here.
     // https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.kubernetes/
+    // =============================================================================
     discovery.kubernetes "pods" {
       role = "pod"
       namespaces {
+        // Scope discovery to only this namespace. Without this, Alloy would
+        // watch every pod in the entire cluster, which is wasteful and noisy.
         names = ["portfolio"]
       }
     }
 
-    // discovery.relabel filters and relabels targets before log collection.
-    // Relabeling runs against the __meta_kubernetes_* labels that
-    // discovery.kubernetes attaches to each target.
+
+    // =============================================================================
+    // STEP 2 — FILTER and RELABEL targets
+    //
+    // discovery.relabel takes the full list of targets from discovery.kubernetes
+    // and runs each one through a sequence of rules top-to-bottom.
+    //
+    // Rules have two jobs:
+    //   A) FILTER — drop targets you don't want (action: keep / action: drop)
+    //   B) RELABEL — reshape the label set you do want (action: replace)
+    //
+    // The output of this block (discovery.relabel.temporal_worker.output) is a
+    // filtered, relabeled list of targets that loki.source.kubernetes will open
+    // log streams for. Only targets that survive all "keep" rules make it through.
+    //
     // https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.relabel/
+    // =============================================================================
     discovery.relabel "temporal_worker" {
       targets = discovery.kubernetes.pods.targets
 
-      // action: keep drops all targets whose label does not match the regex.
-      // Everything that is not the temporal-worker pod is discarded here.
+      // ── FILTER ──────────────────────────────────────────────────────────────
+      // action: keep means: evaluate the regex against source_labels.
+      // If it MATCHES → keep the target and continue to the next rule.
+      // If it DOES NOT match → drop the target entirely. No further rules run.
+      //
+      // __meta_kubernetes_pod_label_app contains the value of the pod's
+      // "app" label from its Kubernetes metadata (i.e. what you wrote under
+      // labels: in the pod spec). Here we keep only pods where app=temporal-worker.
+      //
+      // Every other pod in the "portfolio" namespace — nginx, grafana, loki, etc.
+      // — is silently discarded at this point. They never get a log stream opened.
       rule {
         source_labels = ["__meta_kubernetes_pod_label_app"]
         action        = "keep"
         regex         = "temporal-worker"
       }
 
-      // Promote Kubernetes metadata into plain Loki stream labels so they
-      // are queryable in LogQL without parsing the log line.
+      // ── RELABEL ─────────────────────────────────────────────────────────────
+      // action: replace copies the value of source_labels into target_label,
+      // renaming it to something short and human-readable.
+      //
+      // WHY this matters: Loki organizes logs into "streams" identified by a
+      // set of key=value labels. Those labels are what you filter on in LogQL:
+      //
+      //   {app="temporal-worker", level="error"}
+      //   {namespace="portfolio", pod=~"temporal-worker-.*"}
+      //
+      // If you skip this relabeling step, the raw __meta_kubernetes_* labels
+      // do NOT automatically become Loki stream labels. Your logs would land
+      // in Loki with no queryable metadata attached — just raw log lines with
+      // no way to filter by pod, namespace, or container.
+      //
+      // Each rule below promotes one piece of k8s metadata into a plain label
+      // that Loki will index and that LogQL can match against.
+
+      // Becomes: namespace="portfolio"
       rule {
         source_labels = ["__meta_kubernetes_namespace"]
         action        = "replace"
         target_label  = "namespace"
       }
 
+      // Becomes: pod="temporal-worker-7d9f4b-xkzqp"
+      // Useful for querying logs from a specific pod replica.
       rule {
         source_labels = ["__meta_kubernetes_pod_name"]
         action        = "replace"
         target_label  = "pod"
       }
 
+      // Becomes: container="temporal-worker"
+      // Useful when a pod has multiple containers (init containers, sidecars).
       rule {
         source_labels = ["__meta_kubernetes_pod_container_name"]
         action        = "replace"
         target_label  = "container"
       }
 
+      // Becomes: app="temporal-worker"
+      // Copied from the pod's own "app" label — the same one we filtered on above.
+      // Having it as a plain Loki label lets you query {app="temporal-worker"}
+      // without needing to know individual pod names.
       rule {
         source_labels = ["__meta_kubernetes_pod_label_app"]
         action        = "replace"
@@ -398,24 +521,62 @@ data:
       }
     }
 
-    // loki.source.kubernetes streams logs from pods via the Kubernetes API
-    // (equivalent to kubectl logs --follow). No hostPath or node filesystem
-    // access required — works correctly inside k3s without privileged mode.
+
+    // =============================================================================
+    // STEP 3 — OPEN log streams for each surviving target
+    //
+    // loki.source.kubernetes takes the filtered+relabeled target list and calls
+    // the Kubernetes API to stream logs from each one — identical to running:
+    //   kubectl logs --follow <pod> -c <container> -n portfolio
+    //
+    // This happens entirely over the k8s API using the ServiceAccount token
+    // mounted into the Alloy pod. No hostPath volume, no access to the node's
+    // /var/log/containers directory, no privileged mode required.
+    //
+    // As new pods matching our filter appear (restarts, rollouts), Alloy
+    // automatically picks them up via the live watch from discovery.kubernetes.
+    // Deleted pods are automatically dropped.
+    //
+    // Each log line is forwarded as-is to the next stage for processing.
     // https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/
+    // =============================================================================
     loki.source.kubernetes "temporal_worker" {
       targets    = discovery.relabel.temporal_worker.output
       forward_to = [loki.process.parse_json.receiver]
     }
 
-    // loki.process runs each log line through a pipeline of stages.
-    // stage.json extracts fields from the JSON log line into internal state.
-    // stage.labels promotes extracted fields into Loki stream labels so they
-    // can be used in LogQL label matchers (e.g. {level="error"}).
-    // Fields NOT promoted here are still queryable via | json in LogQL,
-    // but are not indexed — which keeps cardinality low.
+
+    // =============================================================================
+    // STEP 4 — PROCESS each log line through a parsing pipeline
+    //
+    // loki.process runs every incoming log line through a sequence of stages.
+    // The temporal-worker emits structured JSON logs, e.g.:
+    //
+    //   {"level":"info","event":"workflow_started","workflow_id":"abc123","ts":1234567890}
+    //
+    // We parse that JSON and selectively promote certain fields into Loki stream
+    // labels so they can be used in LogQL label matchers.
+    //
+    // IMPORTANT — cardinality tradeoff:
+    //   Loki indexes stream labels. High-cardinality labels (workflow_id, user_id,
+    //   request_id — fields with millions of unique values) bloat the index and
+    //   destroy query performance. Only promote low-cardinality fields as labels.
+    //
+    //   Fields NOT promoted here (e.g. workflow_id, ts) are still fully queryable
+    //   in LogQL using the JSON parser inline:
+    //     {app="temporal-worker"} | json | workflow_id="abc123"
+    //   They just aren't indexed — Loki scans the raw chunk content for them.
+    //
     // https://grafana.com/docs/alloy/latest/reference/components/loki/loki.process/
-    // https://grafana.com/docs/loki/latest/send-data/promtail/stages/json/
+    // =============================================================================
     loki.process "parse_json" {
+
+      // stage.json parses the raw log line as JSON and extracts specific fields
+      // into Alloy's internal per-entry state (not yet Loki labels).
+      //
+      // Format: fieldName = "json_key"
+      // The left side is the internal variable name used in later stages.
+      // The right side is the key path in the JSON object.
       stage.json {
         expressions = {
           level = "level",
@@ -423,6 +584,16 @@ data:
         }
       }
 
+      // stage.labels promotes the extracted fields from internal state into
+      // actual Loki stream labels that get indexed and are usable in LogQL.
+      //
+      // Empty string value means "use the value extracted by the same name
+      // from stage.json above". After this stage, every log line from
+      // temporal-worker lands in Loki with labels like:
+      //
+      //   {app="temporal-worker", namespace="portfolio", level="error", event="task_failed"}
+      //
+      // You can now query: {app="temporal-worker", level="error"} in Grafana Explore.
       stage.labels {
         values = {
           level = "",
@@ -433,9 +604,21 @@ data:
       forward_to = [loki.write.loki.receiver]
     }
 
-    // loki.write sends log entries to the Loki push API.
-    // Using the cluster-internal DNS name — no ingress or port-forward needed.
+
+    // =============================================================================
+    // STEP 5 — SHIP log entries to Loki
+    //
+    // loki.write receives batched log entries and POSTs them to Loki's push API.
+    //
+    // Uses the cluster-internal DNS name (loki.portfolio.svc.cluster.local)
+    // instead of an IP address. Kubernetes DNS guarantees this resolves to the
+    // correct ClusterIP even after pod restarts or service changes — no hardcoded
+    // IPs, no ingress, no port-forwarding needed for internal cluster traffic.
+    //
+    // Format: <service-name>.<namespace>.svc.cluster.local:<port>
+    //
     // https://grafana.com/docs/alloy/latest/reference/components/loki/loki.write/
+    // =============================================================================
     loki.write "loki" {
       endpoint {
         url = "http://loki.portfolio.svc.cluster.local:3100/loki/api/v1/push"
@@ -475,6 +658,7 @@ spec:
             # Loki on restart and the WAL is not the source of truth.
             # https://grafana.com/docs/alloy/latest/reference/cli/run/
             - --storage.path=/tmp/alloy
+            # this is the address that the cluster can use to comunnicate with  this container
             - --server.http.listen-addr=0.0.0.0:12345
           ports:
             # 12345 exposes Alloy's own metrics and UI for debugging.
