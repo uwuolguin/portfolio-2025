@@ -1,25 +1,534 @@
 # =============================================================================
-# 17-monitoring.yaml — Grafana + Loki + Alloy + user init Job
+# LOKI — stores and indexes the logs
+# Upgraded to 3.5.0 with TSDB storage (boltdb-shipper deprecated in 3.0)
 #
-# Namespace: portfolio (same as the app — single environment, no separation needed)
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │                        LOKI COMPONENT ARCHITECTURE                      │
+# └─────────────────────────────────────────────────────────────────────────┘
 #
-# Secret: monitoring-secrets is created by deploy-k3s-local.sh from the
-# password files before this manifest is applied. Do not define it here.
+# Loki is not a single program — it is a collection of components that can
+# run as separate processes (microservices mode) or all inside one process
+# (monolithic mode, which is what this single-node deployment uses).
+# Understanding each component is essential for understanding why logs are
+# stored the way they are, why the ring exists, and why deletion works the
+# way it does.
 #
-# Grafana is publicly accessible via nginx at /grafana/
-# No port-forwarding needed.
+# The full data path looks like this:
 #
-# ACCESS:
-#   https://testproveoportfolio.xyz/grafana/
-#   Admin:  admin / <contents of .grafana-admin-password>
-#   Demo:   demo  / <contents of .grafana-demo-password>  (Viewer only)
+#   [Alloy / Promtail]
+#         │  HTTP POST /loki/api/v1/push
+#         ▼
+#   ┌─────────────┐
+#   │ Distributor │  ← traffic cop, validator, hash router
+#   └──────┬──────┘
+#          │  consistent-hash ring lookup → picks Ingester(s)
+#          ▼
+#   ┌─────────────┐
+#   │  Ingester   │  ← writes RAM head block + WAL, flushes immutable blocks
+#   └──────┬──────┘
+#          │  flush to object storage (filesystem here, S3 in prod)
+#          ▼
+#   ┌──────────────────────────────────┐
+#   │  Object Storage  (block files)   │  ← immutable once written
+#   │   Block 001/  Block 002/  ...    │
+#   │     index                        │
+#   │     chunks/                      │
+#   └────────────┬─────────────────────┘
+#                │  periodic compaction + retention enforcement
+#                ▼
+#   ┌─────────────┐
+#   │  Compactor  │  ← merges small blocks, deletes expired data
+#   └─────────────┘
 #
-# VERSIONS:
-#   Loki:    3.5.0  (boltdb-shipper + schema v11 deprecated in 3.0, using TSDB + v13)
-#   Alloy:   v1.9.2 (Promtail EOL March 2026, Alloy is the official replacement)
-#   Grafana: 10.2.0
+#   Query path (read side):
 #
-# MEMORY: ~320Mi actual across all three pods
+#   [Grafana / LogQL client]
+#         │  HTTP GET /loki/api/v1/query_range
+#         ▼
+#   ┌─────────────┐
+#   │   Querier   │  ← fans out to Ingesters (live data) + blocks (flushed data)
+#   └─────────────┘
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT 1 — DISTRIBUTOR
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The Distributor is the front door for all incoming log pushes. Every POST to
+# /loki/api/v1/push hits the Distributor first. It never stores anything — its
+# entire job is validation, rate-limiting, and routing.
+#
+# What it does in order:
+#
+#   1. VALIDATE the push request
+#      - Checks that each log entry has a valid timestamp
+#      - Enforces reject_old_samples_max_age (72h here): if the log's timestamp
+#        is older than 72h, it is rejected with HTTP 400 right here, before any
+#        Ingester is involved. This protects the index from backfill poisoning.
+#      - Checks ingestion_rate_mb and ingestion_burst_size_mb. If the tenant
+#        (the single "fake" tenant here since auth_enabled: false) is pushing
+#        faster than 4 MB/s sustained or 6 MB burst, the request is rejected
+#        with HTTP 429. The Distributor tracks this with a local token-bucket
+#        counter — no network call to Loki needed.
+#
+#        TOKEN BUCKET — how the rate limiter works:
+#        A token bucket is a rate limiting algorithm. Unrelated to ring tokens —
+#        same word, different concept entirely.
+#
+#        Imagine a bucket with a capacity of ingestion_burst_size_mb (6MB here).
+#        Tokens (credits) refill into it continuously at ingestion_rate_mb (4MB/s)
+#        up to the bucket capacity. Every incoming push costs tokens equal to
+#        its payload size.
+#
+#          t=0.0s  bucket=6MB   push 2MB → bucket=4MB   allowed
+#          t=0.1s  bucket=4.4MB push 3MB → bucket=1.4MB allowed
+#          t=0.2s  bucket=1.8MB push 2MB → bucket=-0.2  REJECTED 429
+#          t=0.5s  bucket=1MB   push 0.5MB → bucket=0.5MB allowed
+#
+#        A burst up to 6MB is absorbed instantly. Sustained traffic above 4MB/s
+#        drains the bucket and triggers rejection. Sustained traffic below 4MB/s
+#        lets the bucket refill, accumulating headroom for the next burst.
+#
+#        The counter lives in the Distributor's own process memory — reading and
+#        updating a float in RAM. No network round trip, no coordination with
+#        other services. Sub-microsecond decision.
+#
+#        In a multi-Distributor cluster each Distributor has its own independent
+#        bucket, so the effective burst ceiling is burst_size × num_distributors —
+#        an acceptable approximation since rate limiting needs fast rejection of
+#        abusive traffic, not perfect byte-level accuracy. Here in monolithic
+#        mode there is one Distributor so the limit is exact.
+#
+#      - Validates that label names are legal (no special characters, not too
+#        many labels per stream, label values not too long).
+#
+#   2. HASH the stream to find its owner on the ring
+#      Each log push contains one or more streams. A stream is a unique label
+#      set, e.g. {app="web", level="error"}. The Distributor computes a 32-bit
+#      hash of the sorted label set (using a fast non-cryptographic hash —
+#      xxHash or FNV depending on Loki version). This hash is a position on a
+#      virtual ring of 2^32 positions.
+#
+#      The ring is divided into ranges, each owned by an Ingester. The
+#      Distributor does a binary search on the ring to find which Ingester owns
+#      the range containing this hash. This lookup is O(log n) and done
+#      entirely in memory — no network call to the Ingester yet.
+#
+#   3. REPLICATE to replication_factor Ingesters
+#      If replication_factor is 3, the Distributor sends the log entry to the
+#      primary Ingester AND the next 2 clockwise neighbours on the ring. This
+#      means the data survives if up to 2 Ingesters crash before flushing.
+#      Here replication_factor: 1 — the Distributor sends to exactly one
+#      Ingester (itself, in monolithic mode). No replication overhead.
+#
+#   4. WAIT for a quorum of acknowledgements
+#      With replication_factor 3 and write_quorum 2, the Distributor waits for
+#      2 of the 3 Ingesters to acknowledge before returning HTTP 204 to the
+#      client. Here with factor 1 it waits for 1 ack — trivially fast.
+#
+#   In monolithic mode (this deployment), the Distributor is a goroutine inside
+#   the same Loki process. The "network call" to the Ingester is an in-process
+#   function call. The ring logic still runs; it just always resolves to the
+#   same local Ingester.
+#
+#   GOROUTINE — what it is:
+#   A goroutine is a lightweight thread managed by the Go runtime rather than
+#   the OS. You can have hundreds of thousands of them in one process. Unlike
+#   an OS thread they are cheap to create (~2KB stack vs ~1MB for an OS thread)
+#   and can block freely without stalling other goroutines — the Go runtime
+#   parks a blocked goroutine and runs another one on the same OS thread.
+#
+#   BLOCKING AND PARKING — in detail:
+#   When a goroutine blocks (waiting for IO, a channel, a mutex, a syscall)
+#   the Go runtime does not block the OS thread it was running on. Instead:
+#
+#     1. DETECT — the Go runtime detects the block at the point where the
+#        goroutine calls something that would wait: a channel receive, a
+#        net.Read(), a sync.Mutex.Lock(), a time.Sleep(), etc.
+#
+#     2. PARK — the runtime saves the goroutine's current state (stack pointer,
+#        program counter, registers) into the goroutine struct in heap memory
+#        and marks it as "waiting". This is done entirely in userspace —
+#        no kernel involvement, no OS context switch, cost is nanoseconds.
+#
+#     3. SCHEDULE — the runtime's scheduler (called the GMP scheduler) picks
+#        another runnable goroutine from its run queue and resumes it on the
+#        same OS thread. The OS thread never stops executing — it just switches
+#        which goroutine it is running.
+#
+#     4. UNPARK — when the blocking condition resolves (IO completes, channel
+#        has a value, mutex is released) the runtime marks the goroutine as
+#        runnable again and puts it back on a run queue. The next time an OS
+#        thread is free it picks it up and resumes from exactly where it parked.
+#
+#   GMP SCHEDULER — the three pieces:
+#     G (goroutine) → the unit of work, the lightweight thread
+#     M (machine)   → the OS thread, the actual CPU execution context
+#     P (processor) → a logical CPU slot, holds a run queue of G's ready to run
+#                     and is required to execute any G on any M. GOMAXPROCS
+#                     controls how many P's exist — default is one per CPU core.
+#
+#   The relationship:
+#     M must hold a P to run any G.
+#     P has a local run queue of G's waiting to execute.
+#     When G blocks, M releases P (or another M takes the P) so the P
+#     can keep scheduling other G's — the OS thread is never wasted sitting idle.
+#
+#   SYSCALL exception:
+#   Pure Go blocking (channels, mutexes) is handled entirely in userspace.
+#   But a blocking OS syscall (e.g. reading from disk with no async path)
+#   DOES block the OS thread — the kernel takes over and the M is stuck.
+#   In this case the Go runtime detaches the P from the blocked M and hands
+#   it to another M (spinning up a new OS thread if needed) so the P's run
+#   queue keeps draining. When the syscall returns, the original M tries to
+#   reacquire a P — if none are free it parks itself and puts its G back on
+#   the global run queue.
+#
+#   This is why goroutines feel like they block freely — for most blocking
+#   operations the OS thread never actually blocks. The illusion of blocking
+#   is implemented as cooperative userspace scheduling underneath.
+#
+#   The runtime multiplexes all goroutines onto a small pool of real OS threads
+#   (one per CPU core by default), giving true parallelism across cores:
+#
+#     OS thread 1:  Distributor goroutine  ← routing decisions
+#     OS thread 2:  Ingester goroutine     ← writing head block
+#     OS thread 3:  Compactor goroutine    ← merging blocks
+#     OS thread 4:  Querier goroutine      ← serving reads
+#
+#   In monolithic mode all Loki components are goroutines inside one process.
+#   Communication between them is a Go function call or channel send — no TCP
+#   socket, no serialization, no loopback network. This is why "no network
+#   call needed" is accurate even though the components are logically separate.
+#
+#   OS THREAD — what it is:
+#   An OS thread is a unit of CPU instruction execution. At the hardware level
+#   a CPU core does one thing at a time: fetch an instruction from memory,
+#   decode it, execute it, write the result back. An OS thread is the
+#   abstraction the kernel uses to track WHERE in a program the CPU is and
+#   WHAT state it carries as it steps through instructions.
+#
+#   THE FULL STACK — from source code to hardware:
+#
+#     source code (Python, Go, C, whatever)
+#          ↓  compiled or interpreted into
+#     machine instructions (binary, CPU-architecture specific)
+#          ↓  loaded into
+#     RAM (process virtual address space — code segment, stack, heap)
+#          ↓  OS scheduler assigns a CPU core to a thread
+#     CPU core fetches instructions from RAM and executes them sequentially
+#          ↓  instructions read and write values in RAM
+#     RAM state changes (variables updated, data structures modified)
+#          ↓  hardware controllers watch specific memory addresses (DMA, MMIO)
+#     hardware reacts — NIC sends packet, GPU renders frame, disk writes block
+#
+#   At the bottom of every abstraction stack is the same loop: CPU executes
+#   instructions, memory changes, hardware reacts to those changes.
+#   Processes, threads, and the OS scheduler exist solely to manage how CPU
+#   time is allocated so that memory gets modified correctly and in the right
+#   order across multiple concurrent programs.
+#
+#   WHAT THE OS ACTUALLY DOES:
+#     - Virtual address spaces: gives each process the illusion it owns all
+#       memory. The MMU (Memory Management Unit, a hardware component on the
+#       CPU die) translates virtual addresses to physical RAM addresses on
+#       every memory access, enforcing process isolation at hardware level.
+#     - Scheduling: decides which thread runs on which CPU core and for how
+#       long (preemptive, time-sliced — typically 1-10ms per slice).
+#     - Context switching: saves the outgoing thread's registers and program
+#       counter, restores the incoming thread's state, resumes — threads are
+#       unaware this happened.
+#     - Hardware mediation: processes cannot talk to hardware directly. They
+#       issue syscalls — controlled entry points into the kernel, which holds
+#       the trusted drivers and performs the IO on the process's behalf.
+#
+#   WHAT A THREAD CARRIES:
+#   A thread is the minimum state required for the CPU to resume execution
+#   after being switched out:
+#
+#     program counter  → address of the next instruction to execute
+#     stack pointer    → where the current call stack lives in memory
+#     registers        → CPU scratchpad (intermediate values, addresses)
+#     stack (~1MB)     → local variables, function frames, return addresses
+#
+#   Everything else — heap, code segment, globals, file descriptors — is
+#   shared across all threads in the same process. They live in the same
+#   virtual address space, which makes inter-thread communication via shared
+#   memory fast but also means a bug in one thread can corrupt data another
+#   thread is reading. This is the fundamental tradeoff of the threading model.
+#
+#   A process is a container — it owns the virtual address space and OS
+#   resources. Threads are what actually execute instructions on CPU cores.
+#   A process with one thread is sequential. A process with many threads
+#   runs concurrently across multiple cores.
+#
+#   The OS scheduler decides which threads run on which CPU cores and for how
+#   long — typically in slices of ~1-10ms before switching to another thread
+#   (preemptive multitasking). This switching is called a context switch and
+#   has real cost: the kernel must save the thread's registers, stack pointer,
+#   and program counter, then restore another thread's state.
+#
+#   Threads vs processes:
+#     process  → isolated memory space, expensive to spawn, expensive to switch
+#     thread   → shared memory space within a process, cheaper than a process
+#                but still heavy compared to a goroutine
+#     goroutine → managed by Go runtime inside one OS thread pool, ~2KB stack,
+#                 context switch handled in userspace with no kernel involvement
+#
+#   This is why Go does not create one OS thread per goroutine — with 100,000
+#   goroutines that would mean 100GB of stack memory and the kernel scheduler
+#   melting under the context switch load. Instead the Go runtime runs a small
+#   fixed pool of OS threads and schedules goroutines onto them itself.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT 2 — THE RING
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The ring is a consistent-hash ring. It is NOT a physical thing — it is a
+# data structure (a sorted array of tokens) shared between components so they
+# agree on which Ingester owns which stream.
+#
+# How it works conceptually:
+#
+#   Imagine a clock face with 2^32 positions (0 to ~4 billion).
+#   Each Ingester claims N random positions on this clock (called "tokens").
+#   The ring is just a sorted list of (token, ingester_id) pairs:
+#
+#     position 12_000_000  → Ingester A
+#     position 45_000_000  → Ingester B
+#     position 78_000_000  → Ingester A
+#     position 110_000_000 → Ingester C
+#     ...
+#
+#   When the Distributor hashes stream {app="web", level="error"} and gets,
+#   say, 50_000_000 — it walks clockwise to find the first token ≥ 50_000_000.
+#   That is 78_000_000 → Ingester A. Stream is always sent to Ingester A.
+#
+#   If Ingester A dies and is removed from the ring, its tokens are gone.
+#   The next clockwise tokens now belong to B or C, so new writes for those
+#   streams automatically reroute — no static config changes needed. This is
+#   the "consistent" property: adding/removing a node only remaps the streams
+#   whose token neighbourhood changed, not every stream at once.
+#
+#   The ring state is stored in a kvstore. Options:
+#     inmemory — single process only, no coordination. Used here because there
+#                is exactly one Ingester and it never needs to broadcast its
+#                token list to anyone else.
+#     memberlist — gossip protocol, peers discover each other and share ring
+#                  state without a central coordinator. Used in most Loki
+#                  distributed deployments.
+#     consul / etcd — external strongly-consistent stores. Used when you need
+#                     guaranteed consistency during network partitions.
+#
+#   instance_addr: 127.0.0.1 is the address this Ingester advertises in the
+#   ring so other components know how to reach it. In a real cluster this
+#   would be a pod IP or DNS name so other Ingesters can call each other for
+#   replication. Here it is localhost because nothing external needs to reach
+#   it — it is the only node and it talks to itself in-process.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT 3 — INGESTER
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The Ingester is where logs actually land and are stored temporarily before
+# being flushed to permanent block storage. It is the most complex component.
+#
+# Internal structure of an Ingester:
+#
+#   WAL (Write-Ahead Log)
+#   ├── Every log entry is written to the WAL on disk BEFORE being acked.
+#   │   If the process crashes, the Ingester replays the WAL on restart to
+#   │   recover all data that was not yet flushed to object storage.
+#   │   Without the WAL, a crash would silently drop logs that were
+#   │   acknowledged to the client but not yet persisted.
+#   │   The WAL is a sequential append-only file — very fast to write.
+#   └── Once a chunk is flushed to object storage, the corresponding WAL
+#       segment is deleted (checkpointed).
+#
+#   Head Block (in RAM, mutable)
+#   ├── This is the live buffer. Every stream gets its own "chunk" in the
+#   │   head block. A chunk is just a compressed list of (timestamp, log_line)
+#   │   pairs for one stream, built up over time.
+#   ├── The Ingester also maintains the in-memory TSDB index:
+#   │     series table: label_set → local integer series ID
+#   │     postings lists: label_value → sorted list of series IDs
+#   │   This index is rebuilt from the WAL on restart — it is not persisted
+#   │   separately during normal operation.
+#   └── When a chunk reaches its size limit (~256KB uncompressed) or its
+#       max age (default 1h), it is marked as "sealed" — no more writes.
+#       Sealed chunks wait in the Ingester until the flush trigger fires.
+#
+#   Flush triggers (any of these causes a flush to object storage):
+#     - A chunk has been sealed for longer than chunk_idle_period (default 30m)
+#     - The WAL has grown past a size threshold
+#     - A graceful shutdown is initiated
+#     - A manual flush is triggered via the admin API
+#
+#   What happens during a flush:
+#     1. All sealed chunks for all streams are gathered.
+#     2. The in-memory TSDB index for those chunks is serialized to disk.
+#     3. Chunks are compressed (Snappy or LZ4) and written to object storage.
+#     4. The index file is written alongside the chunks — together they form
+#        an immutable "block" (a directory with an index file + chunk files).
+#     5. The WAL segments covering this data are deleted.
+#     6. The Ingester starts a fresh head block for new incoming logs.
+#
+#   The block on disk looks like:
+#
+#     Block 00XXXXXXXXXXX/       ← directory named by a ULID (time-sortable ID)
+#       index                    ← binary TSDB index: series table + postings lists
+#       chunks/
+#         000001                 ← chunk file (many chunks packed together)
+#         000002
+#       meta.json                ← block bounds (minT, maxT), series count, etc.
+#       tombstones               ← deletion markers (written by Compactor later)
+#
+#   Series IDs inside a block are local unsigned integers starting from 1.
+#   They have no meaning outside their block. Two different blocks can both
+#   have a series ID 1 referring to completely different label sets.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT 4 — COMPACTOR
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The Compactor runs as a background process (a goroutine here, a separate
+# pod in large deployments). It has two jobs: compaction and retention.
+#
+# JOB 1 — COMPACTION (merging small blocks into larger ones)
+#
+#   Each Ingester flush creates a small block covering maybe 1-2 hours of data
+#   for one subset of streams. Over time, object storage fills up with many
+#   tiny blocks. Querying across a long time range means opening many blocks,
+#   each requiring its own index lookup. This gets slow.
+#
+#   The Compactor merges blocks that cover overlapping or adjacent time ranges
+#   into a single larger block (e.g. merge 24 hourly blocks into one daily
+#   block). The merged block has:
+#     - A new index with series renumbered from 1 (all local, as always)
+#     - Merged and re-sorted chunk files
+#     - A new meta.json with the combined time range
+#
+#   The old small blocks are deleted after the merged block is committed.
+#   This is always atomic from the reader's perspective: the Querier sees
+#   either the old blocks or the new merged block, never a partial state.
+#
+#   Compaction also deduplicates chunks that were replicated across Ingesters
+#   (relevant when replication_factor > 1 and two Ingesters flushed the same
+#   data independently).
+#
+# JOB 2 — RETENTION (enforcing retention_period and deleting expired data)
+#
+#   When retention_enabled: true, the Compactor runs a retention pass after
+#   each compaction cycle. It:
+#
+#   1. Reads meta.json for every block.
+#      If the block's maxT (newest log timestamp) is older than now minus
+#      retention_period (72h here), the entire block is expired.
+#      The Compactor marks it for deletion and deletes it. No rewriting needed.
+#
+#   2. If a block is PARTIALLY expired (its time range straddles the retention
+#      boundary — some chunks are old enough to delete, some are not):
+#      - The Compactor writes a NEW block containing only the surviving chunks.
+#      - Series are renumbered locally from 1 in the new block.
+#      - The old block is deleted.
+#
+#   3. At no point does the Compactor modify a live block's index or postings
+#      lists. The rule is: blocks are immutable. Deletion = rewrite survivors
+#      into a new block + delete the old block atomically.
+#
+#   This is why a postings list can never point to a missing series ID:
+#   the list and everything it references live and die in the same block file.
+#   There is no global series registry that could become stale.
+#
+#   delete_request_store: filesystem tells the Compactor where to store pending
+#   delete requests (from the delete API). Must match object_store in schema_config.
+#
+#   working_directory: /loki/compactor is scratch space for the Compactor to
+#   stage blocks during merge/rewrite before atomically committing them.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT 5 — QUERIER
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The Querier handles all read requests. For a given LogQL query with time range
+# [T1, T2] it must return all matching logs from both live (unflushed) data in
+# Ingesters and historical data in flushed blocks. It does this in parallel:
+#
+#   1. LIVE DATA — asks all Ingesters (via the ring) for any in-memory chunks
+#      that overlap [T1, T2]. Ingesters query their head block index and return
+#      matching log lines. This data has NOT been flushed yet.
+#
+#   2. BLOCK DATA — scans object storage for blocks whose meta.json time range
+#      overlaps [T1, T2]. For each matching block:
+#        a. Opens the TSDB index binary file.
+#        b. Looks up each label matcher against the postings lists.
+#        c. Intersects postings lists to get matching series IDs.
+#        d. Resolves series IDs to chunk file offsets.
+#        e. Reads and decompresses only the matching chunk sections.
+#        f. Scans log lines for any filter expressions (| json, | grep, etc.).
+#
+#   3. MERGE + DEDUPLICATE — the Querier merges results from all Ingesters and
+#      all blocks, sorted by timestamp. With replication_factor > 1, the same
+#      log line may appear from multiple Ingesters and from a flushed block
+#      simultaneously. The Querier deduplicates by (timestamp, log_line) hash.
+#
+#   4. STREAM to the client — results are streamed back, not buffered entirely
+#      in RAM. maxLines: 1000 in the Grafana datasource config caps how many
+#      lines Grafana will request in a single query.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# TSDB INDEX INTERNALS — POSTINGS LISTS IN DETAIL
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Loki TSDB indexes ONLY labels/streams, not full log contents.
+#
+# The index is an inverted index. The key insight is the direction flip:
+# instead of storing series → labels (which you'd need to scan every series
+# to answer "which series have app=web?"), it stores label_value → series IDs.
+#
+# Example — 4 streams flushed into Block 001:
+#
+#   Series 1: {app="web", level="error"}   → chunk A (logs: "disk full", ...)
+#   Series 2: {app="web", level="info"}    → chunk B (logs: "user login", ...)
+#   Series 3: {app="api", level="error"}   → chunk C (logs: "timeout", ...)
+#   Series 4: {app="api", level="info"}    → chunk D (logs: "request ok", ...)
+#
+#   Postings lists (sorted integer arrays, stored in the index file):
+#     app="web"     → [1, 2]
+#     app="api"     → [3, 4]
+#     level="error" → [1, 3]
+#     level="info"  → [2, 4]
+#
+# Query: {app="web", level="error"}
+#   lookup app="web"     → [1, 2]
+#   lookup level="error" → [1, 3]
+#   two-pointer intersect (lists have to be sorted):
+#     i=0 j=0 → list1[0]=1, list2[0]=1 → match → emit 1, advance both
+#     i=1 j=1 → list1[1]=2, list2[1]=3 → 2 < 3 → advance i
+#     i exhausted → done
+#   result: [1] → Series 1 → chunk A → decompress → return log lines
+#
+# The two-pointer merge is O(n) where n is the length of the shorter list.
+# Lists are sorted integers — CPU-cache-friendly sequential reads.
+# No full scan of all series. No heap allocation per step.
+#
+# HIGH-CARDINALITY WARNING:
+#   High-cardinality labels (user_id, trace_id, request_id, workflow_id) must
+#   NOT be index labels. Each unique value gets its own postings list with
+#   exactly one entry. If you have 1 million unique user_ids, that is 1 million
+#   postings lists each with one integer — enormous index, zero intersection
+#   benefit (a single-entry list intersects as slowly as it gets).
+#
+#   Those values belong in the log line payload, queryable without indexing:
+#     {app="temporal-worker"} | json | workflow_id="abc123"
+#   Loki decompresses the matching chunks and scans the raw JSON — slower than
+#   an index lookup but correct, and it doesn't blow up the index size.
+#
+# BLOCK IMMUTABILITY AND DELETION — THE FULL STORY:
+#   Blocks are immutable once written. Series IDs are local to their block.
+#   Deletion never edits a postings list — it rewrites the block without the
+#   expired series or deletes the block entirely. The list and the series it
+#   references always live and die together in the same block file. There is no
+#   moment where a postings list points at a series ID that does not exist.
 # =============================================================================
 
 ---
@@ -34,11 +543,21 @@
 #
 # Internally the TSDB index behaves closer to an inverted index/postings-list
 # system (similar to Prometheus TSDB/Lucene concepts) than a classic mutable
-# B-tree SQL index. Immutable index blocks + chunk metadata allow efficient
-# distributed queries and query sharding.
+# key-value store. Each incoming metric is assigned a unique integer series ID
+# based on its full label set. The index is then built by flipping the
+# relationship: instead of series → labels, it maps each label value to a
+# sorted list of series IDs that carry it (the "postings list"). For example,
+# method="GET" might map to [1, 4, 7, 9, ...] and status="200" to [1, 4, 8, 10, ...].
 #
-# High-cardinality labels (request_id, random UUIDs, per-user labels, etc.)
-# can explode index size and hurt query/storage performance.
+# Querying works by intersecting or unioning these postings lists using a
+# two-pointer merge, which is O(n) and cache-friendly — no full scan of the
+# series set required.
+#
+# High-cardinality labels (user IDs, trace IDs, request IDs) must be avoided
+# as index labels: every unique value creates its own single-entry postings
+# list, blowing up index size linearly with cardinality while providing zero
+# intersection benefit. Those values belong in the datapoint payload, not the
+# label set.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -146,9 +665,25 @@ data:
           schema: v13
           index:
             prefix: index_
-            # period: 24h creates one index table per day. The only supported
-            # value for TSDB — weekly periods are a boltdb-shipper concept.
-            # https://grafana.com/docs/loki/latest/operations/storage/tsdb/#index-period
+            # Timestamps are NOT labels and are never run through the inverted
+            # index. Instead, time is the axis chunks are physically bucketed
+            # along: period: 24h creates one index table per day on disk.
+            #
+            # When a query arrives with a time range, Loki does two levels of
+            # time filtering:
+            #
+            #   1. BUCKET SKIP — any day-table whose entire range falls outside
+            #      the query window is skipped before touching the index at all.
+            #
+            #   2. CHUNK SKIP — inside the matching day-table, every chunk has
+            #      a minT and maxT stored in its metadata. Loki compares those
+            #      against the query window and skips chunks that don't overlap.
+            #      "last 2h" might load 1 chunk; "last 6h" loads 2-3 — chunks
+            #      outside the window are never decompressed or scanned.
+            #
+            # Making timestamps a label would give every log line a unique value
+            # and detonate the index — time works precisely because it lives
+            # outside the postings-list system entirely.
             period: 24h
 
     limits_config:
