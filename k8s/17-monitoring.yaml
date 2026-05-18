@@ -350,7 +350,40 @@
 #   │   pairs for one stream, built up over time.
 #   ├── The Ingester also maintains the in-memory TSDB index:
 #   │     series table: label_set → local integer series ID
+#   │
+#   │         ┌─────────────────────────────────┬───────────┐
+#   │         │ label_set                       │ series ID │
+#   │         ├─────────────────────────────────┼───────────┤
+#   │         │ {app="web",  level="error"}     │     1     │
+#   │         │ {app="web",  level="info"}      │     2     │
+#   │         │ {app="db",   level="error"}     │     3     │
+#   │         └─────────────────────────────────┴───────────┘
+#   │
 #   │     postings lists: label_value → sorted list of series IDs
+#   │
+#   │         ┌─────────────────┬────────────────┐
+#   │         │ label_value     │ series IDs     │
+#   │         ├─────────────────┼────────────────┤
+#   │         │ app="web"       │ [1, 2]         │
+#   │         │ app="db"        │ [3]            │
+#   │         │ level="error"   │ [1, 3]         │
+#   │         │ level="info"    │ [2]            │
+#   │         └─────────────────┴────────────────┘
+#   │
+#   │     query: {app="web", level="error"}
+#   │
+#   │         app="web"      → [1, 2]
+#   │         level="error"  → [1, 3]
+#   │         intersection   → [1]       ← only series ID 1 matches both
+#   │         series table   → {app="web", level="error"}
+#   │         fetch chunks   → log lines for that stream
+#   │
+#   │     the label_set is the key used to locate the chunks on disk.
+#   │     once the intersection resolves to a series ID, Loki maps that
+#   │     ID back to its full label_set and uses it to find the chunk
+#   │     files that contain the actual log lines — the label_set is
+#   │     both the search result AND the pointer into storage.
+#   │  
 #   │   This index is rebuilt from the WAL on restart — it is not persisted
 #   │   separately during normal operation.
 #   └── When a chunk reaches its size limit (~256KB uncompressed) or its
@@ -379,8 +412,49 @@
 #       chunks/
 #         000001                 ← chunk file (many chunks packed together)
 #         000002
-#       meta.json                ← block bounds (minT, maxT), series count, etc.
-#       tombstones               ← deletion markers (written by Compactor later)
+#       meta.json
+#           Written by the Ingester at flush time. Contains everything Loki
+#           needs to know about this block without opening any of its data files:
+#
+#           {
+#             "ulid": "01ARZ3NDEKTSV4RRFFQ69G5FAV",   ← unique block ID (time-sortable)
+#             "minTime": 1716220800000,                 ← oldest log timestamp in this block (unix ms)
+#             "maxTime": 1716221400000,                 ← newest log timestamp in this block (unix ms)
+#             "stats": {
+#               "numSamples": 48301,                   ← total log lines stored
+#               "numSeries":  12,                      ← unique label_sets in this block
+#               "numChunks":  36                       ← total chunk files
+#             }
+#           }
+#
+#           The Querier reads meta.json first before touching anything else.
+#           If your query asks for logs between 14:00 and 14:05, and this
+#           block's maxTime is 13:55, the Querier skips the entire block
+#           without opening a single chunk file. This is time-range pruning —
+#           the reason Loki stays fast even with months of data on disk.
+#
+#       tombstones
+#           A tombstone is a deletion marker — it does NOT immediately delete
+#           data from the chunk files. Instead it records what should be
+#           considered deleted:
+#
+#           {
+#             "series":   {app="web", level="error"},  ← which stream
+#             "minTime":  1716220800000,                ← delete from
+#             "maxTime":  1716221100000                 ← delete until
+#           }
+#
+#           When the Querier reads chunks that overlap with a tombstone's
+#           time range, it filters those log lines out of the results in
+#           memory before returning them — the bytes are still on disk,
+#           they are just silently skipped.
+#
+#           The Compactor later does a full rewrite of the block, physically
+#           removing the tombstoned log lines from the chunk files and then
+#           deleting the tombstone itself. Until that rewrite happens the
+#           data is "deleted" from the user's perspective but still present
+#           on disk — same pattern as Postgres MVCC where dead tuples stay
+#           in the heap until VACUUM physically removes them.
 #
 #   Series IDs inside a block are local unsigned integers starting from 1.
 #   They have no meaning outside their block. Two different blocks can both
@@ -530,34 +604,7 @@
 #   references always live and die together in the same block file. There is no
 #   moment where a postings list points at a series ID that does not exist.
 # =============================================================================
-
 ---
-# =============================================================================
-# LOKI — stores and indexes the logs
-# Upgraded to 3.5.0 with TSDB storage (boltdb-shipper deprecated in 3.0)
-#
-# Loki TSDB indexes ONLY labels/streams, not full log contents.
-# Query flow is roughly:
-#   LogQL label selector -> TSDB index lookup -> matching streams/chunks
-#   -> fetch compressed chunks from object storage -> scan/filter log lines
-#
-# Internally the TSDB index behaves closer to an inverted index/postings-list
-# system (similar to Prometheus TSDB/Lucene concepts) than a classic mutable
-# key-value store. Each incoming metric is assigned a unique integer series ID
-# based on its full label set. The index is then built by flipping the
-# relationship: instead of series → labels, it maps each label value to a
-# sorted list of series IDs that carry it (the "postings list"). For example,
-# method="GET" might map to [1, 4, 7, 9, ...] and status="200" to [1, 4, 8, 10, ...].
-#
-# Querying works by intersecting or unioning these postings lists using a
-# two-pointer merge, which is O(n) and cache-friendly — no full scan of the
-# series set required.
-#
-# High-cardinality labels (user IDs, trace IDs, request IDs) must be avoided
-# as index labels: every unique value creates its own single-entry postings
-# list, blowing up index size linearly with cardinality while providing zero
-# intersection benefit. Those values belong in the datapoint payload, not the
-# label set.
 apiVersion: v1
 kind: ConfigMap
 metadata:
