@@ -625,7 +625,7 @@ data:
     # The common block is a Loki 3.x convenience that sets shared defaults
     # for path_prefix, storage, replication_factor, and ring — avoiding
     # repetition across the ingester, compactor, and ruler sections.
-    # loki rules are alerts you can set fro example when too many 500 errors are present in the records.
+    # loki rules are alerts you can set from example when too many 500 errors are present in the records.
     # https://grafana.com/docs/loki/latest/configure/#common
     common:
       path_prefix: /loki
@@ -719,7 +719,7 @@ data:
             # When a query arrives with a time range, Loki does two levels of
             # time filtering:
             #
-            #   1. BUCKET SKIP — any day-table whose entire range falls outside
+            #   1. BUCKET SKIP (Chunks are inside Buckets) — any day-table whose entire range falls outside
             #      the query window is skipped before touching the index at all.
             #
             #   2. CHUNK SKIP — inside the matching day-table, every chunk has
@@ -934,8 +934,36 @@ metadata:
   name: alloy
 rules:
   - apiGroups: [""]
+    # "" means the core Kubernetes API group — the original built-in resources.
+    # Kubernetes APIs are versioned and grouped:
+    #   ""              → core group: pods, nodes, services, endpoints (no prefix)
+    #   "apps"          → deployments, statefulsets, daemonsets
+    #   "batch"         → jobs, cronjobs
+    #   "rbac.authorization.k8s.io" → roles, clusterroles
+    # Alloy only needs the core group because it only reads pods and nodes.
+
     resources: [nodes, nodes/proxy, services, endpoints, pods, pods/log]
+    # nodes          → discover which machines exist in the cluster
+    # nodes/proxy    → proxy requests through a node to reach its kubelet API
+    #                  needed to scrape node-level metrics
+    # services       → discover service metadata for log enrichment
+    # endpoints      → discover which pods are backing which services
+    # pods           → discover pod metadata (labels, namespace, container names)
+    #                  this is how Alloy builds the label_set for each log stream
+    # pods/log       → stream live log output from a specific pod via the API
+    #                  this is the actual log bytes, not just metadata
+
     verbs: [get, watch, list]
+    # get   → fetch a single specific resource by name
+    #         "give me pod backend-abc123"
+    # list  → fetch all resources of this type at once
+    #         "give me all pods in the cluster right now"
+    # watch → open a long-lived connection, stream changes as they happen
+    #         "tell me whenever a pod is created, updated, or deleted"
+    #         this is how Alloy reacts to new pods without polling constantly
+    #
+    # notably absent:
+    #   create, update, delete, patch → Alloy is read-only, cannot modify anything
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -1105,7 +1133,9 @@ data:
 
 
     // =============================================================================
-    // STEP 3 — OPEN log streams for each surviving target
+    // STEP 3 — OPEN log streams for each surviving target 
+    77 Alloy receives each line and holds it in memory alongside the label set it built in step 2
+    77 Labels behave like an envelop and Logs can be seen as the message.
     //
     // loki.source.kubernetes takes the filtered+relabeled target list and calls
     // the Kubernetes API to stream logs from each one — identical to running:
@@ -1374,10 +1404,23 @@ spec:
             - containerPort: 3000
               name: http
           env:
-            # GF_SECURITY_ADMIN_USER and GF_SECURITY_ADMIN_PASSWORD set the
-            # built-in admin credentials on first boot. On subsequent boots
-            # Grafana ignores these if the admin user already exists in the DB.
-            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#security
+            # ─── ADMIN CREDENTIALS ───────────────────────────────────────────
+            #
+            # Grafana stores its users in an internal SQLite database at
+            # /var/lib/grafana/grafana.db. On FIRST boot these env vars seed
+            # the admin user into that database.
+            #
+            # On SUBSEQUENT boots Grafana checks if the admin user already
+            # exists in grafana.db — if it does, these env vars are ignored
+            # entirely. This means changing these values after first boot has
+            # no effect. To change the admin password after first boot you
+            # must use the Grafana UI or the API directly.
+            #
+            # Values come from a Kubernetes Secret (monitoring-secrets) so the
+            # credentials are never written in plain text in this yaml file.
+            # kubectl create secret generic monitoring-secrets \
+            #   --from-literal=GF_SECURITY_ADMIN_USER=admin \
+            #   --from-literal=GF_SECURITY_ADMIN_PASSWORD=yourpassword
             - name: GF_SECURITY_ADMIN_USER
               valueFrom:
                 secretKeyRef:
@@ -1388,27 +1431,65 @@ spec:
                 secretKeyRef:
                   name: monitoring-secrets
                   key: GF_SECURITY_ADMIN_PASSWORD
-            # GF_SERVER_ROOT_URL tells Grafana its full public URL.
-            # Without this, post-login redirects point to / instead of /grafana/
-            # and OAuth callbacks break.
-            # GF_SERVER_SERVE_FROM_SUB_PATH prefixes all asset URLs with /grafana/
-            # so the browser can resolve JS and CSS through the nginx proxy.
-            # Without it, the UI loads blank — every asset request gets a 404.
-            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#serve_from_sub_path
+            # ─── SUBPATH ROUTING ─────────────────────────────────────────────
+            #
+            # Grafana sits behind nginx at /grafana/ instead of at the root /.
+            # Two env vars are required to make this work correctly:
+            #
+            # GF_SERVER_ROOT_URL
+            #     Tells Grafana its full public URL including the subpath.
+            #     Grafana uses this to build redirect URLs — for example after
+            #     login it redirects to GF_SERVER_ROOT_URL/dashboards.
+            #     Without this, post-login redirects go to / which nginx serves
+            #     as the frontend, not Grafana — you'd get bounced out of Grafana
+            #     every time you log in.
+            #
+            # GF_SERVER_SERVE_FROM_SUB_PATH
+            #     Tells Grafana to prefix ALL asset URLs with /grafana/.
+            #     Grafana's UI is a React app that loads JS, CSS, and font files.
+            #     Without this flag those requests go to /public/build/app.js
+            #     — nginx has no location block for that, returns 404, UI is blank.
+            #     With this flag they go to /grafana/public/build/app.js
+            #     — nginx proxies /grafana/ to the Grafana container, works.
             - name: GF_SERVER_ROOT_URL
               value: "https://testproveoportfolio.xyz/grafana/"
             - name: GF_SERVER_SERVE_FROM_SUB_PATH
               value: "true"
-            # Disable anonymous access — all users must log in.
-            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-security/configure-authentication/grafana/
+
+            # ─── ACCESS CONTROL ──────────────────────────────────────────────
+            #
+            # GF_AUTH_ANONYMOUS_ENABLED = false
+            #     By default Grafana allows anyone to view dashboards without
+            #     logging in (anonymous viewer role). Disabling this forces
+            #     every request to authenticate first. Without this your
+            #     metrics and logs are visible to anyone who finds the /grafana/ URL.
+            #
+            # GF_USERS_ALLOW_SIGN_UP = false
+            #     By default Grafana shows a "Sign Up" link on the login page
+            #     that lets anyone create their own account. Disabling this
+            #     means only the admin can create accounts via the UI or API.
+            #     Without this anyone who finds your Grafana URL can register
+            #     themselves as a user.
             - name: GF_AUTH_ANONYMOUS_ENABLED
               value: "false"
             # Disable self-registration — accounts are created by the admin only.
             # https://grafana.com/docs/grafana/latest/setup-grafana/configure-security/configure-authentication/grafana/#allow-sign-up
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
-            # Disable phone-home telemetry and update checks.
-            # https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#analytics
+
+            # ─── TELEMETRY ────────────────────────────────────────────────────
+            #
+            # GF_ANALYTICS_REPORTING_ENABLED = false
+            #     Grafana phones home to stats.grafana.org by default, sending
+            #     usage statistics (number of dashboards, users, datasources,
+            #     plugin names). Disabled here for privacy — your infrastructure
+            #     topology is nobody else's business.
+            #
+            # GF_ANALYTICS_CHECK_FOR_UPDATES = false
+            #     Grafana polls api.grafana.com on startup and periodically to
+            #     check if a newer version exists, then shows a banner in the UI.
+            #     Disabled here — updates are managed through the image tag in
+            #     this yaml file, not through Grafana's own notification system.
             - name: GF_ANALYTICS_REPORTING_ENABLED
               value: "false"
             - name: GF_ANALYTICS_CHECK_FOR_UPDATES
@@ -1450,92 +1531,441 @@ spec:
 
 ---
 # =============================================================================
-# GRAFANA USER INIT — one-shot Job, runs after Grafana is healthy
+# GRAFANA USER INIT — one-shot Kubernetes Job
+# =============================================================================
 #
-# Admin is created automatically by Grafana from GF_SECURITY_ADMIN_* above.
-# Passwords are injected directly from the secret as env vars — no service
-# account, no Kubernetes API calls, no RBAC needed.
+# PURPOSE
+# -----------------------------------------------------------------------------
+# Creates and maintains a low-privilege "demo" user in Grafana for portfolio
+# visitors. The user is safe to expose publicly because it only receives the
+# Viewer role.
 #
-# Jobs are immutable in Kubernetes — kubectl apply fails if a completed Job
-# already exists in the namespace. rolling-deploy.sh deletes it before apply.
 #
-# Re-run manually:
+# WHO CREATES WHAT
+# -----------------------------------------------------------------------------
+#
+# admin user
+#   Automatically created by Grafana itself on first startup from:
+#
+#     GF_SECURITY_ADMIN_USER
+#     GF_SECURITY_ADMIN_PASSWORD
+#
+#   defined in the Grafana Deployment.
+#
+#   This Job does NOT create the admin user.
+#
+#
+# demo user
+#   Created and maintained by THIS Job through Grafana's HTTP API.
+#
+#   Intended usage:
+#     - public dashboards
+#     - recruiter access
+#     - portfolio/demo environments
+#
+#   Permissions:
+#     Viewer role only
+#       - can view dashboards
+#       - cannot edit dashboards
+#       - cannot create datasources
+#       - cannot manage Grafana
+#
+#
+# WHY THIS EXISTS
+# -----------------------------------------------------------------------------
+# Grafana does not provide a declarative Kubernetes-native way to create
+# additional users at startup.
+#
+# Therefore this Job:
+#
+#   1. waits until Grafana is healthy
+#   2. calls the Grafana HTTP API
+#   3. creates or updates the demo user
+#
+#
+# IDEMPOTENCY
+# -----------------------------------------------------------------------------
+# This Job is intentionally idempotent:
+#
+#   safe to run once
+#   safe to run 100 times
+#
+# Flow:
+#
+#   if demo user exists:
+#       update password only
+#
+#   else:
+#       create user
+#       assign Viewer role
+#
+# Without this lookup-first pattern the Job would fail after the first deploy
+# because the user would already exist.
+#
+#
+# WHY THE JOB RE-RUNS
+# -----------------------------------------------------------------------------
+# Kubernetes Jobs are immutable after completion.
+#
+# kubectl apply cannot patch a completed Job template.
+#
+# Therefore:
+#
+#   rolling-deploy.sh deletes the old Job before apply
+#
+# AND:
+#
+#   ttlSecondsAfterFinished automatically cleans completed Jobs after 5 minutes
+#
+#
+# MANUAL RE-RUN
+# -----------------------------------------------------------------------------
+# Re-run ONLY this Job:
+#
 #   kubectl delete job grafana-init-users -n portfolio
+#
 #   kubectl apply -f k8s/17-monitoring.yaml
+#
+#
+# BASH CONCEPTS USED BELOW
+# -----------------------------------------------------------------------------
+#
+# set -e
+#   Exit the entire script immediately if any command returns non-zero.
+#
+#   Prevents continuing in a broken state after a failed curl/API request.
+#
+#
+# /dev/null
+#   Special Linux device that discards everything written to it.
+#
+#   Used to silence command output we do not care about.
+#
+#
+# > /dev/null 2>&1
+#   Redirect BOTH stdout and stderr into /dev/null.
+#
+#   File descriptors:
+#     0 = stdin
+#     1 = stdout
+#     2 = stderr
+#
+#   2>&1 means:
+#     "send stderr wherever stdout is currently going"
+#
+#
+# $()
+#   Bash command substitution.
+#
+#   Runs a command and captures its stdout into a variable.
+#
+# Example:
+#
+#   STATUS=$(curl ...)
+#
+#
+# curl -w "%{http_code}"
+#   curl format variable expansion.
+#
+#   %{http_code} is NOT a bash variable.
+#   It is expanded internally by curl after the HTTP request finishes.
+#
+# Example:
+#
+#   curl -w "%{http_code}"
+#
+#   prints:
+#
+#     200
+#     404
+#     503
+#
+#
+# until
+#   Inverse of while.
+#
+#   Loops UNTIL the command succeeds (exit code 0).
+#
+# Example:
+#
+#   until curl succeeds:
+#       sleep
+#
+#
+# QUOTING VARIABLES
+# -----------------------------------------------------------------------------
+# Always quote bash variables:
+#
+#   "$VAR"
+#
+# instead of:
+#
+#   $VAR
+#
+# Prevents:
+#   - word splitting
+#   - glob expansion
+#   - syntax errors on empty variables
+#
+#
+# CURL FLAGS USED BELOW
+# -----------------------------------------------------------------------------
+#
+# -s
+#   Silent mode.
+#
+#   Suppresses progress meter and most output.
+#
+#
+# -f
+#   Fail on HTTP errors.
+#
+#   Makes curl return non-zero on:
+#
+#     4xx
+#     5xx
+#
+#   Without -f:
+#
+#     HTTP 404 still returns exit code 0
+#
+#   With -f:
+#
+#     HTTP 404 returns non-zero
+#
+#
+# -u "user:pass"
+#   HTTP Basic Authentication.
+#
+#   curl automatically generates:
+#
+#     Authorization: Basic <base64>
+#
+#
+# -H "Header: value"
+#   Adds custom HTTP headers.
+#
+# Example:
+#
+#   -H "Content-Type: application/json"
+#
+# tells Grafana:
+#
+#   "the request body contains JSON"
+#
+#
+# -X METHOD
+#   Explicit HTTP method.
+#
+# Examples:
+#
+#   -X POST   → create
+#   -X PUT    → replace/update
+#   -X PATCH  → partial update
+#
+#
+# -d "..."
+#   HTTP request body ("data").
+#
+# Used here to send JSON payloads.
+#
+#
 # =============================================================================
 apiVersion: batch/v1
 kind: Job
+
 metadata:
   name: grafana-init-users
   namespace: portfolio
+
 spec:
-  # ttlSecondsAfterFinished deletes the Job and its pod automatically after
-  # 5 minutes, keeping the namespace clean without deploy script intervention.
-  # https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
+  # Automatically delete the completed Job and pod after 5 minutes.
+  #
+  # Keeps the namespace clean and avoids accumulating completed Job pods.
+  #
+  # Without this:
+  #   completed Jobs remain forever unless manually deleted.
   ttlSecondsAfterFinished: 300
-  # backoffLimit: 5 retries the pod up to 5 times on failure before the Job
-  # is marked as failed. Each retry is a fresh pod — useful here because
-  # Grafana may not be ready immediately and the first curl will fail.
-  # https://kubernetes.io/docs/concepts/workloads/controllers/job/#pod-backoff-failure-policy
+
+  # Maximum number of pod retries before the Job is marked failed.
+  #
+  # Each retry creates a NEW pod.
+  #
+  # Useful because Grafana may still be booting when the Job starts.
   backoffLimit: 5
+
   template:
     spec:
-      # OnFailure restarts the container in the same pod on non-zero exit.
-      # Never is the other valid option for Jobs — do not use Always (that is
-      # for Deployments and will be rejected here).
-      # https://kubernetes.io/docs/concepts/workloads/controllers/job/#handling-pod-and-container-failures
+
+      # Restart failed containers inside the SAME pod.
+      #
+      # Valid Job policies:
+      #
+      #   Never
+      #   OnFailure
+      #
+      # "Always" is invalid for Jobs.
       restartPolicy: OnFailure
+
       containers:
       - name: init
+
+        # Small Alpine Linux image (~5MB).
+        #
+        # curl is installed at runtime using apk.
         image: alpine:3.19
+
         command: ["/bin/sh", "-c"]
+
         args:
         - |
+          # Exit entire script on first failure.
           set -e
+
+          # Install curl silently.
+          #
+          # apk:
+          #   Alpine Linux package manager.
+          #
+          # --no-cache:
+          #   do not persist package index to disk.
+          #
+          # > /dev/null 2>&1:
+          #   silence all output.
           apk add --no-cache curl > /dev/null 2>&1
 
+          # Base URL of Grafana service inside the Kubernetes cluster.
+          #
+          # .svc.cluster.local:
+          #   Kubernetes internal DNS domain.
           GRAFANA="http://grafana.portfolio.svc.cluster.local:3000"
 
           echo "Waiting for Grafana..."
-          until curl -sf -u "admin:${ADMIN_PASS}" "$GRAFANA/api/health" > /dev/null 2>&1; do
+
+          # Wait until Grafana responds successfully.
+          #
+          # until:
+          #   keep looping UNTIL command succeeds.
+          #
+          # curl flags:
+          #   -s  → silent
+          #   -f  → fail on HTTP errors
+          #   -u  → HTTP Basic Auth
+          #
+          # Without -f:
+          #   curl returns success even on HTTP 404/503.
+          #
+          # sleep 3:
+          #   avoid hammering Grafana continuously.
+          until curl -sf \
+            -u "admin:${ADMIN_PASS}" \
+            "$GRAFANA/api/health" > /dev/null 2>&1; do
+
             sleep 3
           done
+
           echo "Grafana is up"
 
-          # GET /api/users/lookup returns 200 if the user exists, 404 if not.
-          # https://grafana.com/docs/grafana/latest/developers/http_api/user/#get-user-by-login-or-email
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          # Check whether the demo user already exists.
+          #
+          # curl -w "%{http_code}":
+          #   print ONLY the HTTP status code after the request.
+          #
+          # -o /dev/null:
+          #   discard response body.
+          #
+          # $():
+          #   capture stdout into bash variable.
+          #
+          # Possible values:
+          #   200 → user exists
+          #   404 → user missing
+          HTTP_STATUS=$(curl -s \
+            -o /dev/null \
+            -w "%{http_code}" \
             -u "admin:${ADMIN_PASS}" \
             "$GRAFANA/api/users/lookup?loginOrEmail=demo")
 
+          # Bash test expression.
+          #
+          # Always quote variables inside [ ].
           if [ "$HTTP_STATUS" = "200" ]; then
-            USER_ID=$(curl -sf -u "admin:${ADMIN_PASS}" \
+
+            # User exists.
+            #
+            # Fetch full JSON response and extract numeric ID.
+            #
+            # Example Grafana response:
+            #
+            #   {"id":3,"email":"demo@local",...}
+            #
+            # grep -o '"id":[0-9]*'
+            #   extracts:
+            #
+            #     "id":3
+            #
+            # cut -d: -f2
+            #   splits by ":" and returns field #2:
+            #
+            #     3
+            USER_ID=$(curl -sf \
+              -u "admin:${ADMIN_PASS}" \
               "$GRAFANA/api/users/lookup?loginOrEmail=demo" \
-              | grep -o '"id":[0-9]*' | cut -d: -f2)
-            # PUT /api/admin/users/:id/password updates the password for any user.
-            # https://grafana.com/docs/grafana/latest/developers/http_api/admin/#set-user-password
-            curl -sf -u "admin:${ADMIN_PASS}" \
-              -H "Content-Type: application/json" -X PUT \
+              | grep -o '"id":[0-9]*' \
+              | cut -d: -f2)
+
+            # Update password.
+            #
+            # -H "Content-Type: application/json"
+            #   tells Grafana the request body is JSON.
+            #
+            # -X PUT
+            #   replace/update operation.
+            #
+            # -d
+            #   request body.
+            curl -sf \
+              -u "admin:${ADMIN_PASS}" \
+              -H "Content-Type: application/json" \
+              -X PUT \
               -d "{\"password\":\"${DEMO_PASS}\"}" \
-              "$GRAFANA/api/admin/users/${USER_ID}/password" > /dev/null
-            echo "Demo user updated (user ID: $USER_ID)"
+              "$GRAFANA/api/admin/users/${USER_ID}/password" \
+              > /dev/null
+
+            echo "Demo user password synced (user ID: $USER_ID)"
+
           else
-            # POST /api/admin/users creates a new global user (server admin endpoint).
-            # https://grafana.com/docs/grafana/latest/developers/http_api/admin/#create-global-user
-            curl -sf -u "admin:${ADMIN_PASS}" \
-              -H "Content-Type: application/json" -X POST \
+
+            # User does not exist.
+            #
+            # Create user first.
+            curl -sf \
+              -u "admin:${ADMIN_PASS}" \
+              -H "Content-Type: application/json" \
+              -X POST \
               -d "{\"name\":\"Demo\",\"email\":\"demo@local\",\"login\":\"demo\",\"password\":\"${DEMO_PASS}\",\"OrgId\":1}" \
-              "$GRAFANA/api/admin/users" > /dev/null
-            USER_ID=$(curl -sf -u "admin:${ADMIN_PASS}" \
+              "$GRAFANA/api/admin/users" \
+              > /dev/null
+
+            # Lookup again to obtain generated numeric ID.
+            USER_ID=$(curl -sf \
+              -u "admin:${ADMIN_PASS}" \
               "$GRAFANA/api/users/lookup?loginOrEmail=demo" \
-              | grep -o '"id":[0-9]*' | cut -d: -f2)
-            # PATCH /api/orgs/:orgId/users/:userId sets the user's role within
-            # the org. Viewer can see dashboards but cannot edit or create anything.
-            # https://grafana.com/docs/grafana/latest/developers/http_api/org/#updates-the-given-user
-            curl -sf -u "admin:${ADMIN_PASS}" \
-              -H "Content-Type: application/json" -X PATCH \
+              | grep -o '"id":[0-9]*' \
+              | cut -d: -f2)
+
+            # Downgrade role to Viewer.
+            #
+            # PATCH:
+            #   partial update — modify only the role field.
+            curl -sf \
+              -u "admin:${ADMIN_PASS}" \
+              -H "Content-Type: application/json" \
+              -X PATCH \
               -d "{\"role\":\"Viewer\"}" \
-              "$GRAFANA/api/orgs/1/users/${USER_ID}" > /dev/null
+              "$GRAFANA/api/orgs/1/users/${USER_ID}" \
+              > /dev/null
+
             echo "Demo user created as Viewer (user ID: $USER_ID)"
           fi
         env:
