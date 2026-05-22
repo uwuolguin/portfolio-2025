@@ -45,12 +45,12 @@ su - deploy
 # execute) bits that control exactly who can do what. Creating a dedicated deploy
 # user instead of running everything as root is the practical application of that
 # model — least privilege, each user owns only what they need to touch.
-#
-# See USEFULCOMMANDS.md for commands to inspect the system at a deeper level —
-# process state, open file descriptors, network connections, auth logs, and the
-# filesystem itself. That's where the juice is.
 ```
+### USEFULCOMMANDS.md
 
+See this file "USEFULCOMMANDS.md" for commands to inspect the system at a deeper level
+— process state, open file descriptors, network connections, auth logs
+, and the filesystem itself. That's where the juice is. Also includes a security mental model worth a look.
 ---
 
 ## Quick Start
