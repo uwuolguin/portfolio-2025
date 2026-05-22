@@ -48,9 +48,7 @@ su - deploy
 ```
 ### USEFULCOMMANDS.md
 
-See this file "USEFULCOMMANDS.md" for commands to inspect the system at a deeper level
-— process state, open file descriptors, network connections, auth logs
-, and the filesystem itself. That's where the juice is. Also includes a security mental model worth a look.
+See this file "USEFULCOMMANDS.md" for commands to inspect the system at a deeper level — process state, open file descriptors, network connections, auth logs, and the filesystem itself. That's where the juice is. Also includes a security mental model worth a look.
 ---
 
 ## Quick Start
