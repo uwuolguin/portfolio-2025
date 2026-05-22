@@ -30,6 +30,25 @@ All scripts run as a **regular user with sudo privileges**, never as root direct
 adduser deploy
 usermod -aG sudo deploy
 su - deploy
+# -a      # append — ADD to the existing groups, don't replace them
+          # without -a, -G replaces ALL current groups with the new list
+          # meaning the user loses every group they were in before
+          # -a must always be used with -G, never alone
+
+# -G sudo # the group to add the user to
+          # sudo group = members can run commands as root via sudo
+
+# deploy  # the username being modified
+
+# Users, groups, and sudo permissions are part of Linux's filesystem permission
+# model — every file and directory has an owner, a group, and rwx (read, write,
+# execute) bits that control exactly who can do what. Creating a dedicated deploy
+# user instead of running everything as root is the practical application of that
+# model — least privilege, each user owns only what they need to touch.
+#
+# See USEFULCOMMANDS.md for commands to inspect the system at a deeper level —
+# process state, open file descriptors, network connections, auth logs, and the
+# filesystem itself. That's where the juice is.
 ```
 
 ---
@@ -44,6 +63,7 @@ ssh deploy@<your-droplet-ip>
 ### 2. Clone Repo
 ```bash
 git clone https://github.com/uwuolguin/portfolio-2025.git
+# Execute "git pull origin main" to update the repository if already cloned.
 cd portfolio-2025
 ```
 
@@ -73,6 +93,7 @@ newgrp docker
 **Grafana passwords (required before deploy):**
 ```bash
 # Files live in k8s scripts/ alongside .env.secrets and .credentials
+# ls -lb -a command and flags allow you to see all elements in a directory
 echo "your-strong-admin-password" > .grafana-admin-password
 echo "your-demo-password"         > .grafana-demo-password
 chmod 600 .grafana-admin-password .grafana-demo-password
