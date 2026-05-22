@@ -537,6 +537,8 @@ spec:
             - name: tls-certs
               mountPath: /etc/nginx/certs
               readOnly: true
+            - name: acme-challenge
+              mountPath: /var/www/certbot
           # k8s kills the pod and restarts it if this fails.
           livenessProbe:
             httpGet:
@@ -561,6 +563,10 @@ spec:
               memory: "128Mi"
               cpu: "200m"
       volumes:
+        - name: acme-challenge
+          hostPath:
+            path: /var/www/certbot
+            type: DirectoryOrCreate
         - name: nginx-config
           configMap:
             name: nginx-config

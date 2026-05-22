@@ -568,4 +568,668 @@ cat /etc/ssh/sshd_config                       # SSH daemon config
 #   - only machines possessing your PRIVATE key can authenticate
 #   - SSH exposure drops massively
 #
+# ─── ADDITIONAL SERVER HARDENING ──────────────────────────────────────────────
+#
+# SSH keys are a HUGE improvement, but security is layers.
+#
+# Public servers still get:
+#
+#   - vulnerability scans
+#   - exploit attempts
+#   - bot traffic
+#   - HTTP probing
+#   - port scans
+#
+# Reduce attack surface everywhere possible.
+#
+#
+# YOUR CURRENT SERVER ARCHITECTURE
+# -----------------------------------------------------------------------------
+#
+# Your setup currently looks roughly like:
+#
+#   Internet
+#      ↓
+#   k3s LoadBalancer Service
+#      ↓
+#   nginx service inside Kubernetes
+#      ↓
+#   backend / grafana / temporal / etc
+#
+#
+# Important:
+#
+#   nginx is NOT installed directly on Ubuntu host OS.
+#
+# You verified:
+#
+#   systemctl status nginx
+#
+# returned:
+#
+#   Unit nginx.service could not be found.
+#
+#
+# Instead:
+#
+#   kubectl get svc -A
+#
+# showed:
+#
+#   portfolio/nginx  LoadBalancer
+#
+#
+# This means:
+#
+#   nginx runs INSIDE Kubernetes
+#
+# not as a normal Ubuntu systemd service.
+#
+#
+# WHY YOU DID NOT SEE PORT 80/443 IN ss -tulpn
+# -----------------------------------------------------------------------------
+#
+# k3s uses internal networking + iptables forwarding.
+#
+# Traffic flow is roughly:
+#
+#   public :80/:443
+#      ↓
+#   k3s networking layer
+#      ↓
+#   NodePort
+#      ↓
+#   nginx pod
+#
+#
+# So:
+#
+#   kubectl get svc
+#
+# is often more useful than:
+#
+#   ss -tulpn
+#
+# when debugging Kubernetes networking.
+#
+#
+# YOUR CURRENT EXPOSED PORTS
+# -----------------------------------------------------------------------------
+#
+# From your outputs:
+#
+#   22     → SSH
+#   6443   → Kubernetes API server
+#   10250  → kubelet API
+#
+#
+# IMPORTANT SECURITY NOTE
+# -----------------------------------------------------------------------------
+#
+# Port 6443:
+#
+#   Kubernetes API server
+#
+# Port 10250:
+#
+#   kubelet API
+#
+#
+# These are HIGH VALUE TARGETS.
+#
+# If publicly exposed unnecessarily:
+#
+#   attackers specifically probe them.
+#
+#
+# RECOMMENDATION
+# -----------------------------------------------------------------------------
+#
+# If this is a SINGLE NODE personal project cluster:
+#
+#   strongly consider firewalling:
+#
+#     6443
+#     10250
+#
+#
+# so ONLY SSH + HTTP/HTTPS remain public.
+#
+#
+# FAIL2BAN
+# -----------------------------------------------------------------------------
+#
+# fail2ban monitors logs and temporarily bans IPs repeatedly failing auth.
+#
+# Example:
+#
+#   attacker tries 500 passwords
+#   → fail2ban inserts firewall rule
+#   → attacker IP blocked automatically
+#
+#
+# INSTALL
+# -----------------------------------------------------------------------------
+#
+#   sudo apt update
+#   sudo apt install fail2ban -y
+#
+#
+# ENABLE + START
+# -----------------------------------------------------------------------------
+#
+#   sudo systemctl enable fail2ban
+#   sudo systemctl start fail2ban
+#
+#
+# VERIFY
+# -----------------------------------------------------------------------------
+#
+# Overall status:
+#
+#   sudo fail2ban-client status
+#
+#
+# SSH jail:
+#
+#   sudo fail2ban-client status sshd
+#
+#
+# WHY THIS MATTERS
+# -----------------------------------------------------------------------------
+#
+# Even with password auth disabled:
+#
+#   bots still hammer SSH constantly.
+#
+# fail2ban reduces:
+#
+#   - log spam
+#   - repeated probing
+#   - automated noise
+#
+# UFW FIREWALL
+# -----------------------------------------------------------------------------
+#
+# UFW = Uncomplicated Firewall
+#
+# Default-deny inbound traffic unless explicitly allowed.
+#
+#
+# INSTALL
+# -----------------------------------------------------------------------------
+#
+# Usually already installed on Ubuntu.
+#
+# If not:
+#
+#   sudo apt install ufw -y
+#
+#
+# ⚠️  IMPORTANT: FOLLOW THIS ORDER EXACTLY
+# -----------------------------------------------------------------------------
+#
+# Wrong order = locked out of your server.
+#
+#   1. Set default policies
+#   2. Allow SSH          ← BEFORE enabling UFW
+#   3. Allow web ports
+#   4. Block k8s ports
+#   5. Enable UFW         ← LAST
+#
+#
+# STEP 1 — DEFAULT POLICY
+# -----------------------------------------------------------------------------
+#
+# Deny ALL inbound traffic by default:
+#
+#   sudo ufw default deny incoming
+#
+# Allow outbound:
+#
+#   sudo ufw default allow outgoing
+#
+#
+# STEP 2 — ALLOW SSH
+# -----------------------------------------------------------------------------
+#
+# CRITICAL: Do this BEFORE enabling UFW or you will lock yourself out.
+#
+#   sudo ufw allow 22/tcp
+#
+#
+# STEP 3 — ALLOW WEB TRAFFIC
+# -----------------------------------------------------------------------------
+#
+# Your Kubernetes nginx LoadBalancer (portfolio/nginx) serves:
+#
+#   80   → HTTP
+#   443  → HTTPS
+#
+#   sudo ufw allow 80/tcp
+#   sudo ufw allow 443/tcp
+#
+#
+# STEP 4 — BLOCK KUBERNETES CONTROL-PLANE / NODE APIS
+# -----------------------------------------------------------------------------
+#
+# Your ss -tulpn shows these are bound on 0.0.0.0 / * (publicly reachable!):
+#
+#   6443   → k3s API server          (*:6443)
+#   10250  → kubelet API             (*:10250)
+#   8472   → VXLAN overlay (Flannel) (0.0.0.0:8472 UDP)
+#
+# These must NOT be reachable from the internet.
+# UFW default deny already covers them, but explicit rules are clearer:
+#
+#   sudo ufw deny 6443/tcp
+#   sudo ufw deny 10250/tcp
+#   sudo ufw deny 8472/udp
+#
+# These are safe because k3s internal traffic uses the loopback
+# or cluster-internal IPs (127.x / 10.43.x), not the public interface.
+#
+#
+# STEP 5 — ENABLE UFW
+# -----------------------------------------------------------------------------
+#
+# Only enable AFTER all rules are in place:
+#
+#   sudo ufw enable
+#
+#
+# VERIFY
+# -----------------------------------------------------------------------------
+#
+#   sudo ufw status verbose
+#
+# Expected output:
+#
+#   To                Action    From
+#   --                ------    ----
+#   22/tcp            ALLOW IN  Anywhere
+#   80/tcp            ALLOW IN  Anywhere
+#   443/tcp           ALLOW IN  Anywhere
+#   6443/tcp          DENY IN   Anywhere
+#   10250/tcp         DENY IN   Anywhere
+#   8472/udp          DENY IN   Anywhere
+#
+# Your current k3s setup exposes:
+#
+#   6443  → Kubernetes API server
+#   10250 → kubelet API
+#
+#
+# IMPORTANT:
+# -----------------------------------------------------------------------------
+#
+# These services intentionally listen on:
+#
+#   0.0.0.0
+#
+# instead of:
+#
+#   127.0.0.1
+#
+#
+# WHY?
+# -----------------------------------------------------------------------------
+#
+# Kubernetes components communicate over the network.
+#
+# Even on single-node clusters:
+#
+#   - kubelets
+#   - agents
+#   - kubectl
+#   - control-plane components
+#
+# may need network reachability.
+#
+#
+# So binding ONLY to:
+#
+#   127.0.0.1
+#
+# could break cluster functionality depending on configuration.
+#
+#
+# IMPORTANT DISTINCTION
+# -----------------------------------------------------------------------------
+#
+# LISTENING on:
+#
+#   0.0.0.0
+#
+# does NOT automatically mean:
+#
+#   publicly reachable from internet
+#
+#
+# Firewall rules can still block external access.
+#
+#
+# GOOD SECURITY MODEL
+# -----------------------------------------------------------------------------
+#
+# Kubernetes internal services:
+#
+#   can listen internally
+#
+# while:
+#
+#   UFW blocks internet traffic to them
+#
+#
+# RECOMMENDED FOR YOUR CURRENT SETUP
+# -----------------------------------------------------------------------------
+#
+# Keep:
+#
+#   6443
+#   10250
+#
+# listening normally for k3s internal operation,
+#
+# BUT firewall them from public internet:
+#
+#   sudo ufw deny 6443/tcp
+#   sudo ufw deny 10250/tcp
+#
+#
+# RESULT
+# -----------------------------------------------------------------------------
+#
+# Internal cluster communication:
+#   still works
+#
+#
+# Public internet:
+#   cannot directly access kube APIs
+#
+#
+# WHY THIS MATTERS
+# -----------------------------------------------------------------------------
+#
+# 6443:
+#   Kubernetes control-plane API
+#
+#
+# 10250:
+#   kubelet API
+#
+#
+# These are high-value infrastructure targets.
+#
+# Attackers specifically scan the internet for exposed kube APIs.
+#
+#
+# YOUR CURRENT TEST CONFIRMED THIS
+# -----------------------------------------------------------------------------
+#
+# You successfully reached:
+#
+#   https://YOUR_SERVER_IP:6443
+#
+# and received:
+#
+#   Unauthorized
+#
+#
+# This means:
+#
+#   the API server is publicly reachable right now.
+#
+#
+# Authentication still protects it,
+#
+# BUT:
+#
+#   reducing exposure is better security practice.
+#
+#
+# IDEAL PUBLIC EXPOSURE
+# -----------------------------------------------------------------------------
+#
+# Public:
+#
+#   22   → SSH
+#   80   → HTTP
+#   443  → HTTPS
+#
+#
+# Everything else:
+#
+#   blocked externally by firewall
+#
+# while remaining usable internally by Kubernetes.
+#
+#
+# AUTOMATIC SECURITY UPDATES
+# -----------------------------------------------------------------------------
+#
+# Linux packages receive security patches continuously.
+#
+# If you never patch:
+#
+#   eventually known vulnerabilities accumulate.
+#
+#
+# INSTALL
+# -----------------------------------------------------------------------------
+#
+#   sudo apt install unattended-upgrades -y
+#
+#
+# ENABLE
+# -----------------------------------------------------------------------------
+#
+#   sudo dpkg-reconfigure unattended-upgrades
+#
+#
+# Choose:
+#
+#   Yes
+#
+#
+# WHY THIS MATTERS
+# -----------------------------------------------------------------------------
+#
+# Security vulnerabilities become public constantly.
+#
+# Bots scan for:
+#
+#   outdated kernels
+#   outdated OpenSSH
+#   outdated nginx
+#   outdated container runtimes
+#
+#
+# Automatic updates reduce exposure window.
+#
+#
+# NON-ROOT DEPLOY USER
+# -----------------------------------------------------------------------------
+#
+# Already done correctly.
+#
+#
+# GOOD FLOW
+# -----------------------------------------------------------------------------
+#
+#   ssh deploy@server
+#   sudo -i
+#
+#
+# AVOID
+# -----------------------------------------------------------------------------
+#
+#   ssh root@server
+#
+#
+# WHY
+# -----------------------------------------------------------------------------
+#
+# Separates:
+#
+#   normal operations
+#   from
+#   full administrative access
+#
+#
+# Also reduces accidental destructive commands.
+#
+#
+# REMOVE UNUSED SERVICES / PORTS
+# -----------------------------------------------------------------------------
+#
+# Every listening service increases attack surface.
+#
+#
+# CHECK HOST PORTS
+# -----------------------------------------------------------------------------
+#
+#   sudo ss -tulpn
+#
+#
+# CHECK KUBERNETES SERVICES
+# -----------------------------------------------------------------------------
+#
+#   kubectl get svc -A
+#
+#
+# THINGS THAT SHOULD NEVER BE PUBLIC
+# -----------------------------------------------------------------------------
+#
+# Usually:
+#
+#   Redis
+#   PostgreSQL
+#   MinIO admin
+#   Docker daemon
+#   kubelet APIs
+#   debug/admin ports
+#
+#
+# WHY
+# -----------------------------------------------------------------------------
+#
+# Many infrastructure breaches happen because:
+#
+#   internal services were accidentally internet exposed.
+#
+#
+# YOUR CURRENT SERVICES LOOK GOOD
+# -----------------------------------------------------------------------------
+#
+# Most services are:
+#
+#   ClusterIP
+#
+#
+# Meaning:
+#
+#   internal Kubernetes-only access
+#
+#
+# This is GOOD.
+#
+#
+# KEEP IT THAT WAY
+# -----------------------------------------------------------------------------
+#
+# Avoid changing sensitive services to:
+#
+#   NodePort
+#   LoadBalancer
+#
+#
+# unless absolutely necessary.
+#
+#
+# REMOVE UNUSED PACKAGES
+# -----------------------------------------------------------------------------
+#
+# Less installed software means:
+#
+#   - fewer vulnerabilities
+#   - fewer background services
+#   - smaller attack surface
+#
+#
+# PERIODIC CLEANUP
+# -----------------------------------------------------------------------------
+#
+# Remove unused packages:
+#
+#   sudo apt autoremove
+#
+#
+# LIST INSTALLED SERVICES
+# -----------------------------------------------------------------------------
+#
+#   systemctl list-units --type=service
+#
+#
+# KEEP K3S UPDATED
+# -----------------------------------------------------------------------------
+#
+# Kubernetes components receive security patches too.
+#
+#
+# CHECK VERSION
+# -----------------------------------------------------------------------------
+#
+#   k3s --version
+#
+#
+# UPDATE K3S
+# -----------------------------------------------------------------------------
+#
+# Follow official upgrade docs carefully.
+#
+#
+# WHY THIS MATTERS
+# -----------------------------------------------------------------------------
+#
+# Kubernetes vulnerabilities can become:
+#
+#   cluster compromise
+#   container escape
+#   privilege escalation
+#
+#
+# FINAL SECURITY MENTAL MODEL
+# -----------------------------------------------------------------------------
+#
+# SSH keys:
+#   protect authentication
+#
+#
+# UFW:
+#   protects network exposure
+#
+#
+# fail2ban:
+#   slows automated attacks
+#
+#
+# updates:
+#   patch vulnerabilities
+#
+#
+# minimal services:
+#   reduce attack surface
+#
+#
+# non-root users:
+#   reduce blast radius
+#
+#
+# Kubernetes internal-only services:
+#   reduce infrastructure exposure
+#
+#
+# Security is layers, not one feature.
+#
 # ──────────────────────────────────────────────────────────────────────────────

@@ -39,6 +39,14 @@ sudo ss -tlnp | grep :80
 
 ## Step 3 — Get the Certificate
 
+Certbot uses `--standalone` here: it spins up a temporary HTTP server on port 80
+to serve the ACME challenge file and prove domain ownership to Let's Encrypt.
+This works because port 80 is free at this point.
+
+After the app is deployed, nginx will own port 80 — so standalone would fail on
+renewal. Step 4 patches the renewal config to use webroot instead before that
+happens.
+
 ```bash
 sudo certbot certonly --standalone \
   -d yourdomain.com \
@@ -47,7 +55,41 @@ sudo certbot certonly --standalone \
 
 ---
 
-## Step 4 — Make Certs Accessible to Your Deploy User
+## Step 4 — Switch Renewal to Webroot
+
+Certbot stores renewal settings in `/etc/letsencrypt/renewal/yourdomain.com.conf`.
+It was written with `authenticator = standalone` by the command above. If left
+unchanged, every future `certbot renew` will try to bind port 80 — which will fail
+once nginx is running.
+
+Patch it now, before deploying anything:
+
+```bash
+# Create the directory certbot will write challenge files into.
+# Nginx will serve this path via the /.well-known/acme-challenge/ location block.
+sudo mkdir -p /var/www/certbot
+
+# Switch the authenticator from standalone to webroot.
+sudo sed -i 's/authenticator = standalone/authenticator = webroot/' \
+  /etc/letsencrypt/renewal/yourdomain.com.conf
+
+# Add the webroot path so certbot knows where to write the challenge files.
+sudo sed -i '/authenticator = webroot/a webroot_path = /var/www/certbot' \
+  /etc/letsencrypt/renewal/yourdomain.com.conf
+```
+
+Verify the result:
+
+```bash
+sudo cat /etc/letsencrypt/renewal/yourdomain.com.conf | grep -E 'authenticator|webroot'
+# Expected:
+# authenticator = webroot
+# webroot_path = /var/www/certbot
+```
+
+---
+
+## Step 5 — Make Certs Accessible to Your Deploy User
 
 Certbot saves certs as root. Copy them to your deploy user's home directory:
 
@@ -60,7 +102,7 @@ sudo chown -R deploy:deploy /home/deploy/certs/
 
 ---
 
-## Step 5 — Deploy the App
+## Step 6 — Deploy the App
 
 The TLS secret is in the cluster. Run your normal deploy script:
 
@@ -94,12 +136,41 @@ where the `tls-certs` volume is mounted (see Deployment below).
 
 **Service** — Port 443 added alongside port 80.
 
-**Deployment** — `containerPort: 443` added. A second `volumeMount` added at
-`/etc/nginx/certs` backed by a `tls-certs` volume of type `secret`, pointing at
-`tls-secret` (the k8s secret created automatically by the deploy script after the
-namespace is applied). This is how nginx gets the cert files on disk — Kubernetes
-injects the secret data as files into the container's filesystem at the mount
-path.
+**Deployment** — `containerPort: 443` added. Two volumes added:
+
+- `tls-certs`: a `secret` volume backed by `tls-secret`, mounted at
+  `/etc/nginx/certs`. This is how nginx gets the cert files — Kubernetes injects
+  the secret data as files into the container's filesystem at the mount path.
+
+- `acme-challenge`: a `hostPath` volume pointing at `/var/www/certbot` on the
+  node, mounted at `/var/www/certbot` inside the container. This is how certbot
+  (running on the host) and nginx (running inside the pod) share the same
+  directory. When certbot writes a challenge file to `/var/www/certbot` on the
+  host, nginx serves it from the same path inside the container — no copy needed.
+
+```yaml
+volumeMounts:
+  - name: nginx-config
+    mountPath: /etc/nginx/nginx.conf
+    subPath: nginx.conf
+  - name: tls-certs
+    mountPath: /etc/nginx/certs
+    readOnly: true
+  - name: acme-challenge
+    mountPath: /var/www/certbot
+
+volumes:
+  - name: nginx-config
+    configMap:
+      name: nginx-config
+  - name: tls-certs
+    secret:
+      secretName: tls-secret
+  - name: acme-challenge
+    hostPath:
+      path: /var/www/certbot
+      type: DirectoryOrCreate
+```
 
 ---
 
@@ -265,7 +336,7 @@ required.**
 |---|---|---|
 | `k8s/10-nginx.yaml` ConfigMap | **Yes** | HTTP redirect server block + HTTPS server block with TLS |
 | `k8s/10-nginx.yaml` Service | **Yes** | Add port 443 |
-| `k8s/10-nginx.yaml` Deployment | **Yes** | Add container port 443, mount `tls-secret` volume |
+| `k8s/10-nginx.yaml` Deployment | **Yes** | Add container port 443, mount `tls-secret` and `acme-challenge` volumes |
 | `k8s/01-configmap.yaml` | **Yes** | `DEBUG: "false"` |
 | `deploy-k3s-local.sh` | **Yes** | `API_BASE_URL` and `ALLOWED_ORIGINS` use `https://` |
 | `middleware/security.py` | **Yes** | Exempt health endpoints from HTTPS redirect — k8s probes hit backend directly over HTTP and would loop without this |
@@ -277,9 +348,14 @@ required.**
 
 ---
 
-## Step 7 — Auto-Renewal
+## Step 8 — Auto-Renewal
 
 Certs expire every 90 days. This cron job renews them automatically.
+
+`certbot renew` reads `/etc/letsencrypt/renewal/yourdomain.com.conf` which was
+patched in Step 4 to use webroot. So no flags are needed here — certbot already
+knows to write challenge files to `/var/www/certbot`, which nginx serves via the
+`/.well-known/acme-challenge/` location block. No port conflict, no downtime.
 
 ### Why user context matters here
 
@@ -288,7 +364,8 @@ Three things in this job require elevated privileges:
 - Reading `/etc/letsencrypt/live/` — directory is root-owned, unreadable by other users
 - `cp` from that directory — same reason
 
-`kubectl` commands do **not** need root — they run fine as the deploy user as long as the kubeconfig is reachable.
+`kubectl` commands do **not** need root — they run fine as the deploy user as long
+as the kubeconfig is reachable.
 
 This means you have two options:
 
@@ -309,9 +386,8 @@ sudo crontab -e
 Add this line:
 
 ```cron
-
-0 3 * * * certbot renew --quiet && cp /etc/letsencrypt/live/testproveoportfolio.xyz/fullchain.pem /home/deploy/certs/ && cp /etc/letsencrypt/live/testproveoportfolio.xyz/privkey.pem /home/deploy/certs/ && chown -R deploy:deploy /home/deploy/certs/ && KUBECONFIG=/home/deploy/.kube/config kubectl create secret tls tls-secret --cert=/home/deploy/certs/fullchain.pem --key=/home/deploy/certs/privkey.pem -n portfolio --dry-run=client -o yaml | KUBECONFIG=/home/deploy/.kube/config kubectl apply -f - && KUBECONFIG=/home/deploy/.kube/config kubectl rollout restart deployment nginx -n portfolio
-
+0 3 * * * certbot renew --quiet && cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem /home/deploy/certs/ && cp /etc/letsencrypt/live/yourdomain.com/privkey.pem /home/deploy/certs/ && chown -R deploy:deploy /home/deploy/certs/ && KUBECONFIG=/home/deploy/.kube/config kubectl create secret tls tls-secret --cert=/home/deploy/certs/fullchain.pem --key=/home/deploy/certs/privkey.pem -n portfolio --dry-run=client -o yaml | KUBECONFIG=/home/deploy/.kube/config kubectl apply -f - && KUBECONFIG=/home/deploy/.kube/config kubectl rollout restart deployment nginx -n portfolio
+```
 
 ---
 
@@ -329,8 +405,8 @@ reason.
 Run this as the deploy user to verify the whole chain works:
 
 ```bash
-sudo cp /etc/letsencrypt/live/testproveoportfolio.xyz/fullchain.pem /home/deploy/certs/ && \
-sudo cp /etc/letsencrypt/live/testproveoportfolio.xyz/privkey.pem /home/deploy/certs/ && \
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem /home/deploy/certs/ && \
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem /home/deploy/certs/ && \
 kubectl create secret tls tls-secret \
   --cert=/home/deploy/certs/fullchain.pem \
   --key=/home/deploy/certs/privkey.pem \
