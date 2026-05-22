@@ -133,7 +133,8 @@ kubectl exec -n portfolio deployment/backend -- \
 
 # Temporal Logging Verification
 # Run test workflows to verify all Temporal log sources are emitting JSON.
-# Each workflow targets a different log path:
+
++# Each workflow targets a different log path:
 #   TestSdkLogsWorkflow            -> _SdkJsonFormatter  (temporalio.* Python-side logs)
 #   TestAsyncExceptionWorkflow     -> install_async_exception_handler (asyncio loop handler)
 #   test_sync_exception_standalone -> sys.excepthook (process-level startup crash)
@@ -142,13 +143,13 @@ kubectl exec -n portfolio deployment/backend -- \
 # Step 1 - open a second terminal and tail the worker logs BEFORE triggering:
 kubectl logs -n portfolio deployment/temporal-worker -f
 #
-# Step 2 - in this terminal, trigger all four workflows:
+# Step 2 - in this terminal, trigger all four workflows, sync exceeption separated by desing:
 kubectl exec -n portfolio deployment/backend -- \
   python -m app.temporal.workflows.test_sync_exception_standalone
 
 kubectl exec -n portfolio deployment/backend -- \
   python -m app.temporal.trigger_test_workflows
-#
+
 # What to look for in the worker logs:
 #
 #   SDK log (Python-side):
@@ -165,10 +166,10 @@ kubectl exec -n portfolio deployment/backend -- \
 #   (appears after TestCoreLogsWorkflow times out its activity - wait ~5 seconds)
 #
 # To filter by log type:
-kubectl logs -n portfolio deployment/temporal-worker | grep '"logger":"temporalio'
-kubectl logs -n portfolio deployment/temporal-worker | grep '"event":"uncaught_async'
-kubectl logs -n portfolio deployment/temporal-worker | grep '"event":"uncaught_sync\|thread'
-kubectl logs -n portfolio deployment/temporal-worker | grep '"logger":"temporalio.core'
+kubectl logs -n portfolio deployment/temporal-worker | grep 'temporalio'
+kubectl logs -n portfolio deployment/temporal-worker | grep 'uncaught_async'
+kubectl logs -n portfolio deployment/temporal-worker | grep 'uncaught_sync'
+kubectl logs -n portfolio deployment/temporal-worker | grep 'temporalio.core'
 ```
 
 ### 8. Access
@@ -204,7 +205,7 @@ If k3s is wiped and redeployed (`./cleanup.sh` + `./deploy-k3s-local.sh`), the f
 ### Re-run User Init Manually
 
 ```bash
-kubectl delete job grafana-init-users -n portfolio
+kubectl delete job grafana-init-users -n portfolio --ignore-not-found
 kubectl apply -f k8s/17-monitoring.yaml
 kubectl wait --for=condition=complete job/grafana-init-users -n portfolio --timeout=120s
 kubectl logs -n portfolio -l job-name=grafana-init-users
@@ -222,6 +223,8 @@ ssh -L 3000:localhost:3000 deploy@<droplet-ip>
 # Open: http://localhost:3000
 # Admin: admin / <contents of .grafana-admin-password>
 # Demo:  demo  / <contents of .grafana-demo-password>
+
+# See "Accessing Grafana: Network Deep-Dive" at the end of this file for a full explanation of how this works.
 ```
 
 ---
@@ -946,3 +949,202 @@ Available                4096Mi RAM + 2048Mi swap
 > Image service is the heaviest pod at ~331Mi actual - TensorFlow keeps the
 > model loaded in memory at all times.
 > libretranslate actual varies: ~60Mi cold, ~226Mi with models warm.
+---
+
+## 🔌 Accessing Grafana: Network Deep-Dive
+
+The access workflow chains **two separate tunnels**. Understanding both is useful for debugging and for interviews.
+
+```bash
+# On the droplet:
+kubectl port-forward -n portfolio svc/grafana 3000:3000
+
+# On your laptop:
+ssh -L 3000:localhost:3000 deploy@<droplet-ip>
+
+# Then open: http://localhost:3000
+```
+
+---
+
+### The Big Picture
+
+```
+Your Browser (laptop:3000)
+    │
+    │  SSH tunnel  [-L 3000:localhost:3000]
+    │
+Droplet localhost:3000
+    │
+    │  kubectl port-forward
+    │
+Kubernetes API Server
+    │  (SPDY/WebSocket upgrade over HTTPS)
+    │
+kubelet on the node
+    │
+    │  connect() into pod network namespace
+    │
+Grafana Pod — port 3000
+```
+
+Your laptop never has a direct route to the pod. The pod lives inside a private cluster overlay network (e.g. flannel, Calico). Both tunnels together bridge that gap without opening any firewall ports or binding anything publicly.
+
+---
+
+### Tunnel 1 — `kubectl port-forward`
+
+```bash
+kubectl port-forward -n portfolio svc/grafana 3000:3000
+```
+
+`kubectl` runs as a **userspace process** on the droplet. It:
+
+1. Creates a TCP **server socket**, binds it to `127.0.0.1:3000` (loopback only — not reachable from outside the droplet), and calls `listen()`.
+2. When a connection arrives and `accept()` returns a new file descriptor, `kubectl` opens an **HTTPS connection to the Kubernetes API server** using credentials from `~/.kube/config`.
+3. It sends an HTTP request with an `Upgrade: SPDY/3.1` header (newer versions use WebSocket). The API server accepts the upgrade, turning the connection from request/response into a **persistent bidirectional byte stream**.
+4. Over that stream, `kubectl` opens a **port-forward channel** — a logical sub-stream inside the SPDY/WebSocket session.
+5. The API server forwards the channel to the **kubelet** running on the node.
+6. The kubelet calls `connect()` into the **pod's network namespace** (crossing through the veth pair that the CNI plugin set up), reaching Grafana's process on port 3000.
+
+From this point, bytes written into the droplet's `127.0.0.1:3000` socket travel through all those hops and arrive at the Grafana process — and vice versa. Every hop is **userspace proxying**: no TUN/TAP devices, no kernel tunneling, just processes copying bytes between file descriptors.
+
+**Why loopback only?**
+The default bind address is `127.0.0.1`, not `0.0.0.0`. Nothing on the network can reach it. You *can* override with `--address=0.0.0.0`, but that exposes the port with no authentication. The SSH tunnel is the right way to bring it to your laptop.
+
+#### The low-level socket lifecycle
+
+This is what actually happens inside the kernel when `kubectl port-forward` starts:
+
+```
+1. socket()   → kernel creates a socket object, returns fd=7
+                (just an empty endpoint, not bound to anything yet)
+
+2. bind()     → attaches fd=7 to 127.0.0.1:3000
+                (reserves the address/port combination in the kernel)
+
+3. listen()   → marks fd=7 as passive — "I am a server, I will wait"
+                kernel now maintains two internal queues for this socket:
+                  - SYN queue:     TCP handshakes in progress (SYN received, SYN-ACK sent)
+                  - accept queue:  fully established connections waiting to be claimed
+
+4. accept()   → kubectl blocks here, sleeping, until a client connects
+                when a connection completes the 3-way handshake the kernel
+                moves it from the SYN queue → accept queue
+                accept() dequeues it and returns a NEW fd=8
+                fd=7 keeps listening — fd=8 is the live connection
+
+5. read(fd=8) → kubectl reads bytes the client sent
+                if no bytes yet, the call blocks until data arrives
+                returns however many bytes are currently in the kernel receive buffer
+                (not necessarily all of them — you must loop)
+
+6. write(fd=9)→ kubectl writes those same bytes into fd=9
+                fd=9 is the outbound HTTPS connection to the API server
+                kernel puts them in the send buffer and ACKs when the other
+                side receives them — write() does not mean "delivered"
+```
+
+The critical detail: `kubectl` is doing nothing clever. It is literally:
+
+```
+while true:
+    n, err = read(fd=8, buf)     # block until browser sends something
+    write(fd=9, buf[:n])         # forward it to the API server
+```
+
+and the same loop in the other direction on a second goroutine. This is called **splice proxying** — the process is a dumb byte pipe. It has no idea the bytes are HTTP, or Grafana metrics, or anything else. It just moves them.
+
+**What `listen()` backlog actually means:**
+`listen(fd, backlog=128)` — the `128` is the max size of the accept queue. If connections arrive faster than `accept()` is called to drain them, the kernel silently drops the excess. For port-forward this never matters (one connection at a time), but it's why high-traffic servers call `accept()` in a tight loop or across multiple threads.
+
+**What `read()` actually returns:**
+`read()` returns whatever bytes are sitting in the kernel's TCP receive buffer at that moment — which is not guaranteed to be a complete message. TCP is a **byte stream**, not a message protocol. A single `write("hello")` on one end might arrive as `"hel"` and `"lo"` on two separate `read()` calls. Protocols like HTTP and SPDY solve this by including a `Content-Length` or frame header so the reader knows when a full message has arrived. `kubectl` doesn't need to care about this because it is forwarding raw bytes — the SPDY framing is handled by the Go library underneath, not by kubectl's proxy loop directly.
+
+#### Dummies example
+
+Think of it like a **mail room inside a locked building**.
+
+Grafana is an office on floor 10 — no one from outside can walk in directly. `kubectl port-forward` is a mail room clerk who sits at a desk in the lobby (`127.0.0.1:3000`). The clerk only accepts mail from inside the building (loopback — no external access).
+
+The low-level part is the clerk's actual routine:
+- `socket()` — the clerk is hired but has no desk yet
+- `bind()` — they are assigned desk `127.0.0.1:3000`
+- `listen()` — they sit down and start waiting for mail to arrive
+- `accept()` — a letter arrives; the clerk picks it up (this is blocking — they just sit there until something comes)
+- `read()` — they read however much of the letter has been slid under the door so far (might be half a page — they have to wait for the rest)
+- `write()` — they copy every byte of it into a new envelope and pass it to the next person in the chain
+
+Nobody in the chain reads the letter. They just pass envelopes. The building manager (API server), the floor supervisor (kubelet), and the clerk are all doing the exact same thing: `read` from one fd, `write` to another.
+
+---
+
+### Tunnel 2 — `ssh -L`
+
+```bash
+ssh -L 3000:localhost:3000 deploy@<droplet-ip>
+```
+
+The flag syntax is: `-L <local-port>:<destination-host>:<destination-port>`
+
+This tells the SSH client: **"Listen on my laptop's port 3000. For every connection that arrives, ask the SSH server on the droplet to open a TCP connection to its own `localhost:3000`, and splice the two byte streams together."**
+
+**On your laptop**, the SSH client:
+1. Creates a TCP server socket bound to `127.0.0.1:3000` and calls `listen()`.
+2. When your browser calls `connect()`, `accept()` returns a new connected socket (file descriptor).
+3. SSH reads bytes from that fd, **encrypts them**, and writes them into the existing SSH TCP session to the droplet.
+
+**On the droplet**, `sshd`:
+1. Receives the encrypted bytes, decrypts them.
+2. Sees a **`direct-tcpip` channel-open request** (this is SSH's internal channel type for local port forwarding).
+3. Calls `connect()` to `127.0.0.1:3000` on the droplet — exactly where `kubectl port-forward` is listening.
+4. Splices the streams: bytes from your laptop flow into that socket; bytes back get encrypted and sent to your laptop.
+
+**The SSH multiplexing layer:**
+SSH runs over a single TCP connection between your laptop and the droplet. Inside that TCP session, SSH uses its own binary packet protocol with independent **channels**, each with their own flow control and window sizing — separate from TCP's own. Local port forwarding is just one channel type. You could have multiple `-L` tunnels, a shell session, and SFTP all multiplexed over the same single TCP connection simultaneously.
+
+---
+
+### Full Packet Journey
+
+When you open `http://localhost:3000` in your browser:
+
+```
+1.  Browser: connect() → laptop 127.0.0.1:3000
+2.  SSH client: accept() the connection
+3.  SSH client: send channel-open (direct-tcpip) through encrypted TCP to droplet
+4.  sshd on droplet: receive and decrypt
+5.  sshd: connect() → droplet 127.0.0.1:3000
+6.  kubectl port-forward: accept() that connection
+7.  kubectl: send SPDY/WebSocket port-forward frame to Kubernetes API server (HTTPS)
+8.  API server: forward to kubelet
+9.  kubelet: connect() into pod network namespace → Grafana port 3000
+10. Grafana: accept() — sees a normal inbound TCP connection
+
+Response bytes travel back through all 9 hops in reverse,
+each layer re-encrypting or re-framing as needed.
+```
+
+---
+
+### Why This Architecture
+
+| Problem | How it's solved |
+|---|---|
+| Grafana pod has no public IP | Pod lives in a private cluster CIDR; kubectl tunnels through the already-authenticated API server |
+| Droplet's port-forward binds only to loopback | SSH `-L` forwards it securely to your laptop over the existing SSH connection |
+| No new firewall rules needed | Everything rides port 22 (SSH); no new ingress required |
+| No credentials exposed on the wire | SSH encrypts the tunnel end-to-end; kubectl uses mTLS to the API server |
+
+---
+
+### Key Concepts Summarised
+
+- **`listen()` / `accept()` / `connect()`** — both tunnels create server sockets that block on `accept()`, then splice the resulting fd with an outbound `connect()` fd. This is the entire mechanism.
+- **File descriptors** — `accept()` and `connect()` both return fds. The SSH and kubectl processes are doing fd-to-fd byte copying (splicing) in userspace.
+- **SPDY/WebSocket upgrade** — converts a standard HTTP request/response into a raw stream without opening a new TCP connection. The API server reuses the upgraded connection.
+- **SSH channels** — the `direct-tcpip` channel type is how SSH implements local port forwarding. Multiple port-forwards share one TCP session via channel multiplexing.
+- **Network namespaces** — each pod gets its own network namespace with its own loopback and virtual ethernet interface. The kubelet's `connect()` crosses into it via the veth pair created by the CNI plugin.
+- **Userspace proxying** — no kernel-level tunneling anywhere in this chain. Every hop is a process reading from one socket and writing to another.
+
+---
