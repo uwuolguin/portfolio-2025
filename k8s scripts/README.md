@@ -951,6 +951,795 @@ Available                4096Mi RAM + 2048Mi swap
 > libretranslate actual varies: ~60Mi cold, ~226Mi with models warm.
 ---
 
+## 🌐 Linux Networking Fundamentals — Read This First
+
+Everything in the Grafana tunneling section flows from these primitives.
+If the port-forward explanation feels like alien text, start here.
+
+// ─── POINTERS, BUFFERS, AND MEMORY — FROM HARDWARE TO USERSPACE ──────────────
+//
+// AT THE HARDWARE LEVEL
+//
+// RAM is a giant array of bytes. Every byte has a physical address — a number
+// that corresponds to a real location on the physical RAM chip:
+//
+//     address 0x00000000 → byte 1 on the chip
+//     address 0x00000001 → byte 2 on the chip
+//     address 0x7fff1234 → byte at that physical location
+//     ...billions more
+//
+// The CPU has a special register called the memory bus. To read or write memory
+// the CPU puts an address on the bus, the RAM chip responds with the byte at
+// that address. That's it. Hardware is just: address in → byte out.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// WHAT A POINTER ACTUALLY IS
+//
+// A pointer is just a variable that holds a memory address — a number.
+// Nothing magic. Just a number that means "look at this location in RAM":
+//
+//     int x = 42;           // allocate 4 bytes somewhere in RAM, store 42 there
+//     int *p = &x;          // p holds the ADDRESS of x, e.g. 0x7fff1234
+//                           // p itself is just a number: 0x7fff1234
+//
+//     *p                    // "go to address 0x7fff1234, read the bytes there"
+//                           // returns 42
+//
+//     *p = 99;              // "go to address 0x7fff1234, write 99 there"
+//                           // x is now 99
+//
+// The * operator means "follow this address and read/write what's there".
+// The & operator means "give me the address of this variable".
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// WHAT A BUFFER IS
+//
+// A buffer is just a contiguous region of memory — multiple bytes in a row —
+// used as a temporary holding area for data in transit:
+//
+//     char buffer[4096];    // allocate 4096 bytes in a row on the stack
+//                           // buffer is a pointer to the first byte
+//                           // buffer == &buffer[0] == some address e.g. 0x7fff1234
+//
+//     buffer[0]             // byte at address 0x7fff1234
+//     buffer[1]             // byte at address 0x7fff1235
+//     buffer[4095]          // byte at address 0x7fff2233
+//
+// "Buffer" is just a human word for "a chunk of RAM I'm using to hold bytes
+// temporarily while I move them from one place to another". The hardware has
+// no concept of a buffer — it just sees addresses being read and written.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// THE ABSTRACTION LAYERS — same physical RAM, different views
+//
+// Physical RAM (hardware):
+//     one flat array of bytes
+//     every byte has a real physical address
+//     CPU accesses it directly via the memory bus
+//     no concept of processes, users, or permissions
+//     just: address in → byte out
+//
+// Kernel space (kernel's view):
+//     kernel has full access to all physical RAM
+//     kernel manages virtual memory — maps virtual addresses to physical ones
+//     kernel has its own buffers:
+//         TCP receive buffer   ← bytes that arrived from the network
+//         TCP send buffer      ← bytes waiting to be sent
+//         page cache           ← file contents(also bytes) cached in RAM
+//     these are just regions of physical RAM the kernel tracks internally
+//     the kernel writes to them directly using physical addresses
+//
+// Userspace (your process's view):
+//     your process CANNOT access physical addresses directly
+//     the CPU's MMU (Memory Management Unit) intercepts every memory access
+//     and translates virtual address → physical address via the page table
+//
+//     your process thinks it owns address 0x7fff1234
+//     the MMU translates that to physical address 0x2a4f8800 behind the scenes
+//     two processes can both use address 0x7fff1234
+//     they map to different physical locations — complete isolation
+//
+//     your buffer (char buffer[4096]) is:
+//         from your process's view:  bytes at virtual address 0x7fff1234
+//         from the kernel's view:    bytes at physical address 0x2a4f8800
+//         from the hardware's view:  transistors on the RAM chip at row/col 0x2a4f8800
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// WHAT HAPPENS DURING read(fd, buffer, 4096)
+//
+//     read(fd=8, buffer, 4096)
+//
+//     your process:
+//         buffer is at virtual address 0x7fff1234
+//         syscall: "kernel, copy bytes from fd=8 into 0x7fff1234, up to 4096"
+//         process blocks — parks the goroutine/thread, yields the CPU
+//
+//     kernel:
+//         looks up fd=8 in your process's fd table → finds the TCP socket
+//         checks TCP receive buffer — are bytes waiting?
+//             no  → park the process, come back when NIC interrupt fires
+//             yes → translate your virtual address 0x7fff1234 → physical 0x2a4f8800
+//                   copy bytes from kernel TCP buffer → physical address 0x2a4f8800
+//                   this is a direct memory write by the kernel
+//                   returns number of bytes copied
+//
+//     your process resumes:
+//         buffer[0..n] now contains the bytes the kernel wrote
+//         from your perspective: data appeared in your buffer
+//         what actually happened: kernel wrote to a physical RAM address
+//         that your virtual address maps to
+//
+// The buffer you declared in C is not an abstraction of anything —
+// it IS physical RAM, just accessed through the virtual address translation
+// layer the MMU provides. The bytes the kernel copies into it are real
+// electrons stored in real transistors on a real chip.
+//
+// Every layer above C (Go slice, Python bytes object, Java ByteBuffer)
+// is a wrapper around this same mechanism. Somewhere underneath there is
+// always a raw memory address the kernel writes bytes into.
+// That address is always, ultimately, a location on a physical RAM chip.
+// ─────────────────────────────────────────────────────────────────────────────
+
+---
+
+### 1. Everything is a File Descriptor
+
+You already know everything is a file in Linux. A file descriptor (fd)
+is just an integer the kernel gives back when you open anything:
+open("/var/log/syslog")  → fd=3   ← a file on disk
+socket()                 → fd=4   ← a network socket
+accept()                 → fd=5   ← an incoming connection
+pipe()                   → fd=6   ← a pipe between processes
+
+From that point you use the exact same syscalls on all of them:
+read(fd, buffer)    ← get bytes from whatever fd points to
+write(fd, buffer)   ← send bytes to whatever fd points to
+close(fd)           ← done with it
+
+The kernel hides what's underneath. Your process doesn't know or care
+if fd=5 is a file, a socket, or a pipe. It just reads and writes bytes.
+
+The key thing to understand first is what existed before file descriptors, because that's what makes the design genius obvious.
+
+Before Unix — the old world
+Imagine you're writing a program in the 1960s that needs to read data from three different places:
+reading from a file on disk:
+    FILE *f = fopen("data.txt", "r");
+    fread(buffer, size, count, f);
+    fclose(f);
+
+reading from a tape drive (hardware device):
+    tape_open("/dev/tape0");
+    tape_read(buffer, size);
+    tape_close();
+
+reading from another program through a pipe:
+    pipe_create(&p);
+    pipe_read(&p, buffer, size);
+    pipe_destroy(&p);
+
+Three completely different APIs. Three different sets of functions to learn. If you wanted to write a program that could read from any of those sources, you had to write three separate code paths and decide at compile time which one to use.
+Worse — you couldn't compose programs. You couldn't take the output of program A and pipe it into program B without explicitly writing code to do that. Every combination required new glue code.
+
+The Unix insight — everything is bytes
+Ken Thompson looked at all these resources and noticed one thing: they all fundamentally produce or consume bytes. A file is bytes. A tape drive produces bytes. A pipe carries bytes. A network socket sends and receives bytes.
+So why not give them all the same interface?
+The kernel maintains one thing per open resource — a file descriptor, which is just an integer that indexes into a table:
+fd table for your process:
+    fd=0 → points to: keyboard
+    fd=1 → points to: terminal screen
+    fd=2 → points to: terminal screen
+    fd=3 → points to: data.txt on disk
+    fd=4 → points to: /dev/tape0 hardware device
+    fd=5 → points to: one end of a pipe
+    fd=6 → points to: TCP socket to 1.2.3.4:80
+And now your entire program becomes:
+c// read 100 bytes from whatever fd=3 points to
+read(3, buffer, 100);
+
+// write those bytes to whatever fd=1 points to
+write(1, buffer, 100);
+The same two lines work regardless of whether fd=3 is a file, a tape drive, a pipe, or a network socket. Your program doesn't know and doesn't care. The kernel translates the read() call into whatever the underlying hardware requires.
+
+A concrete example — the pipe
+You type this in your terminal:
+bashcat /var/log/auth.log | grep "Failed" | wc -l
+Three programs. None of them know about each other. Here is exactly what the shell does:
+Step 1 — shell creates two pipes:
+pipe 1:  [read_end_fd=3, write_end_fd=4]   ← between cat and grep
+pipe 2:  [read_end_fd=5, write_end_fd=6]   ← between grep and wc
+A pipe is just a kernel buffer with two ends. Write to one end, read from the other. That's it.
+Step 2 — shell forks three child processes. Before exec'ing each one, it manipulates their fd tables:
+cat's fd table after shell manipulation:
+    fd=0 → keyboard (unchanged)
+    fd=1 → write end of pipe 1 (fd=4)   ← stdout now goes into pipe
+    fd=2 → terminal (unchanged)
+
+grep's fd table after shell manipulation:
+    fd=0 → read end of pipe 1 (fd=3)    ← stdin now comes from pipe
+    fd=1 → write end of pipe 2 (fd=6)   ← stdout goes into second pipe
+    fd=2 → terminal (unchanged)
+
+wc's fd table after shell manipulation:
+    fd=0 → read end of pipe 2 (fd=5)    ← stdin comes from second pipe
+    fd=1 → terminal (unchanged)          ← stdout goes to your screen
+    fd=2 → terminal (unchanged)
+Step 3 — shell execs each program. Now the magic:
+cat thinks:
+    "I will read /var/log/auth.log and write to stdout (fd=1)"
+    cat writes 50,000 lines to fd=1
+    cat has no idea fd=1 is a pipe, not a terminal
+
+grep thinks:
+    "I will read from stdin (fd=0) and write matches to stdout (fd=1)"
+    grep reads lines from fd=0
+    grep has no idea fd=0 is a pipe coming from cat
+    grep writes matching lines to fd=1
+    grep has no idea fd=1 is a pipe going to wc
+
+wc thinks:
+    "I will count lines from stdin (fd=0) and print the number"
+    wc reads from fd=0
+    wc has no idea it's reading grep's output
+    wc prints "37280" to fd=1 which goes to your terminal
+None of these programs were written to work with each other.
+cat was written in 1971. grep was written in 1973. wc was written separately. They compose perfectly because they all speak the same language — read from fd=0, write to fd=1, that's it.
+This is the entire unix philosophy. Write programs that read stdin and write stdout. The shell wires them together however you want by manipulating fds before exec. The programs never know.
+
+How this connects directly to kubectl port-forward and nginx
+kubectl port-forward does exactly the same thing but with sockets instead of pipes:
+kubectl has two fds open:
+    fd=8 → TCP socket: connection FROM your browser
+    fd=9 → TCP socket: connection TO the Kubernetes API server
+
+kubectl does:
+    while true:
+        n = read(fd=8, buf)    ← read from browser, same as reading stdin
+        write(fd=9, buf[:n])   ← write to API server, same as writing stdout
+kubectl is grep. fd=8 is its stdin. fd=9 is its stdout. It has no idea what the bytes mean. It just moves them from one fd to another — exactly like grep moves lines from its stdin to its stdout.
+nginx does the same thing between fd pointing to a client connection and fd pointing to your FastAPI backend.
+sshd does the same thing between fd pointing to your laptop's SSH connection and fd pointing to kubectl's listening socket.
+The entire internet is programs doing read(fd_in) → write(fd_out) on sockets. The file descriptor abstraction from 1971 is the primitive underneath all of it.
+
+**The kernel's file descriptor table:**
+
+Every process has its own fd table — a simple array the kernel maintains:
+process fd table (per process):
+index → pointer to kernel file object
+fd=0  → kernel file object → /dev/tty   (your terminal)
+fd=1  → kernel file object → /dev/tty   (same terminal)
+fd=2  → kernel file object → /dev/tty   (same terminal)
+fd=3  → kernel file object → /var/log/syslog
+fd=4  → kernel file object → socket (TCP connection to 1.2.3.4:80)
+fd=5  → kernel file object → socket (another connection)
+
+The fd number (3, 4, 5) is just an index into this array.
+The kernel file object behind it is where the real state lives —
+file position, socket buffers, connection state, etc.
+
+When you fork(), the child gets a copy of the fd table —
+same indices, same kernel objects. That's how parent and child
+share file descriptors across fork/exec.
+
+**The routing table — how the kernel decides where packets go:**
+
+When your process does `connect(fd, 8.8.8.8:53)` the kernel
+doesn't just send the packet blindly — it consults the routing table
+to decide which interface to use:
+ip route show
+default via 10.0.0.1 dev eth0          ← anything not matched below: use eth0, gateway 10.0.0.1
+10.0.0.0/8 dev eth0 proto kernel       ← traffic to 10.x.x.x: use eth0 directly (same network)
+127.0.0.0/8 dev lo proto kernel        ← traffic to 127.x.x.x: use loopback, never leave machine
+10.42.0.0/16 dev flannel.1             ← traffic to pod network: use flannel tunnel interface
+
+The kernel reads these top to bottom, most specific match wins:
+connect to 8.8.8.8
+→ check: is 8.8.8.8 in 127.0.0.0/8?  no
+→ check: is 8.8.8.8 in 10.0.0.0/8?   no
+→ check: is 8.8.8.8 in 10.42.0.0/16? no
+→ default: use eth0, send to gateway 10.0.0.1
+connect to 127.0.0.1
+→ check: is 127.0.0.1 in 127.0.0.0/8? yes
+→ use lo interface
+→ packet never leaves the machine
+→ kernel loops it back internally
+connect to 10.42.0.17 (a pod IP)
+→ check: is 10.42.0.17 in 10.42.0.0/16? yes
+→ use flannel.1 interface
+→ flannel encapsulates packet and sends to the node that owns that pod
+
+This is why kubectl port-forward binding to 127.0.0.1 is unreachable
+from outside — traffic to 127.x.x.x hits the lo route,
+never reaches eth0, never leaves the machine.
+Not a firewall rule. Just routing.
+
+**The full picture — fd + routing + syscalls together:**
+your process
+write(fd=4, "GET / HTTP/1.1")    ← write to socket fd
+│
+▼
+kernel TCP layer
+│  buffers the bytes
+│  wraps in TCP segment (source port, dest port, seq number)
+│  wraps in IP packet   (source IP, dest IP)
+│  consults routing table → which interface?
+│
+▼
+network interface (eth0 or lo)
+│
+├── lo:   kernel loops packet back, delivers to listening process
+│         no hardware involved
+│
+└── eth0: kernel hands to NIC driver
+NIC driver sends electrical signal on the wire
+packet travels to destination
+
+Every layer is invisible to your process.
+You called write(). The kernel handled everything else.
+That's the unix contract — simple interface, complex implementation hidden underneath.
+
+---
+
+### 2. What a Socket Actually Is
+
+A socket is a kernel object representing one end of a network connection.
+When you call `socket()` the kernel creates it and returns an fd.
+At this point it's just an empty endpoint — no address, no connection, nothing.
+socket()
+→ kernel creates socket object in memory
+→ returns fd=7
+→ fd=7 exists but is not bound to any address yet
+→ nothing can reach it
+
+Think of it as a telephone that exists but has no phone number assigned yet.
+
+---
+
+### 3. The Server Lifecycle — socket, bind, listen, accept
+
+A server goes through four steps:
+
+**socket()** — create the endpoint:
+fd=7 = socket()
+telephone exists, no number yet
+
+**bind()** — assign an address and port:
+bind(fd=7, 127.0.0.1:3000)
+telephone now has number 3000
+only reachable on 127.0.0.1 (loopback)
+
+**listen()** — declare "I am a server, start accepting connections":
+listen(fd=7, backlog=128)
+telephone is now ringing-enabled
+kernel creates two internal queues:
+SYN queue    ← connections mid-handshake
+               (SYN received, SYN-ACK sent, waiting for final ACK)
+
+accept queue ← fully established connections
+               waiting for your process to claim them
+backlog=128 means accept queue holds max 128 connections
+if you don't drain it fast enough kernel drops new ones silently
+
+**accept()** — claim an incoming connection:
+fd=8 = accept(fd=7)
+fd=7 keeps listening forever  ← the "phone number", always open
+fd=8 is the live conversation ← this specific call
+your process blocks on accept() until someone connects
+when they do, kernel returns fd=8
+now you have two fds:
+fd=7 → still listening for more connections
+fd=8 → the live connection to this specific client
+
+---
+
+### 4. The Client Lifecycle — socket, connect
+
+A client only needs socket() and connect():
+fd=9 = socket()                ← create endpoint
+connect(fd=9, 1.2.3.4:80)     ← establish connection to server
+kernel performs the TCP 3-way handshake:
+client → SYN        → server
+client ← SYN-ACK    ← server
+client → ACK        → server
+after ACK, connect() returns
+fd=9 is now a live connection to the server
+
+---
+
+### 5. TCP is a Byte Stream, Not Messages
+
+This is the most misunderstood thing about networking.
+
+TCP does not have messages. It has a continuous stream of bytes —
+like water through a pipe. You cannot tell where one "message" ends
+and the next begins just from TCP alone.
+sender does:
+write(fd, "hello world")   ← writes 11 bytes
+receiver might see:
+read(fd, buf)  → "hello"       ← 5 bytes arrived first
+read(fd, buf)  → " wor"        ← 4 bytes
+read(fd, buf)  → "ld"          ← 2 bytes
+
+TCP can split or batch bytes however it wants for efficiency.
+This is why every protocol built on TCP includes a length field or delimiter:
+HTTP:           Content-Length: 1234   ← read exactly 1234 bytes
+HTTP chunked:   chunk size header      ← read N bytes, then next chunk
+SPDY:           frame header + length  ← read header, then that many bytes
+SSH:            packet length field    ← same pattern
+
+Without this, you would never know if you got a complete response or half of one.
+
+---
+
+### 6. IP Addresses and Ports
+
+An IP address identifies a machine. A port identifies a process on that machine.
+1.2.3.4:80
+│       │
+│       └── port 80 → nginx owns this port
+└────────── 1.2.3.4 → this specific machine
+
+Special addresses:
+127.0.0.1   → loopback — the machine talking to itself
+traffic never leaves the machine
+never hits the NIC, never hits the network
+kernel handles it entirely in memory
+0.0.0.0     → all interfaces — listen on every network interface
+your machine has:
+lo      127.0.0.1   (loopback)
+eth0    10.0.1.5    (real network)
+binding to 0.0.0.0:3000 accepts connections on both
+127.0.0.1:3000 AND 10.0.1.5:3000 simultaneously
+
+This is why kubectl port-forward binds to 127.0.0.1 not 0.0.0.0 —
+it is intentionally only reachable from the same machine.
+
+---
+
+### 7. Network Interfaces — the Doors to the Network
+
+Your machine has network interfaces — each one is a door to a different network:
+lo      → loopback interface
+127.0.0.0/8 range
+packets to 127.x.x.x never leave the machine
+kernel loops them back internally, no NIC involved
+eth0    → real network interface
+connected to the actual NIC hardware
+packets go: eth0 → NIC driver → physical cable → internet
+
+When you send a packet the kernel checks its routing table:
+destination 127.0.0.1  → use lo  (never leaves machine)
+destination 8.8.8.8    → use eth0, via gateway 10.0.0.1
+ip route show          ← see the routing table yourself
+
+---
+
+### 8. Full TCP Connection Journey
+
+What actually happens when your browser connects to a server:
+your laptop
+browser: connect(fd, 1.2.3.4:443)
+kernel builds TCP SYN packet:
+source IP:   192.168.1.5   (your laptop's IP)
+source port: 54321         (random ephemeral, kernel picks it)
+dest IP:     1.2.3.4
+dest port:   443
+kernel checks routing table → use eth0
+kernel hands packet to NIC driver
+NIC sends packet onto the wire
+internet
+packet hops through routers
+each router reads dest IP, forwards toward 1.2.3.4
+server
+NIC receives packet
+kernel reads dest port: 443 → finds nginx owns it
+nginx's accept() unblocks, returns new fd
+nginx sends SYN-ACK
+your laptop
+receives SYN-ACK → sends ACK
+connect() returns — connection established
+both sides now have a live fd they can read/write
+
+---
+
+### 9. The Splice Proxy Pattern — the Core of Everything
+
+Once you have two file descriptors open, proxying between them is trivial:
+fd=8  ← connection from browser
+fd=9  ← connection to backend
+goroutine 1 (browser → backend):
+while true:
+n = read(fd=8, buf)    ← block until browser sends bytes
+write(fd=9, buf[:n])   ← forward those bytes to backend
+goroutine 2 (backend → browser):
+while true:
+n = read(fd=9, buf)    ← block until backend sends bytes
+write(fd=8, buf[:n])   ← forward those bytes to browser
+
+That is a complete proxy in 6 lines. nginx, kubectl port-forward, sshd —
+they all do this exact loop. The process has no idea what the bytes mean.
+It just moves them from one fd to another.
+
+This is called splice proxying. The proxy is dumb by design —
+it does not parse HTTP, does not understand Grafana responses.
+It just copies bytes. This is why "userspace proxying" means
+nothing special — just processes doing read() → write() loops.
+
+---
+
+### 10. What SSH Actually Is
+
+SSH is a protocol running over one TCP connection that provides:
+encryption      ← all bytes encrypted, nobody can read them in transit
+authentication  ← prove identity via private key
+multiplexing    ← multiple independent channels inside one TCP connection
+
+The multiplexing part is key. Inside one TCP connection on port 22:
+channel 1  ← your shell session
+channel 2  ← a port forward tunnel (-L)
+channel 3  ← another port forward tunnel
+channel 4  ← SFTP file transfer
+
+All simultaneously over one TCP connection.
+SSH has its own framing (like HTTP Content-Length) so both sides
+know which channel each packet belongs to.
+
+---
+
+### 11. SSH Local Port Forwarding — the -L Flag
+
+```bash
+ssh -L 3000:localhost:3000 deploy@1.2.3.4
+```
+
+Syntax: `-L <local-port>:<remote-host>:<remote-port>`
+
+"Listen on my laptop's port 3000. For every connection that arrives,
+ask the SSH server on the droplet to connect to its own localhost:3000,
+then splice the two streams together."
+on your laptop:
+SSH client: socket() + bind(127.0.0.1:3000) + listen()
+SSH client: connect() to 1.2.3.4:22
+when browser connects to laptop localhost:3000:
+SSH client: accept() → fd=browser
+SSH client sends through encrypted session:
+"open a direct-tcpip channel, connect to localhost:3000 on your end"
+on the droplet:
+sshd receives the channel-open request
+sshd: connect(fd=remote, 127.0.0.1:3000)
+both sides do the splice loop:
+laptop SSH:   read(browser_fd) → encrypt → write(ssh_fd)
+droplet sshd: read(ssh_fd) → decrypt → write(kubectl_fd)
+
+Result — a pipe across machines:
+browser ←→ SSH tunnel (encrypted) ←→ sshd ←→ kubectl port-forward
+
+---
+
+### 12. Network Namespaces — How Pods Get Isolation
+
+A network namespace gives each pod its own isolated network stack:
+its own loopback      127.0.0.1 means something different inside each pod
+its own eth0          10.42.0.17 or whatever the pod IP is
+its own routing table
+its own port space    two pods can both bind port 3000, no conflict
+its own firewall rules
+
+Host machine and each pod live in separate namespaces:
+host namespace:
+lo      127.0.0.1
+eth0    1.2.3.4         ← the droplet's real public IP
+grafana pod namespace:
+lo      127.0.0.1       ← completely separate loopback
+eth0    10.42.0.17      ← virtual interface, private cluster IP only
+
+Processes inside the pod see their namespace only.
+They think they are on their own machine.
+
+---
+
+### 13. veth Pairs — How Pods Connect to the Host
+
+A veth pair is two virtual interfaces connected like a pipe.
+Bytes written to one come out the other:
+host namespace              pod namespace
+veth0    ←──────────→    eth0
+(host end)               (pod end, what the pod calls its network card)
+kubelet writes to veth0  → bytes appear at pod's eth0
+pod writes to its eth0   → bytes appear at host's veth0
+
+This is how traffic crosses namespace boundaries.
+The kubelet connects to a pod by writing to its end of the veth pair.
+
+---
+
+## 🔌 Accessing Grafana: Network Deep-Dive
+
+The access workflow chains **two separate tunnels**. Understanding both is useful for debugging and for interviews.
+
+```bash
+# On the droplet:
+kubectl port-forward -n portfolio svc/grafana 3000:3000
+
+# On your laptop:
+ssh -L 3000:localhost:3000 deploy@<droplet-ip>
+
+# Then open: http://localhost:3000
+```
+
+---
+
+### The Big Picture
+Your Browser (laptop:3000)
+│
+│  SSH tunnel  [-L 3000:localhost:3000]
+│
+Droplet localhost:3000
+│
+│  kubectl port-forward
+│
+Kubernetes API Server
+│  (SPDY/WebSocket upgrade over HTTPS)
+│
+kubelet on the node
+│
+│  connect() into pod network namespace
+│
+Grafana Pod — port 3000
+
+Your laptop never has a direct route to the pod. The pod lives inside a private cluster overlay network (e.g. flannel, Calico). Both tunnels together bridge that gap without opening any firewall ports or binding anything publicly.
+
+---
+
+### Tunnel 1 — `kubectl port-forward`
+
+```bash
+kubectl port-forward -n portfolio svc/grafana 3000:3000
+```
+
+`kubectl` runs as a **userspace process** on the droplet. It:
+
+1. Creates a TCP **server socket**, binds it to `127.0.0.1:3000` (loopback only — not reachable from outside the droplet), and calls `listen()`.
+2. When a connection arrives and `accept()` returns a new file descriptor, `kubectl` opens an **HTTPS connection to the Kubernetes API server** using credentials from `~/.kube/config`.
+3. It sends an HTTP request with an `Upgrade: SPDY/3.1` header (newer versions use WebSocket). The API server accepts the upgrade, turning the connection from request/response into a **persistent bidirectional byte stream**.
+4. Over that stream, `kubectl` opens a **port-forward channel** — a logical sub-stream inside the SPDY/WebSocket session.
+5. The API server forwards the channel to the **kubelet** running on the node.
+6. The kubelet calls `connect()` into the **pod's network namespace** (crossing through the veth pair that the CNI plugin set up), reaching Grafana's process on port 3000.
+
+From this point, bytes written into the droplet's `127.0.0.1:3000` socket travel through all those hops and arrive at the Grafana process — and vice versa. Every hop is **userspace proxying**: no TUN/TAP devices, no kernel tunneling, just processes copying bytes between file descriptors.
+
+**Why loopback only?**
+The default bind address is `127.0.0.1`, not `0.0.0.0`. Nothing on the network can reach it. You *can* override with `--address=0.0.0.0`, but that exposes the port with no authentication. The SSH tunnel is the right way to bring it to your laptop.
+
+#### The low-level socket lifecycle
+
+This is what actually happens inside the kernel when `kubectl port-forward` starts:
+
+socket()   → kernel creates a socket object, returns fd=7
+(just an empty endpoint, not bound to anything yet)
+bind()     → attaches fd=7 to 127.0.0.1:3000
+(reserves the address/port combination in the kernel)
+listen()   → marks fd=7 as passive — "I am a server, I will wait"
+kernel now maintains two internal queues for this socket:
+- SYN queue:     TCP handshakes in progress (SYN received, SYN-ACK sent)
+- accept queue:  fully established connections waiting to be claimed
+accept()   → kubectl blocks here, sleeping, until a client connects
+when a connection completes the 3-way handshake the kernel
+moves it from the SYN queue → accept queue
+accept() dequeues it and returns a NEW fd=8
+fd=7 keeps listening — fd=8 is the live connection
+read(fd=8) → kubectl reads bytes the client sent
+if no bytes yet, the call blocks until data arrives
+returns however many bytes are currently in the kernel receive buffer
+(not necessarily all of them — you must loop)
+write(fd=9)→ kubectl writes those same bytes into fd=9
+fd=9 is the outbound HTTPS connection to the API server
+kernel puts them in the send buffer and ACKs when the other
+side receives them — write() does not mean "delivered"
+
+
+The critical detail: `kubectl` is doing nothing clever. It is literally:
+while true:
+n, err = read(fd=8, buf)     # block until browser sends something
+write(fd=9, buf[:n])         # forward it to the API server
+
+and the same loop in the other direction on a second goroutine. This is called **splice proxying** — the process is a dumb byte pipe. It has no idea the bytes are HTTP, or Grafana metrics, or anything else. It just moves them.
+
+**What `listen()` backlog actually means:**
+`listen(fd, backlog=128)` — the `128` is the max size of the accept queue. If connections arrive faster than `accept()` is called to drain them, the kernel silently drops the excess. For port-forward this never matters (one connection at a time), but it's why high-traffic servers call `accept()` in a tight loop or across multiple threads.
+
+**What `read()` actually returns:**
+`read()` returns whatever bytes are sitting in the kernel's TCP receive buffer at that moment — which is not guaranteed to be a complete message. TCP is a **byte stream**, not a message protocol. A single `write("hello")` on one end might arrive as `"hel"` and `"lo"` on two separate `read()` calls. Protocols like HTTP and SPDY solve this by including a `Content-Length` or frame header so the reader knows when a full message has arrived. `kubectl` doesn't need to care about this because it is forwarding raw bytes — the SPDY framing is handled by the Go library underneath, not by kubectl's proxy loop directly.
+
+#### Dummies example
+
+Think of it like a **mail room inside a locked building**.
+
+Grafana is an office on floor 10 — no one from outside can walk in directly. `kubectl port-forward` is a mail room clerk who sits at a desk in the lobby (`127.0.0.1:3000`). The clerk only accepts mail from inside the building (loopback — no external access).
+
+The low-level part is the clerk's actual routine:
+- `socket()` — the clerk is hired but has no desk yet
+- `bind()` — they are assigned desk `127.0.0.1:3000`
+- `listen()` — they sit down and start waiting for mail to arrive
+- `accept()` — a letter arrives; the clerk picks it up (this is blocking — they just sit there until something comes)
+- `read()` — they read however much of the letter has been slid under the door so far (might be half a page — they have to wait for the rest)
+- `write()` — they copy every byte of it into a new envelope and pass it to the next person in the chain
+
+Nobody in the chain reads the letter. They just pass envelopes. The building manager (API server), the floor supervisor (kubelet), and the clerk are all doing the exact same thing: `read` from one fd, `write` to another.
+
+---
+
+### Tunnel 2 — `ssh -L`
+
+```bash
+ssh -L 3000:localhost:3000 deploy@<droplet-ip>
+```
+
+The flag syntax is: `-L <local-port>:<destination-host>:<destination-port>`
+
+This tells the SSH client: **"Listen on my laptop's port 3000. For every connection that arrives, ask the SSH server on the droplet to open a TCP connection to its own `localhost:3000`, and splice the two byte streams together."**
+
+**On your laptop**, the SSH client:
+1. Creates a TCP server socket bound to `127.0.0.1:3000` and calls `listen()`.
+2. When your browser calls `connect()`, `accept()` returns a new connected socket (file descriptor).
+3. SSH reads bytes from that fd, **encrypts them**, and writes them into the existing SSH TCP session to the droplet.
+
+**On the droplet**, `sshd`:
+1. Receives the encrypted bytes, decrypts them.
+2. Sees a **`direct-tcpip` channel-open request** (this is SSH's internal channel type for local port forwarding).
+3. Calls `connect()` to `127.0.0.1:3000` on the droplet — exactly where `kubectl port-forward` is listening.
+4. Splices the streams: bytes from your laptop flow into that socket; bytes back get encrypted and sent to your laptop.
+
+**The SSH multiplexing layer:**
+SSH runs over a single TCP connection between your laptop and the droplet. Inside that TCP session, SSH uses its own binary packet protocol with independent **channels**, each with their own flow control and window sizing — separate from TCP's own. Local port forwarding is just one channel type. You could have multiple `-L` tunnels, a shell session, and SFTP all multiplexed over the same single TCP connection simultaneously.
+
+---
+
+### Full Packet Journey
+
+When you open `http://localhost:3000` in your browser:
+
+Browser: connect() → laptop 127.0.0.1:3000
+SSH client: accept() the connection
+SSH client: send channel-open (direct-tcpip) through encrypted TCP to droplet
+sshd on droplet: receive and decrypt
+sshd: connect() → droplet 127.0.0.1:3000
+kubectl port-forward: accept() that connection
+kubectl: send SPDY/WebSocket port-forward frame to Kubernetes API server (HTTPS)
+API server: forward to kubelet
+kubelet: connect() into pod network namespace → Grafana port 3000
+Grafana: accept() — sees a normal inbound TCP connection
+
+Response bytes travel back through all 9 hops in reverse,
+each layer re-encrypting or re-framing as needed.
+
+---
+
+### Why This Architecture
+
+| Problem | How it's solved |
+|---|---|
+| Grafana pod has no public IP | Pod lives in a private cluster CIDR; kubectl tunnels through the already-authenticated API server |
+| Droplet's port-forward binds only to loopback | SSH `-L` forwards it securely to your laptop over the existing SSH connection |
+| No new firewall rules needed | Everything rides port 22 (SSH); no new ingress required |
+| No credentials exposed on the wire | SSH encrypts the tunnel end-to-end; kubectl uses mTLS to the API server |
+
+---
+
+### Key Concepts Summarised
+
+- **`listen()` / `accept()` / `connect()`** — both tunnels create server sockets that block on `accept()`, then splice the resulting fd with an outbound `connect()` fd. This is the entire mechanism.
+- **File descriptors** — `accept()` and `connect()` both return fds. The SSH and kubectl processes are doing fd-to-fd byte copying (splicing) in userspace.
+- **SPDY/WebSocket upgrade** — converts a standard HTTP request/response into a raw stream without opening a new TCP connection. The API server reuses the upgraded connection.
+- **SSH channels** — the `direct-tcpip` channel type is how SSH implements local port forwarding. Multiple port-forwards share one TCP session via channel multiplexing.
+- **Network namespaces** — each pod gets its own network namespace with its own loopback and virtual ethernet interface. The kubelet's `connect()` crosses into it via the veth pair created by the CNI plugin.
+- **Userspace proxying** — no kernel-level tunneling anywhere in this chain. Every hop is a process reading from one socket and writing to another.
+
+---
 ## 🔌 Accessing Grafana: Network Deep-Dive
 
 The access workflow chains **two separate tunnels**. Understanding both is useful for debugging and for interviews.
