@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================================
-# k3s Installation for DigitalOcean Droplet (2GB RAM)
+# k3s Installation for DigitalOcean Droplet (4GB RAM)
 # Run as regular user with sudo privileges
 # =============================================================================
 
@@ -148,13 +148,16 @@ else
     read -r -p "Press Enter to continue with k3s installation, or Ctrl+C to cancel..."
 
     sudo INSTALL_K3S_EXEC="\
---write-kubeconfig-mode 644 \
---disable traefik \
---kubelet-arg=eviction-hard=memory.available<100Mi \
---kubelet-arg=eviction-soft=memory.available<200Mi \
---kubelet-arg=eviction-soft-grace-period=memory.available=30s" \
+--write-kubeconfig-mode 644 \                               # allow non-root users to read kubeconfig
+--disable traefik \                                         # skip built-in ingress controller, we manage our own
+--kubelet-arg=eviction-hard=memory.available<100Mi \        # kill pods immediately below 100Mi free memory
+--kubelet-arg=eviction-soft=memory.available<200Mi \        # flag pods for eviction below 200Mi free memory
+--kubelet-arg=eviction-soft-grace-period=memory.available=30s" \  # give pods 30s to shut down before hard kill
     sh install-k3s.sh
-
+    # systemctl is-active exits 0 if running, non-zero if not
+    # --quiet suppresses output since we handle messaging ourselves via log_error
+    # || runs the right side only on non-zero exit (i.e. k3s not running)
+    # exit 1 is the universal "something went wrong" code; 0 means success, anything else means failure
     sudo systemctl is-active --quiet k3s || {
         log_error "k3s failed to start"
         exit 1
@@ -164,6 +167,8 @@ else
 fi
 
 # Setup kubectl access for current user (no sudo needed for kubectl after this)
+# k3s rewrites /etc/rancher/k3s/k3s.yaml on every restart (owned by root),
+# so we copy it to ~/.kube/config and own it as deploy instead of fighting root
 log_info "Configuring kubectl for user $USER..."
 mkdir -p "$HOME/.kube"
 sudo cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
