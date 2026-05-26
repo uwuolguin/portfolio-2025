@@ -278,8 +278,7 @@ kubectl exec -n portfolio postgres-replica-0 -- \
 kubectl logs -n portfolio deployment/image-service | grep -i "nsfw\|model\|loaded"
 
 # Check health endpoint
-kubectl port-forward -n portfolio svc/image-service 8080:8080 &
-sleep 2
+kubectl port-forward -n portfolio svc/image-service 8080:8080
 curl http://localhost:8080/health
 # Expected: {"status":"healthy",...,"nsfw":{"enabled":true,"model_loaded":true,...}}
 ```
@@ -307,16 +306,19 @@ kubectl exec -n portfolio redpanda-0 -- \
 
 # Check message count per partition
 kubectl exec -n portfolio redpanda-0 -- \
-  rpk topic describe user-logins --print-watermarks --brokers=localhost:9092
+  rpk topic describe user-logins -p --brokers=localhost:9092
 
-# Verify producer connected
-kubectl logs -n portfolio deployment/backend | grep "kafka_producer_started"
+# See everything that's NOT a health check
+kubectl logs -n portfolio deployment/backend | grep -v "health"
 
-# Verify events are being published
-kubectl logs -n portfolio deployment/backend | grep "kafka_event_published"
+# Check for any Kafka-related activity
+kubectl logs -n portfolio deployment/backend | grep -i "kafka\|redpanda\|producer\|consumer\|topic\|publish\|send"
 
-# Check for producer failures (should be empty)
-kubectl logs -n portfolio deployment/backend | grep "kafka_event_failed\|kafka_event_skipped"
+# Check for any errors or warnings
+kubectl logs -n portfolio deployment/backend | grep '"level": "error"\|"level": "warn"\|ERROR\|WARN\|Exception\|Traceback'
+
+# See scheduled jobs and non-health events
+kubectl logs -n portfolio deployment/backend | grep -v "kube-probe\|health"
 ```
 
 ### 5. Consumer Worker
@@ -331,8 +333,6 @@ kubectl logs -n portfolio deployment/consumer | grep "consumer_started"
 # Watch workflow routing in real time
 kubectl logs -n portfolio deployment/consumer -f | \
   grep "workflow_started\|workflow_duplicate_skipped\|workflow_start_failed"
-# Expected on login:
-# {"event":"workflow_started","workflow_id":"auth-user-logins-0-3","workflow":"AuthEventWorkflow",...}
 
 # Check Temporal connection status
 kubectl logs -n portfolio deployment/consumer | grep "temporal_connected"
@@ -441,10 +441,11 @@ curl http://localhost:9000/minio/health/ready
 # Access MinIO console (browser UI)
 kubectl port-forward -n portfolio svc/minio 9001:9001
 # Then open http://localhost:9001 via SSH tunnel
+ssh -L 9001:localhost:9001 deploy@143.110.154.54
 # Credentials: minioadmin / <MINIO_PASSWORD from .credentials>
 
 # Verify images bucket exists
-kubectl logs -n portfolio deployment/image-service | grep -i "bucket\|minio\|connected"
+kubectl logs -n portfolio deployment/image-service
 ```
 
 ### 9. LibreTranslate
@@ -456,19 +457,27 @@ kubectl get pods -n portfolio -l app=libretranslate
 
 # Check startup progress (model download on first boot)
 kubectl logs -n portfolio deployment/libretranslate -f
-# Look for: "Loaded" or "Running on http://0.0.0.0:5000"
+# Look for: "Loaded" or "Listening at: http://0.0.0.0:5000"
 
 # Test a translation directly inside the cluster
 kubectl exec -n portfolio deployment/backend --   curl -s -X POST http://libretranslate:5000/translate   -H "Content-Type: application/json"   -d '{"q":"hello","source":"en","target":"es","format":"text"}'
 # Expected: {"translatedText":"hola"}
 
 # Test the reverse
-kubectl exec -n portfolio deployment/backend --   curl -s -X POST http://libretranslate:5000/translate   -H "Content-Type: application/json"   -d '{"q":"hola","source":"es","target":"en","format":"text"}'
-# Expected: {"translatedText":"hello"}
+kubectl port-forward -n portfolio svc/libretranslate 5000:5000
+#Inside the droplet, in another terminal
+curl -s -X POST http://localhost:5000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"q":"hello","source":"en","target":"es","format":"text"}'
 
-# List available language pairs
-kubectl exec -n portfolio deployment/backend --   curl -s http://libretranslate:5000/languages | python3 -m json.tool
-# Expected: en and es entries only (LT_LOAD_ONLY=en,es)
+# List available language pairs through port-forwarding
+kubectl port-forward -n portfolio svc/libretranslate 5000:5000
+
+# Inside the droplet, in another terminal
+curl -s http://localhost:5000/languages | python3 -m json.tool
+
+# Expected: only "en" and "es" language entries
+# because LT_LOAD_ONLY=en,es
 ```
 
 ### 10. Grafana + Loki + Alloy
@@ -547,9 +556,8 @@ kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
   "SELECT client_addr, state, replay_lag FROM pg_stat_replication;"'
 
 # Quick table counts
-kubectl exec -n portfolio -c postgres postgres-primary-0 -- \
-  bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
-  "SELECT schemaname, tablename, n_live_tup FROM pg_stat_user_tables \
+kubectl exec -n portfolio -c postgres postgres-primary-0 --   bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d portfolio -c \
+  "SELECT schemaname,relname, n_live_tup FROM pg_stat_user_tables \
   WHERE schemaname = '"'"'proveo'"'"' ORDER BY n_live_tup DESC;"'
 ```
 
@@ -566,7 +574,7 @@ kubectl exec -n portfolio redpanda-0 -- \
   rpk topic consume user-logins --brokers=localhost:9092 --num=10
 
 kubectl exec -n portfolio redpanda-0 -- \
-  rpk topic describe user-logins --print-watermarks --brokers=localhost:9092
+  rpk topic describe user-logins --brokers=localhost:9092
 ```
 
 ### Monitor Logs
@@ -609,7 +617,7 @@ kubectl port-forward -n portfolio svc/loki 3100:3100
 
 ---
 
-## Scaling Up
+## Horizontal Scaling Plan (not yet tested)
 
 ```bash
 # Scale backend and image service to 2 replicas
@@ -655,6 +663,8 @@ kubectl top pods -n portfolio
 ```bash
 kubectl describe pod <pod-name> -n portfolio
 kubectl logs <pod-name> -n portfolio
+#kubectl describe pod nginx-57c77d76b5-t6qj5 -n portfolio
+#kubectl logs nginx-57c77d76b5-t6qj5 -n portfolio
 ```
 
 ### Temporal Worker Not Picking Up Tasks
@@ -670,9 +680,12 @@ kubectl logs -n portfolio deployment/temporal-worker | grep "temporal_client_con
 kubectl logs -n portfolio deployment/temporal-worker | grep "uncaught"
 
 # Verify Temporal server is accepting TCP connections
-kubectl exec -n portfolio deployment/temporal-worker -- \
-  nc -zv temporal 7233
-# Expected: Connection to temporal 7233 port succeeded
+kubectl port-forward -n portfolio svc/temporal 7233:7233
+
+# Inside the droplet, in another terminal
+nc -zv localhost 7233
+
+# Expected: Connection to localhost 7233 port succeeded
 ```
 
 ### Temporal Server Not Starting
