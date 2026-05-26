@@ -14,9 +14,6 @@ if [ "$confirm" != "yes" ]; then
     exit 0
 fi
 
-# Ensure kubeconfig
-export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-
 echo ""
 echo "Deleting namespace..."
 kubectl delete namespace portfolio --wait=true --timeout=120s

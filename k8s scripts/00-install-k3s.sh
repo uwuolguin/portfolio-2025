@@ -69,6 +69,7 @@ echo ""
 # =============================================================================
 log_info "Installing prerequisites..."
 sudo apt-get update -qq
+# Note: git is included for use by downstream deploy scripts
 sudo apt-get install -y -qq curl openssl git > /dev/null 2>&1
 log_success "Prerequisites installed"
 echo ""
@@ -100,9 +101,9 @@ if ! command -v docker &> /dev/null; then
     # Pause and wait for user confirmation
     read -p "Press Enter to continue with Docker installation, or Ctrl+C to cancel..."
     sh install-docker.sh
-    sudo systemctl enable docker
-    sudo systemctl start docker
-    sudo usermod -aG docker "$USER"  
+    # enable --now is equivalent to enable + start in a single command
+    sudo systemctl enable --now docker
+    sudo usermod -aG docker "$USER"
     log_success "Docker installed"
     log_warn "You were added to the 'docker' group."
     log_warn "Run 'newgrp docker' or log out/in for it to take effect."
@@ -147,13 +148,16 @@ else
 
     read -r -p "Press Enter to continue with k3s installation, or Ctrl+C to cancel..."
 
-    sudo INSTALL_K3S_EXEC="\
---write-kubeconfig-mode 644 \                               # allow non-root users to read kubeconfig
---disable traefik \                                         # skip built-in ingress controller, we manage our own
---kubelet-arg=eviction-hard=memory.available<100Mi \        # kill pods immediately below 100Mi free memory
---kubelet-arg=eviction-soft=memory.available<200Mi \        # flag pods for eviction below 200Mi free memory
---kubelet-arg=eviction-soft-grace-period=memory.available=30s" \  # give pods 30s to shut down before hard kill
-    sh install-k3s.sh
+    # Flags explained:
+    #   --write-kubeconfig-mode 644        allow non-root users to read kubeconfig
+    #   --disable traefik                  skip built-in ingress controller, we manage our own
+    #   eviction-hard memory.available     kill pods immediately below 100Mi free memory
+    #   eviction-soft memory.available     flag pods for eviction below 200Mi free memory
+    #   eviction-soft-grace-period         give pods 30s to shut down before hard kill
+    K3S_EXEC_ARGS="--write-kubeconfig-mode 644 --disable traefik --kubelet-arg=eviction-hard=memory.available<100Mi --kubelet-arg=eviction-soft=memory.available<200Mi --kubelet-arg=eviction-soft-grace-period=memory.available=30s"
+
+    sudo INSTALL_K3S_EXEC="$K3S_EXEC_ARGS" sh install-k3s.sh
+
     # systemctl is-active exits 0 if running, non-zero if not
     # --quiet suppresses output since we handle messaging ourselves via log_error
     # || runs the right side only on non-zero exit (i.e. k3s not running)
@@ -167,18 +171,25 @@ else
 fi
 
 # Setup kubectl access for current user (no sudo needed for kubectl after this)
+#
 # k3s rewrites /etc/rancher/k3s/k3s.yaml on every restart (owned by root),
-# so we copy it to ~/.kube/config and own it as deploy instead of fighting root
+# so we copy it to ~/.kube/config and own it as the current user instead of
+# fighting root permissions on every kubectl call.
+#
+# We do NOT export KUBECONFIG or write it to .bashrc because kubectl already
+# looks at ~/.kube/config by default — that is the XDG-style convention all
+# Kubernetes tooling (kubectl, helm, k9s, etc.) follows out of the box.
+# Setting KUBECONFIG explicitly is only necessary when your config lives
+# somewhere non-standard, or when you are juggling multiple clusters and need
+# to point at a specific file. Neither applies here.
+#
+# chmod 600 is still required: the file contains the cluster CA, client cert,
+# and client key — treat it like an SSH private key.
 log_info "Configuring kubectl for user $USER..."
 mkdir -p "$HOME/.kube"
 sudo cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
 sudo chown "$USER:$(id -gn)" "$HOME/.kube/config"
 chmod 600 "$HOME/.kube/config"
-export KUBECONFIG="$HOME/.kube/config"
-
-if ! grep -q 'KUBECONFIG' "$HOME/.bashrc" 2>/dev/null; then
-    echo 'export KUBECONFIG="$HOME/.kube/config"' >> "$HOME/.bashrc"
-fi
 
 log_success "kubectl configured for user $USER (no sudo needed)"
 
@@ -192,6 +203,11 @@ while [ $COUNTER -lt 60 ]; do
     sleep 2
     COUNTER=$((COUNTER + 1))
 done
+
+if [ $COUNTER -ge 60 ]; then
+    log_error "Timed out waiting for k3s to become ready"
+    exit 1
+fi
 
 echo ""
 kubectl get nodes -o wide
