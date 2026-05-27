@@ -34,9 +34,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Sanity check: docker-compose.yml is a reliable landmark for the repository root.
-if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
-    log_error "Cannot find docker-compose.yml in repo root: $REPO_ROOT"
+# Sanity check: readme.md is a reliable landmark for the repository root.
+if [ ! -f "$REPO_ROOT/readme.md" ]; then
+    log_error "Cannot find readme.md in repo root: $REPO_ROOT"
     exit 1
 fi
 
