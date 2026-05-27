@@ -17,6 +17,31 @@ log_success() { printf '%b\n' "${GREEN}[OK]${NC} $1"; }
 log_warn()    { printf '%b\n' "${YELLOW}[WARN]${NC} $1"; }
 log_error()   { printf '%b\n' "${RED}[ERROR]${NC} $1"; }
 
+# SCRIPT_DIR resolves the absolute path of the directory containing this script,
+# regardless of where the caller invoked it from.
+#
+# Why this matters:
+# If you run this script from a different directory (e.g. sudo ~/scripts/deploy.sh
+# while sitting in /tmp), then relative paths like ./config.yaml or ./deploy.sh
+# break because they resolve against /tmp, not the script's own folder.
+# SCRIPT_DIR gives you a stable anchor point that is always the script's location.
+#
+# How it works, inside out:
+#   ${BASH_SOURCE[0]}         - path to this script file as bash received it
+#   dirname "..."             - strips the filename, leaving just the directory portion
+#   cd "..." && pwd           - cd into that directory, then print its absolute path
+#                               the cd is necessary because dirname can return a
+#                               relative path (e.g. "." or "../scripts"), and pwd (print working directory)
+#                               turns that into a full absolute path like /home/deploy/scripts
+#   $( )                      - command substitution: captures the output as a string
+#
+# Example:
+#   Script lives at:          /home/deploy/portfolio/k8s-scripts/deploy.sh
+#   You run it from:          /tmp
+#   ${BASH_SOURCE[0]}  →      /tmp/../home/deploy/portfolio/k8s-scripts/deploy.sh (or similar)
+#   dirname            →      /home/deploy/portfolio/k8s-scripts
+#   cd && pwd          →      /home/deploy/portfolio/k8s-scripts
+#   SCRIPT_DIR         →      /home/deploy/portfolio/k8s-scripts
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env.secrets"
 
