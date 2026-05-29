@@ -4,9 +4,13 @@ kind: ConfigMap
 metadata:
   name: portfolio-config
   namespace: portfolio
+
 data:
   # PostgreSQL
   POSTGRES_DB: "portfolio"
+
+  # Frontend / CORS
+  ALLOWED_ORIGINS: "[\"http://localhost\",\"http://localhost:80\",\"https://testproveoportfolio.xyz\",\"https://www.testproveoportfolio.xyz\"]"
 
   # MinIO
   MINIO_ENDPOINT: "minio:9000"

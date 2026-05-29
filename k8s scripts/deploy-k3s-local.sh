@@ -201,7 +201,8 @@ if [ ! -f "$GRAFANA_ADMIN_PASS_FILE" ]; then
     log_info "Grafana admin password file not found — enter it now (input hidden):"
     read -rsp "  Admin password: " GRAFANA_ADMIN_PASS_INPUT
     echo ""
-    echo "$GRAFANA_ADMIN_PASS_INPUT" > "$GRAFANA_ADMIN_PASS_FILE"
+    # printf '%s' avoids the trailing \n that echo adds — password stays clean
+    printf '%s' "$GRAFANA_ADMIN_PASS_INPUT" > "$GRAFANA_ADMIN_PASS_FILE"
     chmod 600 "$GRAFANA_ADMIN_PASS_FILE"
     log_success "Saved to $GRAFANA_ADMIN_PASS_FILE"
 fi
@@ -210,13 +211,15 @@ if [ ! -f "$GRAFANA_DEMO_PASS_FILE" ]; then
     log_info "Grafana demo password file not found — enter it now (input hidden):"
     read -rsp "  Demo password: " GRAFANA_DEMO_PASS_INPUT
     echo ""
-    echo "$GRAFANA_DEMO_PASS_INPUT" > "$GRAFANA_DEMO_PASS_FILE"
+    # printf '%s' avoids the trailing \n that echo adds — password stays clean
+    printf '%s' "$GRAFANA_DEMO_PASS_INPUT" > "$GRAFANA_DEMO_PASS_FILE"
     chmod 600 "$GRAFANA_DEMO_PASS_FILE"
     log_success "Saved to $GRAFANA_DEMO_PASS_FILE"
 fi
 
-GRAFANA_ADMIN_PASS=$(cat "$GRAFANA_ADMIN_PASS_FILE")
-GRAFANA_DEMO_PASS=$(cat "$GRAFANA_DEMO_PASS_FILE")
+# tr -d '\n' strips any trailing newline so the password value is clean
+GRAFANA_ADMIN_PASS=$(tr -d '\n' < "$GRAFANA_ADMIN_PASS_FILE")
+GRAFANA_DEMO_PASS=$(tr -d '\n' < "$GRAFANA_DEMO_PASS_FILE")
 
 log_success "All prerequisites OK"
 echo ""
@@ -246,53 +249,64 @@ fi
 
 # =============================================================================
 # Load Resend API key from .env.secrets
-# Parsed safely line-by-line — never sourced — so no arbitrary shell execution.
-# Only lines matching KEY=value (no spaces, no subshells) are accepted.
+# Parsed line-by-line — never sourced — so no arbitrary shell execution.
+# Only strict KEY=value lines (no spaces around =) are accepted.
+#
+# "read" strips the trailing \n naturally, so RESEND_KEY will be exactly
+# "re_yourkeyhere" with no trailing newline — safe to pass directly into
+# kubectl secrets.
+#
+# Test:
+#   printf 'RESEND_API_KEY=re_test123\n' > /tmp/t.env && \
+#   RESEND_KEY="" && \
+#   while IFS= read -r line || [ -n "$line" ]; do
+#     [[ "$line" =~ ^RESEND_API_KEY=(re_.+)$ ]] || continue
+#     RESEND_KEY="${BASH_REMATCH[1]}"
+#   done < /tmp/t.env && \
+#   echo "key='$RESEND_KEY'" && \   # → key='re_test123' (no trailing \n)
+#   rm /tmp/t.env
 # =============================================================================
+
+# Starts empty; -z check below catches "file exists but key missing"
 RESEND_KEY=""
+
 if [ -f "${SCRIPT_DIR}/.env.secrets" ]; then
+
     log_info "Loading Resend API key from .env.secrets"
+
+    # IFS=              → preserves leading/trailing spaces in the value
+    # read -r           → backslashes are treated literally
+    # || [ -n "$line" ] → rescues final line if file has no trailing \n
     while IFS= read -r line || [ -n "$line" ]; do
-        # Skip blank lines and comments
-        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-        [[ "$line" =~ ^[[:space:]]*# ]]  && continue
-        # Only accept lines that are strictly KEY=value (no spaces around =)
-        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-            key="${BASH_REMATCH[1]}"
-            value="${BASH_REMATCH[2]}"
-            if [ "$key" = "RESEND_API_KEY" ]; then
-                RESEND_KEY="$value"
-            fi
+
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue  # skip blank lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue  # skip comments
+
+        # BASH_REMATCH[0] = entire matched line
+        # BASH_REMATCH[1] = captured API key value (re_...)
+        if [[ "$line" =~ ^RESEND_API_KEY=(re_.+)$ ]]; then
+            RESEND_KEY="${BASH_REMATCH[1]}"
         else
             log_warn ".env.secrets: ignoring malformed line: $line"
         fi
+
+    # Redirect file into loop stdin without a subshell,
+    # so RESEND_KEY survives after the loop exits.
     done < "${SCRIPT_DIR}/.env.secrets"
 
+    #-z tests whether a string is empty.
     if [ -z "$RESEND_KEY" ]; then
-        log_error ".env.secrets found but RESEND_API_KEY is missing or empty!"
-        RESEND_KEY="re_YOUR_KEY_HERE_EMAILS_WILL_NOT_WORK"
-        log_warn "Continuing with placeholder Resend key - email features disabled"
-    else
-        log_success "Resend API key loaded"
-    fi
-else
-    log_error ".env.secrets not found!"
-    log_error "Email verification will NOT work!"
-    echo ""
-    log_error "To fix this, run: ./set-resend-key.sh"
-    echo ""
-    # FIX: added -r to prevent backslash interpretation
-    read -rp "Continue anyway with placeholder key? (yes/no): " continue_deploy
-    if [ "$continue_deploy" != "yes" ] && [ "$continue_deploy" != "y" ]; then
-        echo ""
-        echo "Deployment aborted."
-        echo ""
-        echo "Run './set-resend-key.sh' to configure your Resend API key, then try again."
+        log_error "RESEND_API_KEY missing from .env.secrets"
         exit 1
     fi
-    RESEND_KEY="re_YOUR_KEY_HERE_EMAILS_WILL_NOT_WORK"
-    log_warn "Continuing with placeholder Resend key - email features disabled"
+
+    log_success "Resend API key loaded"
+
+else
+    log_error ".env.secrets not found — run ./set-resend-key.sh first"
+    exit 1
 fi
+
 echo ""
 
 # Detect droplet public IP (fail if not detected)
@@ -319,18 +333,39 @@ echo ""
 
 # TLS secret
 log_info "Loading TLS certificates into cluster..."
+
 if [ -f "/home/deploy/certs/fullchain.pem" ] && [ -f "/home/deploy/certs/privkey.pem" ]; then
+
+    # Idempotent secret creation/update:
+    #
+    # --dry-run=client
+    #   Generates the Secret manifest locally without creating it in the cluster.
+    #
+    # -o yaml
+    #   Outputs the generated Secret manifest as YAML.
+    #
+    # kubectl apply -f -
+    #   Reads the YAML from stdin ("-") and applies it declaratively:
+    #   - creates the Secret if it does not exist
+    #   - updates the Secret if it already exists
+    #
+    # This makes the operation idempotent because re-running the script
+    # converges the cluster to the same desired Secret state instead of
+    # failing with "AlreadyExists".
+
     kubectl create secret tls tls-secret \
         --cert=/home/deploy/certs/fullchain.pem \
         --key=/home/deploy/certs/privkey.pem \
         -n portfolio \
         --dry-run=client -o yaml | kubectl apply -f -
+
     log_success "TLS secret loaded"
 else
     log_error "TLS certs not found at /home/deploy/certs/"
     log_error "Run certbot first (see SSL_SETUP.md Steps 1-4), then re-run this script"
     exit 1
 fi
+
 echo ""
 
 # ConfigMap
@@ -338,12 +373,17 @@ log_info "Creating ConfigMap..."
 kubectl apply -f "$K8S_DIR/01-configmap.yaml"
 echo ""
 
-kubectl patch configmap portfolio-config -n portfolio --type merge \
-  -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"http://localhost\\\",\\\"http://localhost:80\\\",\\\"https://testproveoportfolio.xyz\\\",\\\"https://www.testproveoportfolio.xyz\\\"]\"}}"
-
-log_info "Patched ALLOWED_ORIGINS with domain: testproveoportfolio.xyz"
-
 # Secrets
+# --dry-run=client -o yaml generates the Secret manifest locally without creating it.
+# The generated YAML is piped to `kubectl apply -f -`.
+#
+# -f means "read manifest from file" (--filename).
+# The final `-` is a Unix convention meaning stdin, so kubectl treats
+# the piped stdin stream as the input file.
+#
+# `apply` makes the operation idempotent:
+# - creates the Secret if missing
+# - updates it if it already exists
 log_info "Creating secrets..."
 kubectl create secret generic portfolio-secrets \
   --from-literal=POSTGRES_USER=postgres \
@@ -396,15 +436,27 @@ fi
 
 sleep 5
 kubectl exec -n portfolio postgres-primary-0 -- \
+  env PGPASSWORD="$POSTGRES_PASSWORD" \
   psql -U postgres -d portfolio -c \
-  "SELECT pg_create_physical_replication_slot('replica_slot_1') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot_1');" \
-  2>/dev/null || log_warn "Replication slot may already exist"
+  "SELECT pg_create_physical_replication_slot('replica_slot_1')
+   WHERE NOT EXISTS (
+     SELECT 1
+     FROM pg_replication_slots
+     WHERE slot_name = 'replica_slot_1'
+   );" \
+  2>/dev/null || true
 
 kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" 2>/dev/null || true
+  env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U postgres -d portfolio -c \
+  "CREATE EXTENSION IF NOT EXISTS pg_trgm;" \
+  2>/dev/null || true
 
 kubectl exec -n portfolio postgres-primary-0 -- \
-  psql -U postgres -d portfolio -c "CREATE EXTENSION IF NOT EXISTS pg_cron;" 2>/dev/null || true
+  env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U postgres -d portfolio -c \
+  "CREATE EXTENSION IF NOT EXISTS pg_cron;" \
+  2>/dev/null || true
 
 log_success "PostgreSQL Primary configured"
 echo ""
