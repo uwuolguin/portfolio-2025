@@ -67,11 +67,12 @@ wait_for_deployment_ready() {
     local interval=5
 
     while [ $counter -lt $timeout ]; do
-        local ready=$(kubectl get deployment "$name" -n "$namespace" \
-            -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
         local desired=$(kubectl get deployment "$name" -n "$namespace" \
-            -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+            -o jsonpath='{.spec.replicas}' 2>/dev/null)
+        local ready=$(kubectl get deployment "$name" -n "$namespace" \
+            -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
 
+        desired="${desired:-1}"
         ready="${ready:-0}"
 
         if [ "$ready" = "$desired" ] && [ "$ready" != "0" ]; then
@@ -104,8 +105,11 @@ wait_for_statefulset_ready() {
     local interval=5
 
     while [ $counter -lt $timeout ]; do
-        local ready=$(kubectl get statefulset "$name" -n "$namespace" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-        local desired=$(kubectl get statefulset "$name" -n "$namespace" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+        local ready=$(kubectl get statefulset "$name" -n "$namespace" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        local desired=$(kubectl get statefulset "$name" -n "$namespace" -o jsonpath='{.spec.replicas}' 2>/dev/null)
+
+        desired="${desired:-1}"
+        ready="${ready:-0}"
 
         if [ "$ready" = "$desired" ] && [ "$ready" != "0" ]; then
             log_success "$description ready ($ready/$desired)"
@@ -138,9 +142,12 @@ wait_for_pods_ready() {
 
     while [ $counter -lt $timeout ]; do
         local ready=$(kubectl get pods -n "$namespace" -l "$selector" \
-            -o jsonpath='{.items[*].status.containerStatuses[*].ready}' 2>/dev/null | tr ' ' '\n' | grep -c "true" || echo "0")
+            -o jsonpath='{.items[*].status.containerStatuses[*].ready}' 2>/dev/null | tr ' ' '\n' | grep -c "true")
         local total=$(kubectl get pods -n "$namespace" -l "$selector" \
             --no-headers 2>/dev/null | wc -l | tr -d ' ')
+
+        ready="${ready:-0}"
+        total="${total:-0}"
 
         if [ "$total" -gt "0" ] && [ "$ready" = "$total" ]; then
             log_success "$description ready ($ready/$total)"
@@ -215,28 +222,67 @@ log_success "All prerequisites OK"
 echo ""
 
 # =============================================================================
-# Generate secrets
+# Generate or load secrets (idempotent)
+# If portfolio-secrets already exists in the cluster, read values back from it
+# so existing Postgres data, MinIO buckets, and JWT tokens all stay valid.
+# On a first deploy the secret does not exist yet — generate fresh values.
 # =============================================================================
-log_info "Generating secrets..."
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
-JWT_SECRET=$(openssl rand -hex 16)
-MINIO_PASSWORD=$(openssl rand -hex 16)
+if kubectl get secret portfolio-secrets -n portfolio &>/dev/null 2>&1; then
+    log_info "portfolio-secrets already exists — loading from cluster (idempotent run)"
+    POSTGRES_PASSWORD=$(kubectl get secret portfolio-secrets -n portfolio \
+        -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+    JWT_SECRET=$(kubectl get secret portfolio-secrets -n portfolio \
+        -o jsonpath='{.data.SECRET_KEY}' | base64 -d)
+    MINIO_PASSWORD=$(kubectl get secret portfolio-secrets -n portfolio \
+        -o jsonpath='{.data.MINIO_ROOT_PASSWORD}' | base64 -d)
+    log_success "Secrets loaded from cluster"
+else
+    log_info "Generating new secrets (first deploy)..."
+    POSTGRES_PASSWORD=$(openssl rand -hex 16)
+    JWT_SECRET=$(openssl rand -hex 16)
+    MINIO_PASSWORD=$(openssl rand -hex 16)
+    log_success "New secrets generated"
+fi
 
 # =============================================================================
 # Load Resend API key from .env.secrets
+# Parsed safely line-by-line — never sourced — so no arbitrary shell execution.
+# Only lines matching KEY=value (no spaces, no subshells) are accepted.
 # =============================================================================
+RESEND_KEY=""
 if [ -f "${SCRIPT_DIR}/.env.secrets" ]; then
     log_info "Loading Resend API key from .env.secrets"
-    source "${SCRIPT_DIR}/.env.secrets"
-    RESEND_KEY="${RESEND_API_KEY}"
-    log_success "Resend API key loaded"
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip blank lines and comments
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        [[ "$line" =~ ^[[:space:]]*# ]]  && continue
+        # Only accept lines that are strictly KEY=value (no spaces around =)
+        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+            if [ "$key" = "RESEND_API_KEY" ]; then
+                RESEND_KEY="$value"
+            fi
+        else
+            log_warn ".env.secrets: ignoring malformed line: $line"
+        fi
+    done < "${SCRIPT_DIR}/.env.secrets"
+
+    if [ -z "$RESEND_KEY" ]; then
+        log_error ".env.secrets found but RESEND_API_KEY is missing or empty!"
+        RESEND_KEY="re_YOUR_KEY_HERE_EMAILS_WILL_NOT_WORK"
+        log_warn "Continuing with placeholder Resend key - email features disabled"
+    else
+        log_success "Resend API key loaded"
+    fi
 else
     log_error ".env.secrets not found!"
     log_error "Email verification will NOT work!"
     echo ""
     log_error "To fix this, run: ./set-resend-key.sh"
     echo ""
-    read -p "Continue anyway with placeholder key? (yes/no): " continue_deploy
+    # FIX: added -r to prevent backslash interpretation
+    read -rp "Continue anyway with placeholder key? (yes/no): " continue_deploy
     if [ "$continue_deploy" != "yes" ] && [ "$continue_deploy" != "y" ]; then
         echo ""
         echo "Deployment aborted."
@@ -436,6 +482,7 @@ echo ""
 # =============================================================================
 log_info "Registering Temporal default namespace..."
 TEMPORAL_POD=$(kubectl get pods -n portfolio -l app=temporal -o jsonpath='{.items[0].metadata.name}')
+
 if kubectl exec -n portfolio "$TEMPORAL_POD" -- tctl namespace describe default &>/dev/null 2>&1; then
     log_success "Temporal default namespace already exists"
 else
