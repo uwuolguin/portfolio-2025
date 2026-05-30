@@ -473,7 +473,7 @@ if ! wait_for_statefulset_ready "postgres-replica" "portfolio" 300 "PostgreSQL R
 fi
 
 log_info "Verifying replication state..."
-sleep 20
+sleep 10
 
 REPL_STATE=$(kubectl exec -n portfolio postgres-primary-0 -c postgres -- \
   env PGPASSWORD="$POSTGRES_PASSWORD" \
@@ -547,9 +547,48 @@ kubectl apply -f "$K8S_DIR/16-libretranslate.yaml"
 
 log_info "Waiting for LibreTranslate — first boot downloads language models, allow 2-3 minutes..."
 if ! wait_for_pods_ready "app=libretranslate" "portfolio" 300 "LibreTranslate"; then
-    log_warn "LibreTranslate not ready — translation will fall back to duplication"
-    log_warn "Check: kubectl logs -n portfolio -l app=libretranslate"
+    log_error "LibreTranslate failed"
+    kubectl logs -n portfolio -l app=libretranslate --tail=30 2>/dev/null || true
+    exit 1
 fi
+
+log_info "Testing LibreTranslate en→es..."
+# libretranslate has no curl in its image so kubectl exec won't work here.
+# Instead a throwaway pod (curlimages/curl) is created inside the portfolio
+# namespace — it shares the same cluster network so libretranslate:5000
+# resolves via ClusterIP DNS exactly as the backend would hit it in production.
+# --rm deletes the pod the moment curl exits, no manual cleanup needed.
+# --restart=Never prevents Kubernetes from restarting it if curl fails.
+# -i attaches stdin so the pod output is streamed back to this shell.
+RESULT_ES=$(kubectl run curl-test-es --image=curlimages/curl:latest \
+  --rm --restart=Never -i -n portfolio -- \
+  curl -s -X POST http://libretranslate:5000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"q":"hello","source":"en","target":"es","format":"text"}' \
+  2>/dev/null || echo "error")
+
+if echo "$RESULT_ES" | grep -q "hola"; then
+    log_success "en→es working (hello → hola)"
+else
+    log_error "en→es failed, got: '$RESULT_ES'"
+    exit 1
+fi
+
+log_info "Testing LibreTranslate es→en..."
+RESULT_EN=$(kubectl run curl-test-en --image=curlimages/curl:latest \
+  --rm --restart=Never -i -n portfolio -- \
+  curl -s -X POST http://libretranslate:5000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"q":"hola","source":"es","target":"en","format":"text"}' \
+  2>/dev/null || echo "error")
+
+if echo "$RESULT_EN" | grep -q "hello"; then
+    log_success "es→en working (hola → hello)"
+else
+    log_error "es→en failed, got: '$RESULT_EN'"
+    exit 1
+fi
+
 echo ""
 
 # =============================================================================
@@ -560,7 +599,19 @@ kubectl apply -f "$K8S_DIR/08-image-service.yaml"
 if ! wait_for_pods_ready "app=image-service" "portfolio" 120 "Image Service"; then
     log_error "Image Service failed"; exit 1
 fi
-echo ""
+
+log_info "Testing Image Service health..."
+IMAGE_HEALTH=$(kubectl run curl-test-image --image=curlimages/curl:latest \
+  --rm --restart=Never -i -n portfolio -- \
+  curl -s -o /dev/null -w "%{http_code}" http://image-service:8080/health \
+  2>/dev/null | grep -o '^[0-9]*')
+
+if [ "$IMAGE_HEALTH" = "200" ]; then
+    log_success "Image Service healthy (HTTP 200)"
+else
+    log_error "Image Service health check returned: '$IMAGE_HEALTH' (expected 200)"
+    exit 1
+fi
 
 # =============================================================================
 # Temporal Server + UI
@@ -570,23 +621,37 @@ kubectl apply -f "$K8S_DIR/14-temporal.yaml"
 
 if ! wait_for_pods_ready "app=temporal" "portfolio" 120 "Temporal server"; then
     log_error "Temporal server failed"
-    kubectl logs -n portfolio -l app=temporal --tail=30 2>/dev/null || true
+    kubectl logs -n portfolio -l app=temporal -c temporal --tail=30 2>/dev/null || true
     exit 1
 fi
-echo ""
 
-# =============================================================================
-# Temporal Namespace
-# =============================================================================
-log_info "Registering Temporal default namespace..."
+log_info "Verifying Temporal server health..."
+
+# tctl is the Temporal CLI — ships inside the temporal server image.
+# `cluster health` hits the server's gRPC health endpoint and returns
+# the state of each internal service (frontend, history, matching, worker).
+# All four must report SERVING for the cluster to be operational.
 TEMPORAL_POD=$(kubectl get pods -n portfolio -l app=temporal -o jsonpath='{.items[0].metadata.name}')
+TEMPORAL_HEALTH=$(kubectl exec -n portfolio "$TEMPORAL_POD" -c temporal -- \
+  tctl cluster health 2>/dev/null || echo "error")
 
-# NOTE: replace <temporal-container-name> with the container name from 14-temporal.yaml
-if kubectl exec -n portfolio "$TEMPORAL_POD" -c <temporal-container-name> -- tctl namespace describe default &>/dev/null 2>&1; then
-    log_success "Temporal default namespace already exists"
+if echo "$TEMPORAL_HEALTH" | grep -qi "serving"; then
+    log_success "Temporal server healthy"
 else
-    kubectl exec -n portfolio "$TEMPORAL_POD" -c <temporal-container-name> -- tctl namespace register --retention 7 default
-    log_success "Temporal default namespace registered"
+    log_warn "Temporal health returned: '$TEMPORAL_HEALTH'"
+fi
+
+log_info "Verifying Temporal UI..."
+TEMPORAL_UI_POD=$(kubectl get pods -n portfolio -l app=temporal-ui -o jsonpath='{.items[0].metadata.name}')
+
+# --spider skips downloading the body and only checks the HTTP status code.
+# The UI is a Svelte SPA — the HTML body contains no identifiable text to grep,
+# so checking the exit code (0 = 200 OK) is the only reliable signal here.
+if kubectl exec -n portfolio "$TEMPORAL_UI_POD" -c temporal-ui -- \
+  wget -q --spider http://localhost:8080 2>/dev/null; then
+    log_success "Temporal UI responding"
+else
+    log_warn "Temporal UI not responding on localhost:8080"
 fi
 echo ""
 
@@ -598,9 +663,18 @@ kubectl apply -f "$K8S_DIR/15-temporal-worker.yaml"
 
 if ! wait_for_deployment_ready "temporal-worker" "portfolio" 120 "Temporal worker"; then
     log_error "Temporal worker failed"
-    # NOTE: replace <temporal-worker-container-name> with the container name from 15-temporal-worker.yaml
-    kubectl logs -n portfolio -l app=temporal-worker -c <temporal-worker-container-name> --tail=30 2>/dev/null || true
+    kubectl logs -n portfolio -l app=temporal-worker -c temporal-worker --tail=30 2>/dev/null || true
     exit 1
+fi
+
+log_info "Verifying Temporal worker registered task queue..."
+WORKER_LOGS=$(kubectl logs -n portfolio -l app=temporal-worker -c temporal-worker --tail=20 2>/dev/null || echo "error")
+
+if echo "$WORKER_LOGS" | grep -qi "worker"; then
+    log_success "Temporal worker running"
+else
+    log_warn "Could not confirm worker task queue registration — check logs:"
+    log_warn "  kubectl logs -n portfolio -l app=temporal-worker -c temporal-worker"
 fi
 echo ""
 
@@ -612,9 +686,18 @@ kubectl apply -f "$K8S_DIR/11-redpanda.yaml"
 
 if ! wait_for_statefulset_ready "redpanda" "portfolio" 120 "Redpanda"; then
     log_error "Redpanda failed"
-    # NOTE: replace <redpanda-container-name> with the container name from 11-redpanda.yaml
-    kubectl logs -n portfolio redpanda-0 -c <redpanda-container-name> --tail=30 2>/dev/null || true
+    kubectl logs -n portfolio redpanda-0 -c redpanda --tail=30 2>/dev/null || true
     exit 1
+fi
+
+log_info "Verifying Redpanda cluster health..."
+REDPANDA_HEALTH=$(kubectl exec -n portfolio redpanda-0 -c redpanda -- \
+  rpk cluster health 2>/dev/null || echo "error")
+
+if echo "$REDPANDA_HEALTH" | grep -qi "healthy"; then
+    log_success "Redpanda cluster healthy"
+else
+    log_warn "Redpanda health returned: '$REDPANDA_HEALTH'"
 fi
 echo ""
 
@@ -630,7 +713,18 @@ if ! kubectl wait --for=condition=complete job/redpanda-init -n portfolio --time
     exit 1
 fi
 
-log_success "Redpanda topics created"
+sleep 5
+
+log_info "Verifying Redpanda topics..."
+TOPICS=$(kubectl exec -n portfolio redpanda-0 -c redpanda -- \
+  rpk topic list 2>/dev/null || echo "error")
+
+if echo "$TOPICS" | grep -q "user-logins"; then
+    log_success "Redpanda topics created and visible"
+else
+    log_warn "Topic list returned: '$TOPICS' (expected user-logins, user-logouts)"
+fi
+
 echo ""
 
 # =============================================================================
@@ -638,27 +732,52 @@ echo ""
 # =============================================================================
 log_info "Deploying Consumer worker..."
 kubectl apply -f "$K8S_DIR/13-consumer.yaml"
+
 if ! wait_for_deployment_ready "consumer" "portfolio" 60 "Consumer"; then
     log_error "Consumer deployment failed"
-    # NOTE: replace <consumer-container-name> with the container name from 13-consumer.yaml
-    kubectl logs -n portfolio -l app=consumer -c <consumer-container-name> --tail=30 2>/dev/null || true
+    kubectl logs -n portfolio -l app=consumer -c consumer --tail=30 2>/dev/null || true
     exit 1
 fi
-echo ""
 
+sleep 5
+
+log_info "Verifying Consumer is connected to Redpanda and Temporal..."
+CONSUMER_LOGS=$(kubectl logs -n portfolio -l app=consumer -c consumer --tail=50 2>/dev/null || echo "error")
+
+if echo "$CONSUMER_LOGS" | grep -q "consumer_started" && \
+   echo "$CONSUMER_LOGS" | grep -q "temporal_connected"; then
+    log_success "Consumer connected to Redpanda and Temporal"
+else
+    log_warn "Could not confirm consumer startup — check logs:"
+    log_warn "  kubectl logs -n portfolio -l app=consumer -c consumer"
+fi
+echo ""
 # =============================================================================
 # Backend
 # =============================================================================
 log_info "Deploying Backend (1 replica)..."
 kubectl apply -f "$K8S_DIR/09-backend.yaml"
+
 if ! wait_for_pods_ready "app=backend" "portfolio" 300 "Backend"; then
     log_error "Backend failed"
-    # NOTE: replace <backend-container-name> with the container name from 09-backend.yaml
-    kubectl logs -n portfolio -l app=backend -c <backend-container-name> --tail=30 2>/dev/null || true
+    kubectl logs -n portfolio -l app=backend -c backend --tail=30 2>/dev/null || true
     exit 1
 fi
-echo ""
 
+log_info "Verifying Backend health endpoint..."
+
+BACKEND_POD=$(kubectl get pods -n portfolio -l app=backend -o jsonpath='{.items[0].metadata.name}')
+BACKEND_HEALTH=$(kubectl exec -n portfolio "$BACKEND_POD" -c backend -- \
+  python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/api/v1/health').getcode())" \
+  2>/dev/null || echo "error")
+
+if [ "$BACKEND_HEALTH" = "200" ]; then
+    log_success "Backend healthy (HTTP 200)"
+else
+    log_warn "Backend health returned: '$BACKEND_HEALTH' (expected 200)"
+fi
+
+echo ""
 # =============================================================================
 # Monitoring (Grafana + Loki + Alloy)
 # =============================================================================
@@ -682,11 +801,20 @@ kubectl apply -f "$K8S_DIR/17-monitoring.yaml"
 
 if ! wait_for_pods_ready "app=grafana" "portfolio" 120 "Grafana"; then
     log_error "Grafana failed"
-    # NOTE: replace <grafana-container-name> with the container name from 17-monitoring.yaml
-    kubectl logs -n portfolio -l app=grafana -c <grafana-container-name> --tail=30 2>/dev/null || true
+    kubectl logs -n portfolio -l app=grafana -c grafana --tail=30 2>/dev/null || true
     exit 1
 fi
-echo ""
+
+log_info "Verifying Grafana health..."
+GRAFANA_POD=$(kubectl get pods -n portfolio -l app=grafana -o jsonpath='{.items[0].metadata.name}')
+GRAFANA_HEALTH=$(kubectl exec -n portfolio "$GRAFANA_POD" -c grafana -- \
+  wget -qO- http://localhost:3000/api/health 2>/dev/null || echo "error")
+
+if echo "$GRAFANA_HEALTH" | tr -d ' \n' | grep -q '"database":"ok"'; then
+    log_success "Grafana healthy (database ok)"
+else
+    log_warn "Grafana health returned: '$GRAFANA_HEALTH'"
+fi
 
 # =============================================================================
 # Grafana User Init (creates demo Viewer user)
@@ -711,8 +839,25 @@ echo ""
 # =============================================================================
 log_info "Deploying Nginx..."
 kubectl apply -f "$K8S_DIR/10-nginx.yaml"
+
 if ! wait_for_pods_ready "app=nginx" "portfolio" 60 "Nginx"; then
     log_error "Nginx failed"; exit 1
+fi
+
+# /health is defined on the HTTPS server block (443) only — the HTTP block (80)
+# only handles ACME challenges and redirects everything else.
+# wget inside the pod fails because it refuses the self-signed cert even with
+# --no-check-certificate when connecting to localhost.
+# curl -sk works: -s silences progress, -k skips cert verification.
+# We hit localhost directly on the droplet because nginx is the only ingress
+# point — it terminates TLS for the entire cluster, so it's always reachable
+# at the droplet's loopback address on 443.
+NGINX_HEALTH=$(curl -sk https://localhost/health 2>/dev/null || echo "error")
+
+if echo "$NGINX_HEALTH" | grep -q "healthy"; then
+    log_success "Nginx healthy"
+else
+    log_warn "Nginx health returned: '$NGINX_HEALTH'"
 fi
 echo ""
 
@@ -739,7 +884,6 @@ echo "  ACCESS YOUR APP"
 echo "============================================"
 echo ""
 echo "  Frontend: https://testproveoportfolio.xyz/front-page/front-page.html"
-echo "  Health:   https://testproveoportfolio.xyz/health"
 echo "  Grafana:  https://testproveoportfolio.xyz/grafana"
 echo ""
 echo "============================================"
@@ -781,23 +925,23 @@ echo "  MEMORY BUDGET (4GB droplet + 2GB swap)"
 echo "============================================"
 echo ""
 echo "  k3s system:         ~300MB"
-echo "  PostgreSQL primary:  ~104Mi actual"
-echo "  PostgreSQL replica:   ~34Mi actual"
-echo "  Redis:                 ~4Mi actual"
-echo "  MinIO:                ~81Mi actual"
-echo "  Image Service:       ~331Mi actual (TensorFlow NSFW)"
-echo "  Backend:              ~79Mi actual"
+echo "  PostgreSQL primary:   ~83Mi actual"
+echo "  PostgreSQL replica:   ~49Mi actual"
+echo "  Redis:                 ~6Mi actual"
+echo "  MinIO:                ~86Mi actual"
+echo "  Image Service:       ~367Mi actual (TensorFlow NSFW)"
+echo "  Backend:              ~75Mi actual"
 echo "  Nginx:                 ~4Mi actual"
-echo "  Redpanda:            ~146Mi actual"
-echo "  Consumer:             ~27Mi actual"
-echo "  Temporal server:      ~85Mi actual"
-echo "  Temporal UI:           ~9Mi actual"
-echo "  Temporal worker:      ~62Mi actual"
-echo "  LibreTranslate:      ~226Mi actual"
-echo "  Loki:                ~128Mi actual"
-echo "  Alloy:                ~64Mi actual"
-echo "  Grafana:             ~128Mi actual"
+echo "  Redpanda:            ~300Mi actual"
+echo "  Consumer:             ~25Mi actual"
+echo "  Temporal server:      ~91Mi actual"
+echo "  Temporal UI:           ~7Mi actual"
+echo "  Temporal worker:      ~50Mi actual"
+echo "  LibreTranslate:      ~560Mi actual (en+es models warm)"
+echo "  Loki:                 ~58Mi actual"
+echo "  Alloy:                ~45Mi actual"
+echo "  Grafana:              ~86Mi actual"
 echo "  ─────────────────────────────────"
-echo "  Total pod actual:   ~1376Mi"
-echo "  Node used:           ~2.3Gi (includes k3s, kernel, buff/cache)"
+echo "  Total pod actual:   ~1892Mi"
+echo "  Node used:           ~3.2Gi (includes k3s, kernel, buff/cache)"
 echo "  Available:            4096MB RAM + 2048MB swap"

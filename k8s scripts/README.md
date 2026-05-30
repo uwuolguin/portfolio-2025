@@ -934,39 +934,50 @@ configured requests/limits from the manifests. Use `kubectl top pods -n portfoli
 to verify on your deployment.
 
 ```
-Component              Actual     Request    Limit
---------------------------------------------------
-k3s system             ~300MB     -          -
-postgres-primary        104Mi     192Mi      384Mi
-postgres-replica         34Mi     128Mi      256Mi
-redis                     4Mi      32Mi       96Mi
-minio                    81Mi     128Mi      256Mi
-image-service           331Mi     384Mi      768Mi   (TensorFlow NSFW)
-backend                  79Mi     192Mi      512Mi
-nginx                     4Mi      32Mi      128Mi
-redpanda                146Mi     512Mi      768Mi
-consumer                 27Mi      64Mi      128Mi
-temporal                 85Mi     256Mi      512Mi
-temporal-ui               9Mi      64Mi      128Mi
-temporal-worker          62Mi     128Mi      256Mi
-libretranslate          226Mi     196Mi      384Mi   (en+es models only)
-loki                    128Mi     128Mi      256Mi
-alloy                    57Mi      64Mi      128Mi   (replaced Promtail, EOL March 2026)
-grafana                 128Mi     128Mi      256Mi
---------------------------------------------------
-Current actual total   ~1305Mi
-Current node used       ~2.3Gi   (includes k3s overhead, kernel, buff/cache)
---------------------------------------------------
-Total requests          ~2628Mi
-Total limits            ~5152Mi
-Available                4096Mi RAM + 2048Mi swap
+    Component              Actual     Request    Limit
+    --------------------------------------------------
+    k3s system             ~300MB     -          -
+    postgres-primary         83Mi     192Mi      384Mi
+    postgres-replica         49Mi     128Mi      256Mi
+    redis                     6Mi      32Mi       96Mi
+    minio                    86Mi     128Mi      256Mi
+    image-service           367Mi     384Mi      768Mi   (TensorFlow NSFW)
+    backend                  75Mi     192Mi      512Mi
+    nginx                     4Mi      32Mi      128Mi
+    redpanda                300Mi     512Mi      768Mi
+    consumer                 25Mi      64Mi      128Mi
+    temporal                 91Mi     256Mi      512Mi
+    temporal-ui               7Mi      64Mi      128Mi
+    temporal-worker          50Mi     128Mi      256Mi
+    libretranslate          560Mi     400Mi     1000Mi   (en+es models warm, both directions)
+    loki                     58Mi     128Mi      256Mi
+    alloy                    45Mi      64Mi      128Mi   (replaced Promtail, EOL March 2026)
+    grafana                  86Mi     128Mi      256Mi
+    --------------------------------------------------
+    Current actual total   ~1892Mi
+    Current node used        ~3.2Gi  (includes k3s overhead, kernel, buff/cache)
+    --------------------------------------------------
+    Total requests          ~2836Mi
+    Total limits            ~5832Mi
+    Available                4096Mi RAM + 2048Mi swap
 ```
 
-> The gap between actual pod usage and node used is k3s system
-> processes, kernel buffers, and page cache - normal and expected.
-> Image service is the heaviest pod at ~331Mi actual - TensorFlow keeps the
-> model loaded in memory at all times.
-> libretranslate actual varies: ~60Mi cold, ~226Mi with models warm.
+> The gap between actual pod usage (~1892Mi) and node used (~3.2Gi) is not
+> a contradiction — pod memory is what the processes inside containers are
+> actively using. Node memory includes everything else: the k3s agent, the
+> Linux kernel, filesystem page cache, and kernel buffers. Those live outside
+> any pod but still consume RAM on the same machine.
+> libretranslate is currently the heaviest pod at ~560Mi with both en→es and
+> es→en models warm. Cold (models not yet loaded) it sits around ~60Mi.
+> `free` is literally unused RAM — nothing touching it.
+> `available` is free + whatever the kernel can reclaim on demand, mostly
+> buff/cache. The kernel uses spare RAM to cache disk reads but gives it
+> back instantly if a process needs it. So `available` is the realistic
+> number of how much a new process could actually get.
+> In this cluster: 117Mi truly free, 635Mi effectively usable.
+> buff/cache (887Mi) is file contents and filesystem metadata the kernel
+> cached in RAM to avoid hitting disk twice. It is not locked — the kernel
+> evicts it silently the moment any process needs the memory.
 ---
 
 ## 🌐 Linux Networking Fundamentals — Read This First
