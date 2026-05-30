@@ -670,13 +670,12 @@ fi
 log_info "Verifying Temporal worker registered task queue..."
 WORKER_LOGS=$(kubectl logs -n portfolio -l app=temporal-worker -c temporal-worker --tail=20 2>/dev/null || echo "error")
 
-if echo "$WORKER_LOGS" | grep -qi "worker"; then
-    log_success "Temporal worker running"
+if echo "$WORKER_LOGS" | grep -q "temporal_worker_polling"; then
+    log_success "Temporal worker polling auth-queue"
 else
     log_warn "Could not confirm worker task queue registration — check logs:"
     log_warn "  kubectl logs -n portfolio -l app=temporal-worker -c temporal-worker"
 fi
-echo ""
 
 # =============================================================================
 # Redpanda
