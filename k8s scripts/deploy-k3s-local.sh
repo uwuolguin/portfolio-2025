@@ -430,12 +430,12 @@ kubectl apply -f "$K8S_DIR/04-postgres-primary.yaml"
 
 if ! wait_for_statefulset_ready "postgres-primary" "portfolio" 240 "PostgreSQL Primary"; then
     log_error "PostgreSQL Primary failed"
-    kubectl logs -n portfolio postgres-primary-0 --tail=30 2>/dev/null || true
+    kubectl logs -n portfolio postgres-primary-0 -c postgres --tail=30 2>/dev/null || true
     exit 1
 fi
 
 sleep 5
-kubectl exec -n portfolio postgres-primary-0 -- \
+kubectl exec -n portfolio postgres-primary-0 -c postgres -- \
   env PGPASSWORD="$POSTGRES_PASSWORD" \
   psql -U postgres -d portfolio -c \
   "SELECT pg_create_physical_replication_slot('replica_slot_1')
@@ -446,13 +446,13 @@ kubectl exec -n portfolio postgres-primary-0 -- \
    );" \
   2>/dev/null || true
 
-kubectl exec -n portfolio postgres-primary-0 -- \
+kubectl exec -n portfolio postgres-primary-0 -c postgres -- \
   env PGPASSWORD="$POSTGRES_PASSWORD" \
   psql -U postgres -d portfolio -c \
   "CREATE EXTENSION IF NOT EXISTS pg_trgm;" \
   2>/dev/null || true
 
-kubectl exec -n portfolio postgres-primary-0 -- \
+kubectl exec -n portfolio postgres-primary-0 -c postgres -- \
   env PGPASSWORD="$POSTGRES_PASSWORD" \
   psql -U postgres -d portfolio -c \
   "CREATE EXTENSION IF NOT EXISTS pg_cron;" \
@@ -469,8 +469,37 @@ kubectl apply -f "$K8S_DIR/05-postgres-replica.yaml"
 
 if ! wait_for_statefulset_ready "postgres-replica" "portfolio" 300 "PostgreSQL Replica"; then
     log_warn "Replica not ready - backend will use primary for reads"
-    log_warn "Check: kubectl logs -n portfolio postgres-replica-0"
+    log_warn "Check: kubectl logs -n portfolio postgres-replica-0 -c postgres"
 fi
+
+log_info "Verifying replication state..."
+sleep 20
+
+REPL_STATE=$(kubectl exec -n portfolio postgres-primary-0 -c postgres -- \
+  env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U postgres -d portfolio -tAc \
+  "SELECT state FROM pg_stat_replication WHERE application_name = 'replica1';" \
+  2>/dev/null || echo "error")
+
+if [ "$REPL_STATE" = "streaming" ]; then
+    log_success "Replication active (replica1 is streaming)"
+else
+    log_warn "Replication state: '$REPL_STATE' (expected 'streaming')"
+    log_warn "Check: kubectl logs -n portfolio postgres-replica-0 -c postgres"
+fi
+
+RECOVERY=$(kubectl exec -n portfolio postgres-replica-0 -c postgres -- \
+  env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U postgres -d postgres -tAc \
+  "SELECT pg_is_in_recovery();" \
+  2>/dev/null || echo "error")
+
+if [ "$RECOVERY" = "t" ]; then
+    log_success "Replica is in recovery mode (standby confirmed)"
+else
+    log_warn "Replica pg_is_in_recovery() returned: '$RECOVERY' (expected 't')"
+fi
+
 echo ""
 
 # =============================================================================
@@ -479,7 +508,14 @@ echo ""
 log_info "Deploying Redis..."
 kubectl apply -f "$K8S_DIR/06-redis.yaml"
 if ! wait_for_pods_ready "app=redis" "portfolio" 60 "Redis"; then
-    log_error "Redis failed"; exit 1
+    log_warn "Redis not ready — cache and rate limiting will be unavailable"
+else
+    REDIS_PING=$(kubectl exec -n portfolio deployment/redis -- redis-cli ping 2>/dev/null || echo "error")
+    if [ "$REDIS_PING" = "PONG" ]; then
+        log_success "Redis accepting connections"
+    else
+        log_warn "Redis ping returned: '$REDIS_PING' (expected 'PONG')"
+    fi
 fi
 echo ""
 
@@ -490,6 +526,16 @@ log_info "Deploying MinIO..."
 kubectl apply -f "$K8S_DIR/07-minio.yaml"
 if ! wait_for_pods_ready "app=minio" "portfolio" 90 "MinIO"; then
     log_error "MinIO failed"; exit 1
+fi
+
+MINIO_HEALTH=$(kubectl exec -n portfolio deployment/minio -- \
+  curl -s -o /dev/null -w "%{http_code}" http://localhost:9000/minio/health/ready \
+  2>/dev/null || echo "error")
+
+if [ "$MINIO_HEALTH" = "200" ]; then
+    log_success "MinIO healthy (HTTP 200)"
+else
+    log_warn "MinIO health check returned: '$MINIO_HEALTH' (expected '200')"
 fi
 echo ""
 
@@ -535,10 +581,11 @@ echo ""
 log_info "Registering Temporal default namespace..."
 TEMPORAL_POD=$(kubectl get pods -n portfolio -l app=temporal -o jsonpath='{.items[0].metadata.name}')
 
-if kubectl exec -n portfolio "$TEMPORAL_POD" -- tctl namespace describe default &>/dev/null 2>&1; then
+# NOTE: replace <temporal-container-name> with the container name from 14-temporal.yaml
+if kubectl exec -n portfolio "$TEMPORAL_POD" -c <temporal-container-name> -- tctl namespace describe default &>/dev/null 2>&1; then
     log_success "Temporal default namespace already exists"
 else
-    kubectl exec -n portfolio "$TEMPORAL_POD" -- tctl namespace register --retention 7 default
+    kubectl exec -n portfolio "$TEMPORAL_POD" -c <temporal-container-name> -- tctl namespace register --retention 7 default
     log_success "Temporal default namespace registered"
 fi
 echo ""
@@ -551,7 +598,8 @@ kubectl apply -f "$K8S_DIR/15-temporal-worker.yaml"
 
 if ! wait_for_deployment_ready "temporal-worker" "portfolio" 120 "Temporal worker"; then
     log_error "Temporal worker failed"
-    kubectl logs -n portfolio -l app=temporal-worker --tail=30 2>/dev/null || true
+    # NOTE: replace <temporal-worker-container-name> with the container name from 15-temporal-worker.yaml
+    kubectl logs -n portfolio -l app=temporal-worker -c <temporal-worker-container-name> --tail=30 2>/dev/null || true
     exit 1
 fi
 echo ""
@@ -564,7 +612,8 @@ kubectl apply -f "$K8S_DIR/11-redpanda.yaml"
 
 if ! wait_for_statefulset_ready "redpanda" "portfolio" 120 "Redpanda"; then
     log_error "Redpanda failed"
-    kubectl logs -n portfolio redpanda-0 --tail=30 2>/dev/null || true
+    # NOTE: replace <redpanda-container-name> with the container name from 11-redpanda.yaml
+    kubectl logs -n portfolio redpanda-0 -c <redpanda-container-name> --tail=30 2>/dev/null || true
     exit 1
 fi
 echo ""
@@ -591,7 +640,8 @@ log_info "Deploying Consumer worker..."
 kubectl apply -f "$K8S_DIR/13-consumer.yaml"
 if ! wait_for_deployment_ready "consumer" "portfolio" 60 "Consumer"; then
     log_error "Consumer deployment failed"
-    kubectl logs -n portfolio -l app=consumer --tail=30 2>/dev/null || true
+    # NOTE: replace <consumer-container-name> with the container name from 13-consumer.yaml
+    kubectl logs -n portfolio -l app=consumer -c <consumer-container-name> --tail=30 2>/dev/null || true
     exit 1
 fi
 echo ""
@@ -603,7 +653,8 @@ log_info "Deploying Backend (1 replica)..."
 kubectl apply -f "$K8S_DIR/09-backend.yaml"
 if ! wait_for_pods_ready "app=backend" "portfolio" 300 "Backend"; then
     log_error "Backend failed"
-    kubectl logs -n portfolio -l app=backend --tail=30 2>/dev/null || true
+    # NOTE: replace <backend-container-name> with the container name from 09-backend.yaml
+    kubectl logs -n portfolio -l app=backend -c <backend-container-name> --tail=30 2>/dev/null || true
     exit 1
 fi
 echo ""
@@ -631,7 +682,8 @@ kubectl apply -f "$K8S_DIR/17-monitoring.yaml"
 
 if ! wait_for_pods_ready "app=grafana" "portfolio" 120 "Grafana"; then
     log_error "Grafana failed"
-    kubectl logs -n portfolio -l app=grafana --tail=30 2>/dev/null || true
+    # NOTE: replace <grafana-container-name> with the container name from 17-monitoring.yaml
+    kubectl logs -n portfolio -l app=grafana -c <grafana-container-name> --tail=30 2>/dev/null || true
     exit 1
 fi
 echo ""
@@ -707,7 +759,7 @@ echo "     kubectl exec -n portfolio deployment/backend -- \\"
 echo "       python -m scripts.database.manage_search_refresh_cron"
 echo ""
 echo "  4. Check replication:"
-echo "     kubectl exec -n portfolio postgres-primary-0 -- \\"
+echo "     kubectl exec -n portfolio postgres-primary-0 -c postgres -- \\"
 echo "       psql -U postgres -d portfolio -c \\"
 echo "       'SELECT client_addr, state FROM pg_stat_replication;'"
 echo ""

@@ -460,7 +460,11 @@ kubectl logs -n portfolio deployment/libretranslate -f
 # Look for: "Loaded" or "Listening at: http://0.0.0.0:5000"
 
 # Test a translation directly inside the cluster
-kubectl exec -n portfolio deployment/backend --   curl -s -X POST http://libretranslate:5000/translate   -H "Content-Type: application/json"   -d '{"q":"hello","source":"en","target":"es","format":"text"}'
+kubectl port-forward -n portfolio svc/libretranslate 5000:5000
+#Inside the droplet, in another terminal
+curl -s -X POST http://localhost:5000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"q":"hello","source":"en","target":"es","format":"text"}'
 # Expected: {"translatedText":"hola"}
 
 # Test the reverse
@@ -468,7 +472,8 @@ kubectl port-forward -n portfolio svc/libretranslate 5000:5000
 #Inside the droplet, in another terminal
 curl -s -X POST http://localhost:5000/translate \
   -H "Content-Type: application/json" \
-  -d '{"q":"hello","source":"en","target":"es","format":"text"}'
+  -d '{"q":"hola","source":"es","target":"en","format":"text"}'
+# Expected: {"translatedText":"hello"}
 
 # List available language pairs through port-forwarding
 kubectl port-forward -n portfolio svc/libretranslate 5000:5000

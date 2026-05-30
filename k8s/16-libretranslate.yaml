@@ -144,12 +144,12 @@ spec:
 
           resources:
             requests:
-              memory: "196Mi"
+              memory: "400Mi"
               cpu: "50m"
             limits:
               # en+es models fit in ~300Mi at runtime.
               # 384Mi gives headroom with a single worker.
-              memory: "384Mi"
+              memory: "1000Mi"
               cpu: "500m"
 
           volumeMounts:
