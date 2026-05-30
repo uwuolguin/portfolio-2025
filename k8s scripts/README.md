@@ -53,6 +53,11 @@ See this file "USEFULCOMMANDS.md" for commands to inspect the system at a deeper
 
 ## Quick Start
 
+### 0. Set Up SSL / HTTPS
+
+Before deploying, point your domain to this droplet and obtain TLS certificates.
+Full walkthrough: **[SSL Setup Guide](./SSL_SETUP.md)**.
+
 ### 1. Create Droplet and SSH In
 ```bash
 ssh deploy@<your-droplet-ip>
@@ -171,6 +176,14 @@ kubectl logs -n portfolio deployment/temporal-worker | grep 'uncaught_async'
 kubectl logs -n portfolio deployment/temporal-worker | grep 'uncaught_sync'
 kubectl logs -n portfolio deployment/temporal-worker | grep 'temporalio.core'
 ```
+### 7.5. Harden the Server
+
+Follow the **SSH Hardening** section in `USEFULCOMMANDS.md` for the full walkthrough.
+At minimum, complete these before considering the server production-ready:
+
+- Disable password auth, enable key-only login (`PasswordAuthentication no`)
+- Block Kubernetes ports from the public internet via UFW (`6443`, `10250`, `8472`)
+- Install `fail2ban` and `unattended-upgrades`
 
 ### 8. Access
 ```
