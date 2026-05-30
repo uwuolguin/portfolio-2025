@@ -6,7 +6,7 @@ set -e
 # Run as regular user with sudo privileges
 #
 # NO_CACHE flag:
-#   NO_CACHE=true ./build-and-import-k3s.sh   → passes --no-cache to every build
+#   NO_CACHE=true ./build-and-import-k3s.sh   → passes --pull --no-cache to every build
 #   ./build-and-import-k3s.sh                  → uses Docker layer cache (faster)
 #
 # The GitHub Actions deploy workflow always sets NO_CACHE=true to guarantee
@@ -47,7 +47,7 @@ cd "$REPO_ROOT"
 # =============================================================================
 NO_CACHE_FLAG=""
 if [ "${NO_CACHE:-false}" = "true" ]; then
-    NO_CACHE_FLAG="--no-cache"
+    NO_CACHE_FLAG="--pull --no-cache"
     log_warn "NO_CACHE=true — all Docker layer cache will be ignored"
     log_warn "Build times will be significantly longer (10-20 min for image-service)"
 fi
@@ -57,7 +57,7 @@ echo "Build & Import Images to k3s"
 echo "=================================="
 echo "Repo root: $(pwd)"
 if [ -n "$NO_CACHE_FLAG" ]; then
-    echo "Cache:     DISABLED (--no-cache)"
+    echo "Cache:     DISABLED (--pull --no-cache)"
 else
     echo "Cache:     enabled"
 fi
