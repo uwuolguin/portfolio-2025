@@ -8,7 +8,7 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    if: startsWith(github.event.head_commit.message, 'prod-')
+    if: startsWith(github.event.head_commit.message, 'prod-') || startsWith(github.event.head_commit.message, 'dopkp')
 
     steps:
       - uses: actions/checkout@v4
