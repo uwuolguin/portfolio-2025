@@ -284,11 +284,12 @@ For HTTPS first: **[SSL Setup Guide](./SSL_SETUP.md)**.
 ```
 proveo/
 |-- .github/
-|   +-- workflows/
-|       +-- deploy.yml           # Triggers on prod-* commits, SSHs into droplet and runs deploy scripts
-|       +-- eslint.yml           # Triggers on prod-* or dopkp commits, runs ESLint on frontend JS
-|       +-- pylint_backend.yml   # Triggers on prod-* or dopkp commits, runs pylint on backend/app
-|       +-- pylint_image_service.yml  # Triggers on prod-* or dopkp commits, runs pylint on image-service
+|    |-- workflows/
+|    |   |-- deploy.yml           # Triggers on prod-* commits, SSHs into droplet and runs deploy scripts
+|    |   |-- eslint.yml           # Triggers on prod-* or dopkp commits, runs ESLint on frontend JS
+|    |   |-- pylint_backend.yml   # Triggers on prod-* or dopkp commits, runs pylint on backend/app
+|    +-- +-- pylint_image_service.yml  # Triggers on prod-* or dopkp commits, runs pylint on image-service
+|
 |-- backend/                      # FastAPI application
 |   |-- app/
 |   |   |-- database/            # Read/write pools, transactions
