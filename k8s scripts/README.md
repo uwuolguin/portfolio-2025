@@ -82,8 +82,7 @@ newgrp docker
 ### 3.5. Allow deploy to Run sudo Without a Password (Required for CI)
 
 The GitHub Actions deploy workflow SSHes in as `deploy` and runs scripts that
-call `sudo` internally. Without this, the workflow fails with
-`sudo: a terminal is required to read the password`.
+call `sudo` internally. This prevents any sudo-related failures in non-interactive SSH sessions.
 
 ```bash
 # run as root

@@ -21,6 +21,12 @@ jobs:
           username: deploy
           key: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
           command_timeout: 60m
+          # Allocates a pseudo-terminal (PTY) for the SSH session.
+          # GitHub Actions SSHes in as a non-interactive shell — no TTY, no terminal.
+          # Some sudo configurations and scripts check for a terminal before executing,
+          # and will fail with "a terminal is required to read the password" without one.
+          # request_pty: true forces SSH to allocate a pseudo-terminal, making the session
+          # behave like a real interactive shell as far as sudo and other tools are concerned.
           request_pty: true
           script: |
             set -e
