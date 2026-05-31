@@ -13,6 +13,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Centralized application settings loaded from environment variables."""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -121,7 +123,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------------
     # Kafka / Redpanda
     # ------------------------------------------------------------------------
-    bootstrap_servers: str = "redpanda:9092"  # comma-separated for multiple brokers: "b1:9092,b2:9092,b3:9092"
+    bootstrap_servers: str = "redpanda:9092"
+    # comma-separated for multiple brokers: "b1:9092,b2:9092,b3:9092"
 
     # ------------------------------------------------------------------------
     # Temporal
