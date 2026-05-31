@@ -3,7 +3,7 @@ set -e
 
 # =============================================================================
 # Portfolio k3s Deployment Script - DigitalOcean 4GB Droplet
-# Run as regular user with sudo privileges
+# Run as regular user with sudo -n privileges
 # Deploys services SEQUENTIALLY to avoid OOM
 # =============================================================================
 
@@ -22,18 +22,16 @@ log_success() { printf '%b\n' "${GREEN}[OK]${NC} $1"; }
 log_warn()    { printf '%b\n' "${YELLOW}[WARN]${NC} $1"; }
 log_error()   { printf '%b\n' "${RED}[ERROR]${NC} $1"; }
 
+log_info "SCRIPT_DIR=$SCRIPT_DIR"
+log_info "PROJECT_ROOT=$PROJECT_ROOT"
+log_info "K8S_DIR=$K8S_DIR"
+
 echo "============================================"
 echo "Portfolio Deployment - DO 4GB Droplet"
 echo "============================================"
 echo ""
 echo "K8s manifests: $K8S_DIR"
 echo ""
-
-# Check sudo
-if ! sudo -v; then
-    log_error "This script requires sudo privileges."
-    exit 1
-fi
 
 # Show system resources
 log_info "System resources:"
@@ -46,8 +44,8 @@ echo ""
 if [ ! -f "$HOME/.kube/config" ]; then
     log_info "Setting up kubectl for user $USER..."
     mkdir -p "$HOME/.kube"
-    sudo cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
-    sudo chown "$USER:$(id -gn)" "$HOME/.kube/config"
+    sudo -n cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
+    sudo -n chown "$USER:$(id -gn)" "$HOME/.kube/config"
     chmod 600 "$HOME/.kube/config"
 fi
 export KUBECONFIG="$HOME/.kube/config"
@@ -174,14 +172,14 @@ log_info "Checking prerequisites..."
 
 if ! kubectl cluster-info &> /dev/null; then
     log_error "Cannot connect to k3s cluster."
-    log_error "Make sure k3s is running: sudo systemctl status k3s"
+    log_error "Make sure k3s is running: sudo -n systemctl status k3s"
     log_error "And kubeconfig exists: ls -la $HOME/.kube/config"
     exit 1
 fi
 
 MISSING=0
 for img in portfolio-backend:latest portfolio-image-service:latest portfolio-nginx:latest portfolio-postgres:16; do
-    if ! sudo k3s ctr images ls | grep -q "$img"; then
+    if ! sudo -n k3s ctr images ls | grep -q "$img"; then
         log_error "Missing image: $img"
         MISSING=1
     fi

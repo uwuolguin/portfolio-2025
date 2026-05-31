@@ -1,8 +1,5 @@
 name: Deploy to Production
 
-# Triggers on every push to main, but the job itself only runs
-# when the commit message starts with "prod- ".
-# This avoids burning GitHub Actions minutes on WIP commits.
 on:
   push:
     branches:
@@ -10,68 +7,116 @@ on:
 
 jobs:
   deploy:
+    # Only run deployments when the commit message starts with "prod-".
+    # Regular pushes to main will not trigger the deployment job.
     if: startsWith(github.event.head_commit.message, 'prod-')
+
     runs-on: ubuntu-latest
+
+    # Hard limit for the entire deployment job.
+    # Prevents a stuck deployment from running forever.
+    timeout-minutes: 180
 
     steps:
       - name: Deploy to Droplet via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DROPLET_HOST }}
-          username: deploy
-          key: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
-          command_timeout: 60m
-          # Allocates a pseudo-terminal (PTY) for the SSH session.
-          # GitHub Actions SSHes in as a non-interactive shell — no TTY, no terminal.
-          # Some sudo configurations and scripts check for a terminal before executing,
-          # and will fail with "a terminal is required to read the password" without one.
-          # request_pty: true forces SSH to allocate a pseudo-terminal, making the session
-          # behave like a real interactive shell as far as sudo and other tools are concerned.
-          request_pty: true
-          script: |
-            set -e
+        uses: appleboy/ssh-action@master
 
-            # ── 1. Nuke any local changes and force-pull main ──────────────
+        with:
+          # Public IP or hostname of the production droplet.
+          host: ${{ secrets.DROPLET_HOST }}
+
+          # Linux user used for deployments.
+          username: deploy
+
+          # SSH private key stored in GitHub Secrets.
+          key: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
+
+          # Maximum time allowed to establish the SSH connection.
+          timeout: 60s
+
+          # Maximum runtime for the remote script itself.
+          command_timeout: 180m
+
+          # Disable PTY allocation.
+          # CI/CD is non-interactive and PTYs are a common source
+          # of hanging Docker builds and deployment scripts.
+          request_pty: false
+
+          # Stop immediately when any command fails.
+          # Prevents continuing a deployment after an earlier error.
+          script_stop: true
+
+          script: |
+            # -e  : exit immediately on command failure
+            # -E  : preserve ERR traps in functions/subshells
+            # -u  : fail on undefined variables
+            # -o pipefail : fail pipelines if any command fails
+            set -Eeuo pipefail
+
+            # Disable interactive package manager prompts.
+            export DEBIAN_FRONTEND=noninteractive
+
+            # Move to project root.
             cd /home/deploy/portfolio-2025
 
-            git fetch origin main
-            git reset --hard origin/main
-            git clean -fd
+            echo "=== $(date) FETCH ==="
 
-            # ── 2. Enter the scripts directory ────────────────────────────
+            # Download latest Git metadata from origin.
+            git fetch origin main
+
+            echo "=== $(date) RESET ==="
+
+            # Force local checkout to exactly match origin/main.
+            # Removes any drift caused by manual server changes.
+            git reset --hard origin/main
+
+
+
+            # Enter deployment scripts directory.
             cd "k8s scripts"
 
-            # ── 3. Make all shell scripts executable ──────────────────────
+            # Ensure all deployment scripts are executable.
             chmod +x *.sh
 
-            # ── 4. Build Docker images and import them into k3s ───────────
+            echo "=== $(date) BUILD START ==="
+
+            # Rebuild every Docker image from scratch.
             NO_CACHE=true ./build-and-import-k3s.sh
 
-            # ── 5. Apply manifests and roll out the stack ─────────────────
+            echo "=== $(date) BUILD END ==="
+
+            echo "=== $(date) DEPLOY START ==="
+
+            # Apply Kubernetes manifests and perform deployment.
             ./deploy-k3s-local.sh
 
-            # ── 6. Wait for backend rollout to finish ─────────────────────
-            kubectl rollout status deployment/backend -n portfolio --timeout=300s
+            echo "=== $(date) DEPLOY END ==="
 
-            # ── 7. Seed test data ─────────────────────────────────────────
-            # On subsequent deploys the DB already has the test users/communes/products,
-            # so seed_test_data raises ValueError / UniqueViolationError for every row —
-            # all expected, all handled by the script's except-and-continue logic.
+            # Wait until the backend deployment is fully rolled out.
+            # Fails if Kubernetes cannot make the deployment healthy.
+            kubectl rollout status deployment/backend \
+              -n portfolio \
+              --timeout=300s
+
+            # Seed demo/test data after deployment.
             #
-            # The pipe chain cleans up the output:
-            #   2>&1          → merges stderr into stdout so grep can see both
-            #   grep -v "..."  → drops lines matching any | -separated pattern:
-            #                     already registered / already exists → duplicate user/commune/product noise
-            #                     UniqueViolationError               → postgres unique constraint noise
-            #                     transaction_                       → transaction_started / transaction_rolled_back
-            #                     Traceback                          → python traceback header
-            #                     ╭ │ ╰ ❱                           → rich box-drawing chars framing the traceback body
-            #   grep .         → drops leftover blank lines filtering leaves behind
+            # 2>&1 merges stderr into stdout so both streams pass through
+            # the same filtering pipeline.
+            #
+            # The seed script is idempotent. Re-running it can produce
+            # expected duplicate-entry messages for records that already
+            # exist in the database.
+            #
+            # grep -v removes known non-fatal messages to keep the CI log
+            # readable while still showing real errors and tracebacks.
+            #
+            # The final grep removes empty lines left behind by filtering.
             kubectl exec -n portfolio deployment/backend -- \
               python -m scripts.database.seed_test_data 2>&1 \
-              | grep -v "already registered\|already exists\|UniqueViolationError\|transaction_\|Traceback\|╭\|│\|╰\|❱" \
+              | grep -v "already registered\|already exists\|UniqueViolationError\|transaction_\|╭\|│\|╰\|❱" \
               | grep .
 
-            # ── 8. Run test suite ─────────────────────────────────────────
+            # Execute backend test suite inside the running container.
+            # Final verification that the deployed application is healthy.
             kubectl exec -n portfolio deployment/backend -- \
               pytest app/tests/ -v
