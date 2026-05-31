@@ -81,7 +81,7 @@ jobs:
             echo "=== $(date) BUILD START ==="
 
             # Rebuild every Docker image from scratch.
-            NO_CACHE=true ./build-and-import-k3s.sh
+            # NO_CACHE=true ./build-and-import-k3s.sh
 
             echo "=== $(date) BUILD END ==="
 
@@ -120,3 +120,8 @@ jobs:
             # Final verification that the deployed application is healthy.
             kubectl exec -n portfolio deployment/backend -- \
               pytest app/tests/ -v
+            # Rolling restart all deployments (zero downtime, one pod at a time)
+            kubectl rollout restart deployment -n portfolio
+
+            # Rolling restart all statefulsets
+            kubectl rollout restart statefulset -n portfolio
