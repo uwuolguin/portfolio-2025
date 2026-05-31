@@ -81,7 +81,7 @@ jobs:
             echo "=== $(date) BUILD START ==="
 
             # Rebuild every Docker image from scratch.
-            # NO_CACHE=true ./build-and-import-k3s.sh
+            NO_CACHE=true ./build-and-import-k3s.sh
 
             echo "=== $(date) BUILD END ==="
 
