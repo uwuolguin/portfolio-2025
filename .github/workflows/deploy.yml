@@ -20,8 +20,8 @@ jobs:
           host: ${{ secrets.DROPLET_HOST }}
           username: deploy
           key: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
-          # Long timeout — build-and-import-k3s.sh can take 10-20 min
           command_timeout: 60m
+          request_pty: true
           script: |
             set -e
 
