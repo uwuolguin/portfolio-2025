@@ -79,6 +79,23 @@ chmod +x *.sh
 # After install, activate docker group:
 newgrp docker
 ```
+### 3.5. Allow deploy to Run sudo Without a Password (Required for CI)
+
+The GitHub Actions deploy workflow SSHes in as `deploy` and runs scripts that
+call `sudo` internally. Without this, the workflow fails with
+`sudo: a terminal is required to read the password`.
+
+```bash
+# run as root
+sudo su -
+echo "deploy ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/deploy
+chmod 440 /etc/sudoers.d/deploy
+exit
+```
+
+> This is safe for a single-user personal server where `deploy` is the only
+> non-root account. On multi-tenant servers you would scope this to specific
+> commands instead of `ALL`.
 
 ### 4. Build Images on Droplet
 ```bash
