@@ -1,7 +1,7 @@
 name: Deploy to Production
 
 # Triggers on every push to main, but the job itself only runs
-# when the commit message starts with "prod-".
+# when the commit message starts with "prod- ".
 # This avoids burning GitHub Actions minutes on WIP commits.
 on:
   push:
@@ -10,71 +10,62 @@ on:
 
 jobs:
   deploy:
+    if: startsWith(github.event.head_commit.message, 'prod- ')
     runs-on: ubuntu-latest
-    if: startsWith(github.event.head_commit.message, 'prod-')
 
     steps:
-      - name: Deploy to DigitalOcean droplet
+      - name: Deploy to Droplet via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DROPLET_IP }}
+          host: ${{ secrets.DROPLET_HOST }}
           username: deploy
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # Build + import can take 10-20 min (image-service has TensorFlow wheels).
-          # --no-cache means no layer reuse — worst case is always the ceiling.
-          command_timeout: 40m
+          key: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
+          # Long timeout — build-and-import-k3s.sh can take 10-20 min
+          command_timeout: 60m
           script: |
             set -e
 
-            echo "=========================================="
-            echo "Rolling Deploy — $(date -Iseconds)"
-            echo "Commit: ${{ github.event.head_commit.message }}"
-            echo "=========================================="
+            # ── 1. Nuke any local changes and force-pull main ──────────────
+            cd /home/deploy/portfolio-2025
 
-            cd ~/portfolio-2025
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd
 
-            # ── Ensure scripts are executable ────────────────────────────────
-            # git tracks the executable bit (100755) so this is normally a no-op.
-            # It's here as a safety net when switching droplets or cloning fresh —
-            # one prod- commit is enough to get everything working without manual chmod.
-            chmod +x "k8s scripts"/*.sh
-
-            # ── Step 1: Remove stale custom images from k3s ──────────────────
-            # Official images (postgres:16, redis:7, minio, redpanda, temporal,
-            # libretranslate, grafana, loki, alloy, busybox, alpine) are left alone.
-            # They are cached in k3s containerd and only get re-pulled if their
-            # tag changes in a manifest — kubectl apply handles that.
-            echo ""
-            echo "── Removing stale custom images from k3s ──"
-            for img in \
-              portfolio-backend \
-              portfolio-image-service \
-              portfolio-nginx \
-              portfolio-postgres; do
-              sudo k3s ctr images ls -q \
-                | grep "^${img}" \
-                | xargs -r sudo k3s ctr images rm \
-                && echo "  removed: ${img}" \
-                || echo "  not found (skip): ${img}"
-            done
-
-            # ── Step 2: Rebuild with zero cache and import ───────────────────
-            # NO_CACHE=true is passed to build-and-import-k3s.sh which passes
-            # --no-cache to every docker build call.
-            # This guarantees no stale layer sneaks through — at the cost of
-            # longer build times (~10-20 min for image-service / TensorFlow).
-            echo ""
-            echo "── Building images (no cache) and importing ──"
+            # ── 2. Enter the scripts directory ────────────────────────────
             cd "k8s scripts"
+
+            # ── 3. Make all shell scripts executable ──────────────────────
+            chmod +x *.sh
+
+            # ── 4. Build Docker images and import them into k3s ───────────
             NO_CACHE=true ./build-and-import-k3s.sh
 
-            # ── Step 3: Rolling deploy ────────────────────────────────────────
-            echo ""
-            echo "── Running rolling deploy ──"
-            ./rolling-deploy.sh
+            # ── 5. Apply manifests and roll out the stack ─────────────────
+            ./deploy-k3s-local.sh
 
-            echo ""
-            echo "=========================================="
-            echo "Deploy complete"
-            echo "=========================================="
+            # ── 6. Wait for backend rollout to finish ─────────────────────
+            kubectl rollout status deployment/backend -n portfolio --timeout=300s
+
+            # ── 7. Seed test data ─────────────────────────────────────────
+            # On subsequent deploys the DB already has the test users/communes/products,
+            # so seed_test_data raises ValueError / UniqueViolationError for every row —
+            # all expected, all handled by the script's except-and-continue logic.
+            #
+            # The pipe chain cleans up the output:
+            #   2>&1          → merges stderr into stdout so grep can see both
+            #   grep -v "..."  → drops lines matching any | -separated pattern:
+            #                     already registered / already exists → duplicate user/commune/product noise
+            #                     UniqueViolationError               → postgres unique constraint noise
+            #                     transaction_                       → transaction_started / transaction_rolled_back
+            #                     Traceback                          → python traceback header
+            #                     ╭ │ ╰ ❱                           → rich box-drawing chars framing the traceback body
+            #   grep .         → drops leftover blank lines filtering leaves behind
+            kubectl exec -n portfolio deployment/backend -- \
+              python -m scripts.database.seed_test_data 2>&1 \
+              | grep -v "already registered\|already exists\|UniqueViolationError\|transaction_\|Traceback\|╭\|│\|╰\|❱" \
+              | grep .
+
+            # ── 8. Run test suite ─────────────────────────────────────────
+            kubectl exec -n portfolio deployment/backend -- \
+              pytest app/tests/ -v

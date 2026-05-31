@@ -196,7 +196,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 - CI/CD is scoped to `prod-*` commit prefixes via GitHub Actions: not a full pipeline.
 - No backups. Local-path PVCs on one node: if the droplet dies, data goes with it.
 - Single point of failure. Single-node k3s means no high availability: if the droplet goes down, the entire stack goes down with it. Remediation: in a production environment this would be deployed across a managed Kubernetes control plane (EKS/GKE) with a multi-AZ node group.
-- Inline documentation: Manifests and scripts have no comments explaining non-obvious values or why a particular configuration was chosen. The goal for this repo is that every config value that isn't self-evident has a comment next to it.
+- Inline documentation: Manifests and scripts have comments explaining non-obvious values or why a particular configuration was chosen. The goal for this repo is that every config value that isn't self-evident has a comment next to it.
 - `force_rollback` on DB methods is a testing convenience, not a production pattern.
 - **Single-namespace monitoring**: Grafana, Loki, and Alloy run inside the `portfolio` namespace alongside the application. In a real multi-tenant environment, observability infrastructure lives in a dedicated `monitoring` namespace - the same Grafana/Loki stack then serves `portfolio`, `staging`, `payments`, or any other namespace without being coupled to one application. The mechanics: Alloy's `ClusterRole` grants `get/watch/list` on pods cluster-wide, and the `ClusterRoleBinding` maps that role to the `alloy` ServiceAccount in `monitoring`, so it can tail logs from every namespace while running in its own. Keeping them separate also means you can wipe `kubectl delete namespace portfolio` during a clean deploy cycle without taking down observability. For this single-environment demo the separation adds DNS complexity (`loki.monitoring.svc.cluster.local` vs `loki.portfolio.svc.cluster.local`) with no operational benefit, so everything lives in `portfolio`.
 
@@ -206,25 +206,25 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 | Pod | Manifest | Actual RAM |
 |-----|----------|-----------|
-| `postgres-primary-0` | `04-postgres-primary.yaml` | ~104Mi |
-| `postgres-replica-0` | `05-postgres-replica.yaml` | ~37Mi |
-| `redis-*` | `06-redis.yaml` | ~3Mi |
-| `minio-*` | `07-minio.yaml` | ~90Mi |
-| `image-service-*` | `08-image-service.yaml` | ~331Mi |
-| `backend-*` | `09-backend.yaml` | ~78Mi |
-| `nginx-*` | `10-nginx.yaml` | ~3Mi |
-| `redpanda-0` | `11-redpanda.yaml` | ~148Mi |
-| `consumer-*` | `13-consumer.yaml` | ~26Mi |
-| `temporal-*` | `14-temporal.yaml` | ~98Mi |
-| `temporal-ui-*` | `14-temporal.yaml` | ~6Mi |
-| `temporal-worker-*` | `15-temporal-worker.yaml` | ~53Mi |
-| `libretranslate-*` | `16-libretranslate.yaml` | ~122Mi |
-| `loki-*` | `17-monitoring.yaml` | ~71Mi |
-| `alloy-*` | `17-monitoring.yaml` | ~57Mi |
-| `grafana-*` | `17-monitoring.yaml` | ~100Mi |
-| **Subtotal (pods)** | | **~1,327Mi** |
+| `postgres-primary-0` | `04-postgres-primary.yaml` | ~83Mi |
+| `postgres-replica-0` | `05-postgres-replica.yaml` | ~49Mi |
+| `redis-*` | `06-redis.yaml` | ~6Mi |
+| `minio-*` | `07-minio.yaml` | ~86Mi |
+| `image-service-*` | `08-image-service.yaml` | ~367Mi |
+| `backend-*` | `09-backend.yaml` | ~75Mi |
+| `nginx-*` | `10-nginx.yaml` | ~4Mi |
+| `redpanda-0` | `11-redpanda.yaml` | ~300Mi |
+| `consumer-*` | `13-consumer.yaml` | ~25Mi |
+| `temporal-*` | `14-temporal.yaml` | ~91Mi |
+| `temporal-ui-*` | `14-temporal.yaml` | ~7Mi |
+| `temporal-worker-*` | `15-temporal-worker.yaml` | ~50Mi |
+| `libretranslate-*` | `16-libretranslate.yaml` | ~560Mi |
+| `loki-*` | `17-monitoring.yaml` | ~58Mi |
+| `alloy-*` | `17-monitoring.yaml` | ~45Mi |
+| `grafana-*` | `17-monitoring.yaml` | ~86Mi |
+| **Subtotal (pods)** | | **~1,892Mi** |
 | **System overhead** | k3s, containerd, dockerd, journald | **~1,131Mi** |
-| **Process total** | matches `free -h` used | **~2,458Mi (~2.4GB, 63%)** |
+| **Process total** | matches `free -h` used | **~3,023Mi (~3.0GB, 74%)** |
 | | | |
 | **buff/cache** | The kernel uses buff/cache to store frequently accessed data from disk in RAM so it does not have to read from disk again. The more of it there is, the faster the system feels. It gets freed automatically when a process needs more RAM, so it is never wasted. Trying to clear it manually gives a false sense of free memory and actually slows the system down. | **~1,638Mi** |
 | **Available** | RAM Linux can hand out before touching swap | **~1,434Mi** |
@@ -238,7 +238,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 | **Replicate this exact stack** | 4GB is the absolute minimum. The system is already using 215Mi of swap under low traffic, which means there is no real headroom. A minimum of **6GB is recommended** to keep the stack stable without relying on swap. |
 | **Add one more heavy service** | **8GB** is recommended. buff/cache will compete for the remaining available RAM under any meaningful load. |
 | **Production with real traffic** | **8GB minimum**, ideally **16GB**. Traffic spikes cause PostgreSQL and Redpanda to buffer aggressively, and the kernel cache needs room to stay warm rather than get evicted. |
-| **Could this run on 2GB?** | No. Process usage alone is 2.4GB under low traffic; the system would be deep in swap and performance would degrade badly. |
+| **Could this run on 2GB?** | No. Process usage alone is ~3.0GB under low traffic; the system would be deep in swap and performance would degrade badly. |
 ---
 
 ## Quick Local Preview
@@ -337,6 +337,7 @@ proveo/
 |   |-- deploy-k3s-local.sh
 |   |-- set-resend-key.sh
 |   |-- cleanup.sh
+|   |-- USEFULCOMMANDS.md        # Server exploration, SSH hardening
 |   +-- README.md                # K8s deployment guide
 |
 |-- nginx/                       # Reverse proxy + frontend
