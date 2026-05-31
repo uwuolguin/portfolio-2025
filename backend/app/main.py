@@ -40,19 +40,16 @@ async def scheduled_cleanup():
     logger.info("scheduled_cleanup_started")
     try:
         from scripts.maintenance.cleanup_orphan_images import cleanup_orphan_images
+
         await cleanup_orphan_images()
         logger.info("scheduled_cleanup_completed")
     except Exception as e:
-        logger.error(
-            "scheduled_cleanup_failed",
-            error=str(e),
-            exc_info=True
-        )
+        logger.error("scheduled_cleanup_failed", error=str(e), exc_info=True)
 
 
 def create_app() -> FastAPI:
     """Factory function to create a FastAPI app instance with fresh scheduler"""
-    
+
     scheduler = AsyncIOScheduler()
 
     @asynccontextmanager
@@ -66,7 +63,7 @@ def create_app() -> FastAPI:
 
             await redis_client.connect()
             logger.info("redis_connected")
-            
+
             await kafka_producer.start()
             logger.info("kafka_producer_initialized")
 
@@ -76,7 +73,7 @@ def create_app() -> FastAPI:
                 id="cleanup_orphan_images",
                 replace_existing=True,
                 max_instances=1,
-                coalesce=True
+                coalesce=True,
             )
             scheduler.start()
             logger.info(
@@ -84,10 +81,12 @@ def create_app() -> FastAPI:
                 jobs=[
                     {
                         "id": job.id,
-                        "next_run": job.next_run_time.isoformat() if job.next_run_time else None
+                        "next_run": (
+                            job.next_run_time.isoformat() if job.next_run_time else None
+                        ),
                     }
                     for job in scheduler.get_jobs()
-                ]
+                ],
             )
 
             logger.info("application_startup_complete")
