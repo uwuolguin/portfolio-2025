@@ -32,6 +32,8 @@ logger = structlog.get_logger(__name__)
 
 
 class UploadedImage(TypedDict):
+    """Type definition for uploaded image response."""
+
     image_id: str
     extension: str
     url: str
@@ -42,8 +44,6 @@ class UploadedImage(TypedDict):
 
 class ImageServiceError(Exception):
     """Exception raised for image service errors."""
-
-    pass
 
 
 _RETRY_POLICY: Final = retry(
@@ -190,6 +190,7 @@ class ImageServiceClient:
             }
 
         except CircuitBreakerOpen:
+            # Re-raise immediately - no cleanup needed
             raise
 
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
@@ -197,11 +198,13 @@ class ImageServiceClient:
             raise
 
         except ImageServiceError:
+            # Re-raise immediately - no cleanup needed
             raise
 
     async def delete_image(
         self, filename: str
     ) -> bool:  # pylint: disable=missing-function-docstring
+        """Delete an image from the storage service."""
         await _circuit_breaker.allow_call()
 
         try:
@@ -227,6 +230,7 @@ class ImageServiceClient:
             return False
 
         except CircuitBreakerOpen:
+            # Re-raise immediately - no cleanup needed
             raise
 
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
@@ -237,6 +241,7 @@ class ImageServiceClient:
     def get_extension_from_content_type(
         content_type: str,
     ) -> str:  # pylint: disable=missing-function-docstring
+        """Get file extension from content type using settings mapping."""
         extension = settings.content_type_map.get(content_type)  # type: ignore
         if not extension:
             raise ValueError(
@@ -249,6 +254,7 @@ class ImageServiceClient:
     def build_image_url(
         image_id: str, extension: str
     ) -> str:  # pylint: disable=missing-function-docstring
+        """Build the full URL for an image."""
         base = settings.api_base_url.rstrip("/")
         return f"{base}/images/{image_id}{extension}"
 

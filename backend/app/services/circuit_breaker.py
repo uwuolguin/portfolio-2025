@@ -7,8 +7,6 @@ import asyncio
 class CircuitBreakerOpen(Exception):
     """Exception raised when circuit breaker is open."""
 
-    pass
-
 
 class CircuitBreaker:
     """Circuit breaker to prevent repeated calls to failing external services."""
