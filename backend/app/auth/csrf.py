@@ -58,11 +58,10 @@ async def validate_csrf_token(request: Request) -> None:
             has_header=bool(header_token),
             ip=client_ip,
             method=request.method,
-            path=request.url.path
+            path=request.url.path,
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="CSRF token missing"
+            status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token missing"
         )
 
     if not secrets.compare_digest(cookie_token, header_token):
@@ -71,16 +70,15 @@ async def validate_csrf_token(request: Request) -> None:
             reason="token_mismatch",
             ip=client_ip,
             method=request.method,
-            path=request.url.path
+            path=request.url.path,
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="CSRF token invalid"
+            status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token invalid"
         )
 
     logger.debug(
         "csrf_validation_success",
         ip=client_ip,
         method=request.method,
-        path=request.url.path
+        path=request.url.path,
     )
