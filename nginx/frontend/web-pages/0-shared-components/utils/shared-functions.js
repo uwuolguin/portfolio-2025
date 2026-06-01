@@ -10,7 +10,7 @@ export function getInternalUrl(path) {
     return `${BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-function notifyStateChange(key) {
+function notifyStateChange(_key) {
     document.dispatchEvent(new Event('stateChange'));
 }
 
@@ -85,16 +85,12 @@ export async function apiRequest(url, options = {}) {
         headers['X-CSRF-Token'] = csrfToken;
     }
 
-    try {
-        const response = await fetch(url, {
-            ...options,
-            headers,
-            credentials: 'include'
-        });
-        return response;
-    } catch (error) {
-        throw error;
-    }
+    const response = await fetch(url, {
+        ...options,
+        headers,
+        credentials: 'include'
+    });
+    return response;
 }
 
 export async function checkAuthStatus() {
@@ -106,7 +102,7 @@ export async function checkAuthStatus() {
             setLoginState(isAuthenticated);
         }
         return isAuthenticated;
-    } catch (error) {
+    } catch (_error) {
         const currentState = getLoginState();
         if (currentState) {
             setLoginState(false);
@@ -124,7 +120,7 @@ export async function checkCompanyStatus() {
             setCompanyPublishState(hasCompany);
         }
         return hasCompany;
-    } catch (error) {
+    } catch (_error) {
         const currentState = getCompanyPublishState();
         if (currentState) {
             setCompanyPublishState(false);

@@ -42,14 +42,16 @@ export function validateEmailFormat(email) {
 
 export function sanitizePhone(phone) {
     if (typeof phone !== 'string') return '';
-    return phone.replace(/[^\d\s\-\(\)\+]/g, '').trim();
+    // Remove escape characters - use character class instead of escaping parentheses
+    return phone.replace(/[^\d\s\-()+]/g, '').trim();
 }
 
 export function validatePhoneFormat(phone) {
     if (typeof phone !== 'string') return false;
     const trimmed = phone.trim();
     if (trimmed.length > 30) return false;
-    return /^(?=.*\d)[\d\s\-\(\)\+]{8,}$/.test(trimmed);
+    // Remove escape characters - use character class instead of escaping parentheses
+    return /^(?=.*\d)[\d\s\-()+]{8,}$/.test(trimmed);
 }
 
 export function sanitizeURL(url) {
@@ -126,6 +128,7 @@ export function setHTML(element, html) {
     if (!(element instanceof HTMLElement)) {
         throw new TypeError('setHTML requires an HTMLElement');
     }
+    // eslint-disable-next-line no-undef
     element.innerHTML = DOMPurify.sanitize(String(html ?? ''), {
         ALLOWED_TAGS: [
             'p', 'br', 'strong', 'em', 'a', 'ul', 'ol', 'li',
@@ -181,7 +184,7 @@ export function buildDropdownOption(value, displayText) {
 export function buildBusinessCard(company, lang) {
     const card = document.createElement('div');
     card.className = 'business-card';
-    
+
     const pictureDiv = document.createElement('div');
     pictureDiv.className = 'card-picture';
     const img = document.createElement('img');
@@ -193,7 +196,7 @@ export function buildBusinessCard(company, lang) {
     };
     pictureDiv.appendChild(img);
     card.appendChild(pictureDiv);
-    
+
     const detailsDiv = document.createElement('div');
     detailsDiv.className = 'card-details';
 
@@ -211,7 +214,7 @@ export function buildBusinessCard(company, lang) {
     // For search results, use 'product_name' field (language already selected by backend)
     const productEl = document.createElement('p');
     productEl.className = 'product';
-    setText(productEl,company.product_name);
+    setText(productEl, company.product_name);
     detailsDiv.appendChild(productEl);
 
     // Commune

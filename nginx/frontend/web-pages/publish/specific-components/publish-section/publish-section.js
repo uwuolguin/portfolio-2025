@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const response = await apiRequest('/api/v1/companies/user/my-company');
             return response.ok;
-        } catch (error) {
+        } catch {
             return false;
         }
     }
