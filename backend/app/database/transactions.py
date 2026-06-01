@@ -942,7 +942,7 @@ class DB:  # pylint: disable=too-many-public-methods
 
     @staticmethod
     @db_retry()
-    async def create_company(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def create_company(
         conn: asyncpg.Connection,
         company_uuid: UUID,
         user_uuid: UUID,
@@ -959,6 +959,7 @@ class DB:  # pylint: disable=too-many-public-methods
         force_rollback: bool = False,
     ) -> CompanyRecord:
         """Create a company (WRITE operation - uses primary)"""
+        # pylint: disable=too-many-arguments,too-many-positional-arguments
         async with transaction(
             conn,
             isolation=IsolationLevel.READ_COMMITTED,
