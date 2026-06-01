@@ -144,3 +144,6 @@ jobs:
 
             # Rolling restart all statefulsets
             kubectl rollout restart statefulset -n portfolio
+
+            # Rolling restart all daemonsets
+            kubectl rollout restart daemonset -n portfolio
