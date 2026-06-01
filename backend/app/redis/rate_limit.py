@@ -1,9 +1,14 @@
+"""Per-IP and global rate limiting via Redis sliding-window counters."""
+
 import time
-from fastapi import Request, HTTPException, status
-from app.redis.redis_client import redis_client
+
 import structlog
+from fastapi import HTTPException, Request, status
+
+from app.redis.redis_client import redis_client
 
 logger = structlog.get_logger(__name__)
+
 
 async def enforce_rate_limit(
     request: Request,
@@ -11,11 +16,13 @@ async def enforce_rate_limit(
     ip_limit: int,
     global_limit: int,
     window_seconds: int = 60,
-):
+) -> None:
     """
-    Enforces per-IP and global rate limits using Redis counters.
-    """
+    Enforce per-IP and global rate limits using Redis pipeline counters.
 
+    Silently skips enforcement when Redis is unavailable so the app
+    continues serving traffic without cache dependency.
+    """
     if not redis_client.is_available():
         logger.warning("redis_unavailable_skip_rate_limit")
         return
@@ -41,15 +48,16 @@ async def enforce_rate_limit(
         logger.warning("rate_limit_ip_exceeded", ip=client_ip, route=route_name)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many requests from this IP (max {ip_limit}/min)."
+            detail=f"Too many requests from this IP (max {ip_limit}/min).",
         )
 
     if global_count > global_limit:
         logger.warning("rate_limit_global_exceeded", route=route_name)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many requests globally (max {global_limit}/min)."
+            detail=f"Too many requests globally (max {global_limit}/min).",
         )
+
 
 def rate_limit(
     *,
@@ -58,7 +66,13 @@ def rate_limit(
     global_limit: int,
     window_seconds: int = 60,
 ):
-    async def dependency(request: Request):
+    """
+    Return a FastAPI dependency that enforces rate limiting on a route.
+
+    Usage:
+        @router.get("/", dependencies=[Depends(rate_limit(route_name="list", ip_limit=10, global_limit=100))])
+    """
+    async def dependency(request: Request) -> None:
         await enforce_rate_limit(
             request=request,
             route_name=route_name,

@@ -1,9 +1,19 @@
-import json, functools
+"""
+Caching decorators for FastAPI route handlers.
+
+Provides cache_response — a factory decorator that transparently
+caches route results in Redis and serves them on subsequent requests.
+"""
+
+import functools
+import json
 from typing import Callable, Any
-from app.redis.redis_client import redis_client
-from app.config import settings
+
 import structlog
 from pydantic import BaseModel
+
+from app.redis.redis_client import redis_client
+from app.config import settings
 
 logger = structlog.get_logger(__name__)
 
@@ -98,12 +108,21 @@ logger = structlog.get_logger(__name__)
 # 6. original Pydantic objects returned to FastAPI for response validation
 #    (not json_result — FastAPI needs the models, not the dicts)
 # =============================================================================
+
+
 def cache_response(key_prefix: str, ttl: int = None):
+    """
+    Factory decorator that caches a route's return value in Redis.
+
+    Args:
+        key_prefix: Redis key under which the result is stored.
+        ttl: Time-to-live in seconds; falls back to settings.cache_ttl.
+    """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
             cache_key = key_prefix
-            
+
             if not redis_client.is_available():
                 return await func(*args, **kwargs)
 
@@ -113,33 +132,32 @@ def cache_response(key_prefix: str, ttl: int = None):
                     data = json.loads(cached)
                     if data:  # non-empty, return it
                         return data
-                    else:
-                        # empty list/dict cached — stale, flush and fall through to DB
-                        await redis_client.delete(cache_key)
-                        logger.warning("cache_empty_value_flushed", key=cache_key)
+                    # empty list/dict cached — stale, flush and fall through to DB
+                    await redis_client.delete(cache_key)
+                    logger.warning("cache_empty_value_flushed", key=cache_key)
                 except json.JSONDecodeError:
                     logger.warning("cache_json_decode_error", key=cache_key)
-                    await redis_client.delete(cache_key)  # also clean up bad data
+                    await redis_client.delete(cache_key)  # clean up bad data
 
             result = await func(*args, **kwargs)
-            
+
             if isinstance(result, list):
                 json_result = [
-                    item.model_dump(mode='json') if isinstance(item, BaseModel) else item 
+                    item.model_dump(mode="json") if isinstance(item, BaseModel) else item
                     for item in result
                 ]
             elif isinstance(result, BaseModel):
-                json_result = result.model_dump(mode='json')
+                json_result = result.model_dump(mode="json")
             else:
                 json_result = result
-            
+
             if json_result:
                 await redis_client.set(
-                    cache_key, 
-                    json.dumps(json_result), 
-                    expire=ttl or settings.cache_ttl
+                    cache_key,
+                    json.dumps(json_result),
+                    expire=ttl or settings.cache_ttl,
                 )
-            
+
             return result
 
         return wrapper
