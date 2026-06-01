@@ -1,5 +1,4 @@
-"""
-Translation Service — LibreTranslate (self-hosted)
+"""Translation Service — LibreTranslate (self-hosted)
 
 Self-hosted LibreTranslate instance running in the same Kubernetes cluster.
 Exposes a documented REST API and runs fully offline after language models
@@ -10,16 +9,17 @@ Translation quality is adequate for a demo. For production evaluate
 DeepL or a managed service with SLA guarantees.
 """
 
+from typing import Optional, Tuple
 import httpx
 import structlog
-from typing import Optional, Tuple
 
 from app.config import settings
 
 logger = structlog.get_logger(__name__)
 
 
-class UniversalTranslator:
+class UniversalTranslator:  # pylint: disable=too-few-public-methods
+    """Universal translator using self-hosted LibreTranslate."""
 
     # LibreTranslate endpoint — internal cluster DNS.
     # Configured via settings so it can be overridden in tests or
@@ -27,7 +27,9 @@ class UniversalTranslator:
     TRANSLATE_URL = f"{settings.libretranslate_url}/translate"
 
     @staticmethod
-    async def _translate_text(text: str, source_lang: str, target_lang: str) -> Optional[str]:
+    async def _translate_text(
+        text: str, source_lang: str, target_lang: str
+    ) -> Optional[str]:
         """
         Translate text using self-hosted LibreTranslate.
         Returns None if translation fails — callers fall back to duplication.
@@ -86,7 +88,7 @@ class UniversalTranslator:
             )
             return None
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(
                 "translation_unexpected_error",
                 error=str(e),
@@ -97,7 +99,7 @@ class UniversalTranslator:
             return None
 
     @staticmethod
-    async def translate(
+    async def translate(  # pylint: disable=too-many-return-statements
         text_es: Optional[str] = None,
         text_en: Optional[str] = None,
         field_name: str = "text",
@@ -128,7 +130,9 @@ class UniversalTranslator:
         if text_es:
             logger.debug(f"translating_{field_name}_es_to_en", text=text_es[:50])
 
-            translated_en = await UniversalTranslator._translate_text(text_es, "es", "en")
+            translated_en = await UniversalTranslator._translate_text(
+                text_es, "es", "en"
+            )
 
             if translated_en is None:
                 logger.warning(

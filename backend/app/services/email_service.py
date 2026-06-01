@@ -1,3 +1,5 @@
+"""Email service for sending verification emails using Resend."""  # pylint: disable=missing-module-docstring
+
 import resend
 from app.config import settings
 import structlog
@@ -5,14 +7,18 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-class EmailService:
+class EmailService:  # pylint: disable=too-few-public-methods
+    """Service for sending verification emails."""
+
     def __init__(self):
         resend.api_key = settings.resend_api_key
-    
-    async def send_verification_email(self, to_email: str, token: str, user_name: str) -> bool:
+
+    async def send_verification_email(
+        self, to_email: str, token: str, user_name: str
+    ) -> bool:
         """Send email verification link"""
         verification_url = f"{settings.api_base_url}/api/v1/users/verify-email/{token}"
-        
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -34,9 +40,9 @@ class EmailService:
                                     <table width="100%" cellpadding="0" cellspacing="0">
                                         <tr>
                                             <td align="center" style="padding: 20px 0;">
-                                                <a href="{verification_url}" 
-                                                   style="display: inline-block; padding: 14px 32px; 
-                                                          background-color: #4CAF50; color: #ffffff; 
+                                                <a href="{verification_url}"
+                                                   style="display: inline-block; padding: 14px 32px;
+                                                          background-color: #4CAF50; color: #ffffff;
                                                           text-decoration: none; border-radius: 4px;
                                                           font-weight: bold; font-size: 16px;">
                                                     Verify Email Address
@@ -63,25 +69,26 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         try:
-            response = resend.Emails.send({
-                "from":settings.email_from,
-                "to": to_email,
-                "subject": " Verify Your Proveo Account",
-                "html": html_content
-            })
-            
-            logger.info("verification_email_sent", 
-                       to=to_email, 
-                       email_id=response.get('id'))
+            response = resend.Emails.send(
+                {
+                    "from": settings.email_from,
+                    "to": to_email,
+                    "subject": " Verify Your Proveo Account",
+                    "html": html_content,
+                }
+            )
+
+            logger.info(
+                "verification_email_sent", to=to_email, email_id=response.get("id")
+            )
             return True
-            
-        except Exception as e:
-            logger.error("verification_email_failed", 
-                        to=to_email, 
-                        error=str(e),
-                        exc_info=True)
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error(
+                "verification_email_failed", to=to_email, error=str(e), exc_info=True
+            )
             return False
 
 

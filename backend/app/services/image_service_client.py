@@ -9,10 +9,10 @@ OPTIMIZED VERSION:
 - Type-safe responses
 """
 
+import logging
 from typing import Optional, TypedDict, Final
 import httpx
 import structlog
-import logging
 
 from tenacity import (
     retry,
@@ -41,15 +41,15 @@ class UploadedImage(TypedDict):
 
 
 class ImageServiceError(Exception):
+    """Exception raised for image service errors."""
+
     pass
 
 
 _RETRY_POLICY: Final = retry(
     stop=stop_after_attempt(settings.max_retries),
     wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type(
-        (httpx.ConnectError, httpx.TimeoutException)
-    ),
+    retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
@@ -94,17 +94,20 @@ class ImageServiceClient:
         )
 
     async def close(self) -> None:
+        """Close the HTTP client."""
         await self._client.aclose()
         logger.info("image_service_client_closed")
 
     @staticmethod
-    def _raise_for_error(response: httpx.Response, action: str) -> None:
+    def _raise_for_error(
+        response: httpx.Response, action: str
+    ) -> None:  # pylint: disable=missing-function-docstring
         if response.status_code in (200, 201):
             return
 
         try:
             detail = response.json().get("detail", "Unknown error")
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             detail = response.text
 
         logger.error(
@@ -137,14 +140,15 @@ class ImageServiceClient:
             data=data,
         )
 
-    async def upload_image_streaming(
+    async def upload_image_streaming(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         file_obj,
         company_id: str,
         content_type: str,
         extension: str,
-        user_id: Optional[str] = None,
+        user_id: Optional[str] = None,  # pylint: disable=unused-argument
     ) -> UploadedImage:
+        """Upload an image using streaming to minimize memory usage."""
         await _circuit_breaker.allow_call()
 
         try:
@@ -195,7 +199,9 @@ class ImageServiceClient:
         except ImageServiceError:
             raise
 
-    async def delete_image(self, filename: str) -> bool:
+    async def delete_image(
+        self, filename: str
+    ) -> bool:  # pylint: disable=missing-function-docstring
         await _circuit_breaker.allow_call()
 
         try:
@@ -228,17 +234,21 @@ class ImageServiceClient:
             raise
 
     @staticmethod
-    def get_extension_from_content_type(content_type: str) -> str:
-        extension = settings.content_type_map.get(content_type)
+    def get_extension_from_content_type(
+        content_type: str,
+    ) -> str:  # pylint: disable=missing-function-docstring
+        extension = settings.content_type_map.get(content_type)  # type: ignore
         if not extension:
             raise ValueError(
                 f"Unsupported image type: {content_type}. "
-                f"Allowed: {', '.join(settings.content_type_map.keys())}"
+                f"Allowed: {', '.join(settings.content_type_map.keys())}"  # type: ignore
             )
         return extension
 
     @staticmethod
-    def build_image_url(image_id: str, extension: str) -> str:
+    def build_image_url(
+        image_id: str, extension: str
+    ) -> str:  # pylint: disable=missing-function-docstring
         base = settings.api_base_url.rstrip("/")
         return f"{base}/images/{image_id}{extension}"
 
