@@ -1026,7 +1026,7 @@ class DB:  # pylint: disable=too-many-public-methods
 
     @staticmethod
     @db_retry()
-    async def update_company_by_uuid(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def update_company_by_uuid(
         conn: asyncpg.Connection,
         company_uuid: UUID,
         user_uuid: UUID,
@@ -1042,7 +1042,7 @@ class DB:  # pylint: disable=too-many-public-methods
         commune_uuid: Optional[UUID] = None,
     ) -> CompanyRecord:
         """Update company (WRITE operation - uses primary)"""
-        # pylint: disable=too-many-locals
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         async with transaction(
             conn, isolation=IsolationLevel.READ_COMMITTED, readonly=False
         ):
