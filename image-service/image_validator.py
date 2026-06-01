@@ -9,6 +9,10 @@ OPTIMIZED VERSION:
 - Returns BytesIO for efficient streaming
 """
 
+# pylint: disable=import-outside-toplevel
+# NSFW imports are inside functions intentionally - optional feature to avoid
+# loading heavy ML models unless the feature is enabled
+
 from typing import Tuple
 from io import BytesIO
 
@@ -50,9 +54,7 @@ class ImageValidator:
         try:
             logger.info("nsfw_model_loading_starting")
 
-            from opennsfw2 import (
-                predict_image,
-            )  # pylint: disable=import-outside-toplevel
+            from opennsfw2 import predict_image
 
             logger.info("nsfw_model_testing")
             test_img = Image.new("RGB", (224, 224), color="red")
@@ -217,9 +219,7 @@ class ImageValidator:
             return (0.0, False)
 
         try:
-            from opennsfw2 import (
-                predict_image,
-            )  # pylint: disable=import-outside-toplevel
+            from opennsfw2 import predict_image
 
             image_stream.seek(0)
             score = predict_image(image_stream)
