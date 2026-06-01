@@ -203,7 +203,7 @@ class ImageServiceClient:
 
     async def delete_image(
         self, filename: str
-    ) -> bool:  # pylint: disable=missing-function-docstring
+    ) -> bool:
         """Delete an image from the storage service."""
         await _circuit_breaker.allow_call()
 
@@ -240,20 +240,22 @@ class ImageServiceClient:
     @staticmethod
     def get_extension_from_content_type(
         content_type: str,
-    ) -> str:  # pylint: disable=missing-function-docstring
+    ) -> str:
         """Get file extension from content type using settings mapping."""
-        extension = settings.content_type_map.get(content_type)  # type: ignore
+        # pylint: disable=no-member
+        extension = settings.content_type_map.get(content_type)
         if not extension:
+            allowed_types = ', '.join(settings.content_type_map.keys())
             raise ValueError(
                 f"Unsupported image type: {content_type}. "
-                f"Allowed: {', '.join(settings.content_type_map.keys())}"  # type: ignore
+                f"Allowed: {allowed_types}"
             )
         return extension
 
     @staticmethod
     def build_image_url(
         image_id: str, extension: str
-    ) -> str:  # pylint: disable=missing-function-docstring
+    ) -> str:
         """Build the full URL for an image."""
         base = settings.api_base_url.rstrip("/")
         return f"{base}/images/{image_id}{extension}"
