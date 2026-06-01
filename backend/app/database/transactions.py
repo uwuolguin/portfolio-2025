@@ -1,4 +1,5 @@
-"""# pylint: disable=too-many-lines,too-many-public-messages
+# pylint: disable=too-many-lines,too-many-public-messages
+"""
 Database Transactions Module with Read/Write Splitting
 
 This module provides transaction management with automatic routing:
@@ -46,6 +47,8 @@ logger = structlog.get_logger(__name__)
 
 
 class IsolationLevel(Enum):
+    """Transaction isolation levels for database operations."""
+
     READ_COMMITTED = "READ COMMITTED"
     REPEATABLE_READ = "REPEATABLE READ"
     SERIALIZABLE = "SERIALIZABLE"
@@ -261,8 +264,9 @@ class DB:  # pylint: disable=too-many-public-methods
     @db_retry()
     async def delete_user_by_uuid(
         conn: asyncpg.Connection, user_uuid: UUID
-    ) -> UserDeletionResponse:  # pylint: disable=too-many-locals
+    ) -> UserDeletionResponse:
         """Delete user and cascade (WRITE operation - uses primary)"""
+        # pylint: disable=too-many-locals
         company_uuid: Optional[str] = None
         deleted_image: Optional[str] = None
 
@@ -424,8 +428,9 @@ class DB:  # pylint: disable=too-many-public-methods
     @db_retry()
     async def admin_delete_user_by_uuid(
         conn: asyncpg.Connection, user_uuid: UUID
-    ) -> UserDeletionResponse:  # pylint: disable=too-many-locals
+    ) -> UserDeletionResponse:
         """Admin delete user (WRITE operation - uses primary)"""
+        # pylint: disable=too-many-locals
         deleted_image_path: Optional[str] = None
         company_uuid: Optional[str] = None
 
@@ -1020,7 +1025,7 @@ class DB:  # pylint: disable=too-many-public-methods
 
     @staticmethod
     @db_retry()
-    async def update_company_by_uuid(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    async def update_company_by_uuid(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         conn: asyncpg.Connection,
         company_uuid: UUID,
         user_uuid: UUID,
@@ -1349,7 +1354,7 @@ class DB:  # pylint: disable=too-many-public-methods
 
     @staticmethod
     @db_retry()
-    async def search_companies(  # pylint: disable=too-many-locals,too-many-branches
+    async def search_companies(  # pylint: disable=too-many-locals,too-many-branches,too-many-arguments,too-many-positional-arguments
         conn: asyncpg.Connection,
         query: str,
         lang: str = "es",
