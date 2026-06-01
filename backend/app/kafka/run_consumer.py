@@ -24,8 +24,8 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 logger = logging.getLogger(__name__)
 
 TOPIC_PARTITION_TO_EVENT_TYPE: dict[tuple[str, int], str] = {
-    ("user-logins",  0): "login",
-    ("user-logins",  1): "login",
+    ("user-logins", 0): "login",
+    ("user-logins", 1): "login",
     ("user-logouts", 0): "logout",
     ("user-logouts", 1): "logout",
 }
@@ -34,7 +34,16 @@ WORKFLOW_NAME = "AuthEventWorkflow"
 TASK_QUEUE = "auth-queue"
 
 
-async def run_consumer(bootstrap_servers: str, temporal_host: str) -> None:
+async def run_consumer(
+    bootstrap_servers: str, temporal_host: str
+) -> None:  # pylint: disable=redefined-outer-name
+    """
+    Run the Kafka consumer that reads auth events and starts Temporal workflows.
+
+    Args:
+        bootstrap_servers: Kafka/Redpanda broker addresses (comma-separated)
+        temporal_host: Temporal server host:port address
+    """
     # ── Temporal client ────────────────────────────────────────────────────
     # Client.connect() has no built-in retry on initial connection.
     # If Temporal is unavailable the consumer crashes and Kubernetes restarts it.
@@ -47,15 +56,15 @@ async def run_consumer(bootstrap_servers: str, temporal_host: str) -> None:
     consumer = AIOKafkaConsumer(
         bootstrap_servers=bootstrap_servers,
         group_id="auth-event-workers",
-        enable_auto_commit=False,   # manual commit AFTER Temporal acks
+        enable_auto_commit=False,  # manual commit AFTER Temporal acks
         auto_offset_reset="earliest",
     )
 
     # Explicit partition assignment — no rebalance coordinator needed for
     # a single worker. All four partitions are assigned to this one instance.
     partitions = [
-        TopicPartition("user-logins",  0),
-        TopicPartition("user-logins",  1),
+        TopicPartition("user-logins", 0),
+        TopicPartition("user-logins", 1),
         TopicPartition("user-logouts", 0),
         TopicPartition("user-logouts", 1),
     ]
@@ -85,10 +94,10 @@ async def run_consumer(bootstrap_servers: str, temporal_host: str) -> None:
             raw_payload: dict = json.loads(msg.value)
             enriched_payload = {
                 **raw_payload,
-                "event_type": event_type,   # "login" | "logout"
-                "topic": msg.topic,          # "user-logins" | "user-logouts"
+                "event_type": event_type,  # "login" | "logout"
+                "topic": msg.topic,  # "user-logins" | "user-logouts"
                 "partition": msg.partition,  # 0 (es) | 1 (en)
-                "offset": msg.offset,        # Kafka offset for audit trail
+                "offset": msg.offset,  # Kafka offset for audit trail
             }
 
             try:
@@ -114,7 +123,7 @@ async def run_consumer(bootstrap_servers: str, temporal_host: str) -> None:
                     "workflow_duplicate_skipped",
                     extra={"workflow_id": workflow_id},
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error(
                     "workflow_start_failed",
                     extra={"workflow_id": workflow_id, "error": str(e)},
@@ -124,9 +133,13 @@ async def run_consumer(bootstrap_servers: str, temporal_host: str) -> None:
 
             # Commit only after Temporal has accepted the work.
             # offset + 1 tells the broker where to resume on next restart.
-            await consumer.commit({
-                TopicPartition(msg.topic, msg.partition): OffsetAndMetadata(msg.offset + 1, "")
-            })
+            await consumer.commit(
+                {
+                    TopicPartition(msg.topic, msg.partition): OffsetAndMetadata(
+                        msg.offset + 1, ""
+                    )
+                }
+            )
 
     finally:
         await consumer.stop()

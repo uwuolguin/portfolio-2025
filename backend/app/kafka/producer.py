@@ -95,7 +95,7 @@ class KafkaProducerClient:
                 await self._producer.start()
                 logger.info("kafka_producer_started", brokers=settings.bootstrap_servers)
 
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 # Redpanda down at startup — stay None, lazy reconnect retries on next publish.
                 self._producer = None
                 logger.warning(
@@ -114,7 +114,7 @@ class KafkaProducerClient:
                 # Flushes buffered messages, closes TCP connection, releases resources.
                 await self._producer.stop()
                 logger.info("kafka_producer_stopped")
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.warning("kafka_producer_stop_error", error=str(e))
             finally:
                 # Always clean up regardless of whether .stop() raised.
@@ -138,7 +138,12 @@ class KafkaProducerClient:
         """
         # Unknown key → discard before touching the producer.
         if key not in self.PARTITION_MAP:
-            logger.warning("kafka_event_discarded", topic=topic, key=key, reason="invalid_key")
+            logger.warning(
+                "kafka_event_discarded",
+                topic=topic,
+                key=key,
+                reason="invalid_key"
+            )
             return
 
         # Self-healing path — retries if Redpanda was down at startup or last publish killed it.
@@ -156,7 +161,12 @@ class KafkaProducerClient:
                 value=payload,
                 partition=self.PARTITION_MAP[key],
             )
-            logger.info("kafka_event_published", topic=topic, key=key, partition=self.PARTITION_MAP[key])
+            logger.info(
+                "kafka_event_published",
+                topic=topic,
+                key=key,
+                partition=self.PARTITION_MAP[key]
+            )
 
         except (KafkaConnectionError, KafkaError) as e:
             # Expected failure — mark producer dead so next call triggers lazy reconnect.
@@ -169,7 +179,7 @@ class KafkaProducerClient:
             )
             self._producer = None
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             # Unexpected — bug in serializer, OOM, etc. Full stack trace attached.
             logger.error(
                 "kafka_event_unexpected_error",
