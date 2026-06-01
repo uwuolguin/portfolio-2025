@@ -2066,5 +2066,4 @@ each layer re-encrypting or re-framing as needed.
 - **SSH channels** — the `direct-tcpip` channel type is how SSH implements local port forwarding. Multiple port-forwards share one TCP session via channel multiplexing.
 - **Network namespaces** — each pod gets its own network namespace with its own loopback and virtual ethernet interface. The kubelet's `connect()` crosses into it via the veth pair created by the CNI plugin.
 - **Userspace proxying** — no kernel-level tunneling anywhere in this chain. Every hop is a process reading from one socket and writing to another.
-
 ---
