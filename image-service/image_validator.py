@@ -97,25 +97,22 @@ class ImageValidator:
 
     @classmethod
     def validate_and_process_image(
-        cls,
-        image_stream: BytesIO,
-        content_type: str,
-        extension: str
+        cls, image_stream: BytesIO, content_type: str, extension: str
     ) -> BytesIO:
         """
         Validate and process an image from a file-like stream.
-        
+
         Args:
             image_stream: BytesIO object containing image data (size pre-validated)
             content_type: MIME type (e.g., "image/jpeg")
             extension: File extension (e.g., ".jpg", ".png")
-            
+
         Returns:
             BytesIO: Processed and optimized image stream
-            
+
         Raises:
             ValueError: If validation fails
-            
+
         Note:
             Size validation is handled by main.py during streaming upload.
             This function focuses on format, dimensions, and optimization.
@@ -125,7 +122,7 @@ class ImageValidator:
                 f"Unsupported MIME type: {content_type}. "
                 f"Allowed: {', '.join(sorted(settings.allowed_types))}"
             )
-        
+
         image_stream.seek(0)
 
         try:
@@ -133,10 +130,10 @@ class ImageValidator:
                 img.load()
                 fmt = (img.format or "").upper()
                 img_copy = img.copy()
-        except UnidentifiedImageError:
-            raise ValueError("Invalid or corrupted image file")
+        except UnidentifiedImageError as exc:
+            raise ValueError("Invalid or corrupted image file") from exc
         except Exception as e:
-            raise ValueError(f"Image processing error: {str(e)}")
+            raise ValueError(f"Image processing error: {str(e)}") from e
 
         expected_format = None
         for format_name, ext in settings.ext_by_format.items():
@@ -190,15 +187,15 @@ class ImageValidator:
     def check_nsfw_content(cls, image_stream: BytesIO) -> Tuple[float, bool]:
         """
         Check if image contains NSFW content.
-        
+
         Args:
             image_stream: BytesIO object containing image data
-            
+
         Returns:
             Tuple[float, bool]: (nsfw_score, check_performed)
                 - nsfw_score: 0.0-1.0, higher = more NSFW
                 - check_performed: True if model ran, False if failed/disabled
-                
+
         Memory efficiency:
             - Reuses input stream (no copy)
             - OpenNSFW2 loads into memory (unavoidable)
@@ -211,12 +208,12 @@ class ImageValidator:
             if settings.nsfw_fail_closed:
                 logger.warning("nsfw_unavailable_blocking_upload")
                 return (1.0, False)
-            else:
-                logger.warning("nsfw_unavailable_allowing_upload")
-                return (0.0, False)
+            logger.warning("nsfw_unavailable_allowing_upload")
+            return (0.0, False)
 
         try:
             from opennsfw2 import predict_image
+
             image_stream.seek(0)
             score = predict_image(image_stream)
             image_stream.seek(0)
@@ -236,6 +233,5 @@ class ImageValidator:
             if settings.nsfw_fail_closed:
                 logger.warning("nsfw_check_failed_blocking_upload")
                 return (1.0, False)
-            else:
-                logger.warning("nsfw_check_failed_allowing_upload")
-                return (0.0, False)
+            logger.warning("nsfw_check_failed_allowing_upload")
+            return (0.0, False)

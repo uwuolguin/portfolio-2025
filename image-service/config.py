@@ -1,3 +1,7 @@
+"""
+Image Service Configuration Module
+"""
+
 from typing import Set, Dict
 
 from pydantic import Field
