@@ -6,6 +6,8 @@ Tests that the company_search materialized view can be refreshed
 and reflects data from the companies table.
 """
 
+# pylint: disable=duplicate-code
+
 import ssl
 import sys
 from contextlib import asynccontextmanager

@@ -6,6 +6,8 @@ Tests that the orphan image detection correctly identifies images
 that exist in storage but are not referenced in the database.
 """
 
+# pylint: disable=duplicate-code
+
 import base64
 import ssl
 import sys
