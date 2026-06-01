@@ -11,6 +11,7 @@ at startup, a missing import, a bad config value, a typo in module code.
 Expected output:
     {"level": "critical", "event": "sync_uncaught_exception", "exc_info": "..."}
 """
+
 from app.middleware.logging import setup_logging, install_sync_exception_handler
 
 setup_logging()

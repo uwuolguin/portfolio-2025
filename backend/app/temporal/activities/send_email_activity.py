@@ -9,7 +9,8 @@ logger = structlog.get_logger(__name__)
 @activity.defn(name="send_mock_email_activity")
 async def send_mock_email_activity(
     payload: dict,
-) -> bool:  # pylint: disable=missing-function-docstring
+) -> bool:
+    """Send a mock email (replace with real email service in production)."""
     info = activity.info()
 
     logger.info(

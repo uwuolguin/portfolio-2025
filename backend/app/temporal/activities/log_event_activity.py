@@ -9,7 +9,8 @@ logger = structlog.get_logger(__name__)
 @activity.defn(name="log_event_activity")
 async def log_event_activity(
     payload: dict,
-) -> dict:  # pylint: disable=missing-function-docstring
+) -> dict:
+    """Log auth event received from Kafka."""
     info = activity.info()
 
     logger.info(
