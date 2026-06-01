@@ -6,15 +6,16 @@ Run with:
 """
 
 import uuid
+from datetime import timedelta
+
 import pytest
 import pytest_asyncio
-from datetime import timedelta
 from httpx import AsyncClient, ASGITransport
 
-from app.main import create_app
+from app.auth.jwt import create_access_token
 from app.database.connection import pool_manager
 from app.database.transactions import DB
-from app.auth.jwt import create_access_token
+from app.main import create_app
 
 
 # =============================================================================
@@ -22,6 +23,7 @@ from app.auth.jwt import create_access_token
 # =============================================================================
 @pytest_asyncio.fixture
 async def app_client():
+    """Fixture: running app with HTTP client."""
     app = create_app()
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
@@ -34,6 +36,7 @@ async def app_client():
 
 @pytest_asyncio.fixture
 async def db_conn():
+    """Fixture: write DB connection inside app lifespan."""
     app = create_app()
     async with app.router.lifespan_context(app):
         async with pool_manager.write_pool.acquire() as conn:
@@ -44,7 +47,8 @@ async def db_conn():
 # SIGNUP
 # =============================================================================
 @pytest.mark.asyncio
-async def test_signup_invalid_email(app_client):
+async def test_signup_invalid_email(app_client):  # pylint: disable=redefined-outer-name
+    """Test signup rejects invalid email format."""
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/signup",
@@ -54,7 +58,10 @@ async def test_signup_invalid_email(app_client):
 
 
 @pytest.mark.asyncio
-async def test_signup_short_password(app_client):
+async def test_signup_short_password(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test signup rejects passwords that are too short."""
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/signup",
@@ -67,17 +74,25 @@ async def test_signup_short_password(app_client):
 # LOGIN
 # =============================================================================
 @pytest.mark.asyncio
-async def test_login_wrong_password(app_client):
+async def test_login_wrong_password(app_client):  # pylint: disable=redefined-outer-name
+    """Test login fails with wrong password."""
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/login",
-        json={"email": "admin_test@mail.com", "password": "wrongpassword", "lang": "en"},
+        json={
+            "email": "admin_test@mail.com",
+            "password": "wrongpassword",
+            "lang": "en",
+        },
     )
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_login_nonexistent_user(app_client):
+async def test_login_nonexistent_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test login fails for a non-existent user."""
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/login",
@@ -87,7 +102,8 @@ async def test_login_nonexistent_user(app_client):
 
 
 @pytest.mark.asyncio
-async def test_login_success(app_client):
+async def test_login_success(app_client):  # pylint: disable=redefined-outer-name
+    """Test successful login returns access token and CSRF token."""
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/login",
@@ -102,7 +118,8 @@ async def test_login_success(app_client):
 # LOGOUT
 # =============================================================================
 @pytest.mark.asyncio
-async def test_logout_success(app_client):
+async def test_logout_success(app_client):  # pylint: disable=redefined-outer-name
+    """Test logout succeeds for an authenticated user."""
     client, _ = app_client
 
     payload = {
@@ -131,14 +148,16 @@ async def test_logout_success(app_client):
 # ME
 # =============================================================================
 @pytest.mark.asyncio
-async def test_me_unauthenticated(app_client):
+async def test_me_unauthenticated(app_client):  # pylint: disable=redefined-outer-name
+    """Test /me endpoint returns 401 for unauthenticated requests."""
     client, _ = app_client
     response = await client.get("/api/v1/users/me")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_me_authenticated(app_client):
+async def test_me_authenticated(app_client):  # pylint: disable=redefined-outer-name
+    """Test /me endpoint returns user data for authenticated requests."""
     client, _ = app_client
 
     payload = {
@@ -161,7 +180,10 @@ async def test_me_authenticated(app_client):
 # EMAIL VERIFICATION
 # =============================================================================
 @pytest.mark.asyncio
-async def test_verify_email_invalid_token(app_client):
+async def test_verify_email_invalid_token(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test email verification fails for an invalid token."""
     client, _ = app_client
     response = await client.get("/api/v1/users/verify-email/invalid-token")
     assert response.status_code == 200
@@ -169,7 +191,10 @@ async def test_verify_email_invalid_token(app_client):
 
 
 @pytest.mark.asyncio
-async def test_resend_verification_user_not_found(app_client):
+async def test_resend_verification_user_not_found(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test resend verification fails for a non-existent user."""
     client, _ = app_client
     response = await client.post(
         "/api/v1/users/resend-verification",
@@ -182,14 +207,20 @@ async def test_resend_verification_user_not_found(app_client):
 # DELETE ME
 # =============================================================================
 @pytest.mark.asyncio
-async def test_delete_me_unauthenticated(app_client):
+async def test_delete_me_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test delete me fails without authentication."""
     client, _ = app_client
     response = await client.delete("/api/v1/users/me")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_delete_me_missing_csrf(app_client):
+async def test_delete_me_missing_csrf(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test delete me fails when CSRF token is missing."""
     client, _ = app_client
 
     token = create_access_token(
@@ -211,14 +242,20 @@ ADMIN_DELETE_PATH = "/api/v1/users/admin/users/{user_id}"
 
 
 @pytest.mark.asyncio
-async def test_admin_get_users_unauthenticated(app_client):
+async def test_admin_get_users_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin get users fails without authentication."""
     client, _ = app_client
     response = await client.get(ADMIN_LIST_PATH)
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_admin_get_users_forbidden_for_regular_user(app_client):
+async def test_admin_get_users_forbidden_for_regular_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin get users is forbidden for regular users."""
     client, _ = app_client
 
     token = create_access_token(
@@ -232,7 +269,10 @@ async def test_admin_get_users_forbidden_for_regular_user(app_client):
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_user_forbidden_for_regular_user(app_client):
+async def test_admin_delete_user_forbidden_for_regular_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin delete user is forbidden for regular users."""
     client, _ = app_client
 
     token = create_access_token(
@@ -252,7 +292,10 @@ async def test_admin_delete_user_forbidden_for_regular_user(app_client):
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_user_success_not_found(app_client):
+async def test_admin_delete_user_success_not_found(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin delete returns 404 for a non-existent user."""
     client, _ = app_client
 
     token = create_access_token(
@@ -275,7 +318,10 @@ async def test_admin_delete_user_success_not_found(app_client):
 # DB ROLLBACK TEST
 # =============================================================================
 @pytest.mark.asyncio
-async def test_create_user_with_rollback(db_conn):
+async def test_create_user_with_rollback(
+    db_conn,
+):  # pylint: disable=redefined-outer-name
+    """Test user creation rolls back cleanly without persisting data."""
     email = f"rollback_{uuid.uuid4().hex[:8]}@test.com"
 
     user = await DB.create_user(

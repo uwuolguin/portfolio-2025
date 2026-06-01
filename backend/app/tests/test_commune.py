@@ -2,28 +2,35 @@
 Communes router tests with rollback for non-persistent test data.
 Run with: pytest app/tests/test_communes.py -v
 """
+
+import uuid
+from datetime import timedelta
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from app.main import create_app
+
+from app.auth.jwt import create_access_token
 from app.database.connection import pool_manager
 from app.database.transactions import DB
-from app.auth.jwt import create_access_token
-from datetime import timedelta
-import uuid
+from app.main import create_app
 
 
 @pytest_asyncio.fixture
 async def app_client():
+    """Fixture: running app with HTTP client."""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         transport = ASGITransport(app=fresh_app)
-        async with AsyncClient(transport=transport, base_url="https://testserver") as client:
+        async with AsyncClient(
+            transport=transport, base_url="https://testserver"
+        ) as client:
             yield client
 
 
 @pytest_asyncio.fixture
 async def db_conn():
+    """Fixture: write DB connection inside app lifespan."""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         async with pool_manager.write_pool.acquire() as conn:
@@ -31,25 +38,27 @@ async def db_conn():
 
 
 def make_admin_token():
+    """Return a signed JWT for an admin user."""
     jwt_payload = {
         "sub": str(uuid.uuid4()),
         "name": "Admin",
         "email": "admin@test.com",
         "role": "admin",
         "email_verified": True,
-        "created_at": "2025-01-01T00:00:00"
+        "created_at": "2025-01-01T00:00:00",
     }
     return create_access_token(data=jwt_payload, expires_delta=timedelta(minutes=30))
 
 
 def make_user_token():
+    """Return a signed JWT for a regular user."""
     jwt_payload = {
         "sub": str(uuid.uuid4()),
         "name": "User",
         "email": "user@test.com",
         "role": "user",
         "email_verified": True,
-        "created_at": "2025-01-01T00:00:00"
+        "created_at": "2025-01-01T00:00:00",
     }
     return create_access_token(data=jwt_payload, expires_delta=timedelta(minutes=30))
 
@@ -58,7 +67,8 @@ def make_user_token():
 # LIST COMMUNES - public endpoint (read-only)
 # =============================================================================
 @pytest.mark.asyncio
-async def test_list_communes(app_client):
+async def test_list_communes(app_client):  # pylint: disable=redefined-outer-name
+    """Test listing communes returns 200 and a list."""
     response = await app_client.get("/api/v1/communes")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
@@ -68,19 +78,22 @@ async def test_list_communes(app_client):
 # CREATE COMMUNE - admin only, POST /api/v1/communes/
 # =============================================================================
 @pytest.mark.asyncio
-async def test_create_commune_unauthenticated(app_client):
-    """Test create commune fails without auth - should get 401 or 403 (CSRF missing)"""
+async def test_create_commune_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test create commune fails without auth - should get 401 or 403 (CSRF missing)."""
     response = await app_client.post(
         "/api/v1/communes",
-        json={"name": "Test Commune"}
+        json={"name": "Test Commune"},
     )
-    # No auth cookie → 401
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_create_commune_forbidden_for_user(app_client):
-    """Test create commune forbidden for non-admin"""
+async def test_create_commune_forbidden_for_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test create commune forbidden for non-admin."""
     token = make_user_token()
     csrf = "test-csrf"
 
@@ -90,7 +103,7 @@ async def test_create_commune_forbidden_for_user(app_client):
     response = await app_client.post(
         "/api/v1/communes",
         json={"name": "Test Commune"},
-        headers={"X-CSRF-Token": csrf}
+        headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
 
@@ -101,18 +114,22 @@ async def test_create_commune_forbidden_for_user(app_client):
 # UPDATE COMMUNE - PUT /api/v1/communes/{commune_uuid}
 # =============================================================================
 @pytest.mark.asyncio
-async def test_update_commune_unauthenticated(app_client):
-    """Test update commune fails without auth"""
+async def test_update_commune_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test update commune fails without auth."""
     response = await app_client.put(
         f"/api/v1/communes/{uuid.uuid4()}",
-        json={"name": "Updated Name"}
+        json={"name": "Updated Name"},
     )
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_update_commune_forbidden_for_user(app_client):
-    """Test update commune forbidden for non-admin"""
+async def test_update_commune_forbidden_for_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test update commune forbidden for non-admin."""
     token = make_user_token()
     csrf = "test-csrf"
 
@@ -122,7 +139,7 @@ async def test_update_commune_forbidden_for_user(app_client):
     response = await app_client.put(
         f"/api/v1/communes/{uuid.uuid4()}",
         json={"name": "Updated Name"},
-        headers={"X-CSRF-Token": csrf}
+        headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
 
@@ -133,17 +150,19 @@ async def test_update_commune_forbidden_for_user(app_client):
 # DELETE COMMUNE - DELETE /api/v1/communes/{commune_uuid}
 # =============================================================================
 @pytest.mark.asyncio
-async def test_delete_commune_unauthenticated(app_client):
-    """Test delete commune fails without auth"""
-    response = await app_client.delete(
-        f"/api/v1/communes/{uuid.uuid4()}"
-    )
+async def test_delete_commune_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test delete commune fails without auth."""
+    response = await app_client.delete(f"/api/v1/communes/{uuid.uuid4()}")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_delete_commune_forbidden_for_user(app_client):
-    """Test delete commune forbidden for non-admin"""
+async def test_delete_commune_forbidden_for_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test delete commune forbidden for non-admin."""
     token = make_user_token()
     csrf = "test-csrf"
 
@@ -152,7 +171,7 @@ async def test_delete_commune_forbidden_for_user(app_client):
 
     response = await app_client.delete(
         f"/api/v1/communes/{uuid.uuid4()}",
-        headers={"X-CSRF-Token": csrf}
+        headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 403
 
@@ -163,7 +182,10 @@ async def test_delete_commune_forbidden_for_user(app_client):
 # ROLLBACK TEST
 # =============================================================================
 @pytest.mark.asyncio
-async def test_create_commune_with_rollback(db_conn):
+async def test_create_commune_with_rollback(
+    db_conn,
+):  # pylint: disable=redefined-outer-name
+    """Test commune creation rolls back cleanly without persisting data."""
     unique_name = f"Rollback Commune {uuid.uuid4().hex[:8]}"
 
     commune = await DB.create_commune(

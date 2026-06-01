@@ -2,28 +2,37 @@
 Companies router tests with rollback for non-persistent test data.
 Run with: pytest app/tests/test_companies.py -v
 """
+
+import uuid
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from app.main import create_app
+
+from app.auth.csrf import generate_csrf_token
+from app.auth.jwt import create_access_token, get_password_hash
+from app.config import settings
 from app.database.connection import pool_manager
-from app.database.transactions import DB
-from app.auth.jwt import create_access_token
-from datetime import timedelta
-import uuid
+from app.database.transactions import DB, transaction
+from app.main import create_app
 
 
 @pytest_asyncio.fixture
 async def app_client():
+    """Fixture: running app with HTTP client."""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         transport = ASGITransport(app=fresh_app)
-        async with AsyncClient(transport=transport, base_url="https://testserver") as client:
+        async with AsyncClient(
+            transport=transport, base_url="https://testserver"
+        ) as client:
             yield client
 
 
 @pytest_asyncio.fixture
 async def db_conn():
+    """Fixture: write DB connection inside app lifespan."""
     fresh_app = create_app()
     async with fresh_app.router.lifespan_context(fresh_app):
         async with pool_manager.write_pool.acquire() as conn:
@@ -31,6 +40,7 @@ async def db_conn():
 
 
 def make_admin_token():
+    """Return a signed JWT for an admin user."""
     jwt_payload = {
         "sub": str(uuid.uuid4()),
         "name": "Admin",
@@ -43,6 +53,7 @@ def make_admin_token():
 
 
 def make_user_token(user_uuid: str = None, verified: bool = True):
+    """Return a signed JWT for a regular user."""
     jwt_payload = {
         "sub": user_uuid or str(uuid.uuid4()),
         "name": "User",
@@ -58,21 +69,28 @@ def make_user_token(user_uuid: str = None, verified: bool = True):
 # SEARCH COMPANIES - public endpoint (read-only)
 # =============================================================================
 @pytest.mark.asyncio
-async def test_search_companies(app_client):
+async def test_search_companies(app_client):  # pylint: disable=redefined-outer-name
+    """Test company search returns 200 and a list."""
     response = await app_client.get("/api/v1/companies/search")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
 
 @pytest.mark.asyncio
-async def test_search_companies_with_query(app_client):
+async def test_search_companies_with_query(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test company search with a text query."""
     response = await app_client.get("/api/v1/companies/search", params={"q": "test"})
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
 
 @pytest.mark.asyncio
-async def test_search_companies_with_filters(app_client):
+async def test_search_companies_with_filters(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test company search with commune, product, and language filters."""
     response = await app_client.get(
         "/api/v1/companies/search",
         params={"commune": "Santiago Centro", "product": "Tecnología", "lang": "es"},
@@ -85,7 +103,10 @@ async def test_search_companies_with_filters(app_client):
 # GET COMPANY BY UUID - public endpoint
 # =============================================================================
 @pytest.mark.asyncio
-async def test_get_company_not_found(app_client):
+async def test_get_company_not_found(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test fetching a non-existent company returns 404."""
     response = await app_client.get(f"/api/v1/companies/{uuid.uuid4()}")
     assert response.status_code == 404
 
@@ -94,13 +115,19 @@ async def test_get_company_not_found(app_client):
 # GET MY COMPANY
 # =============================================================================
 @pytest.mark.asyncio
-async def test_get_my_company_unauthenticated(app_client):
+async def test_get_my_company_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test get my company fails without authentication."""
     response = await app_client.get("/api/v1/companies/user/my-company")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_get_my_company_not_found(app_client):
+async def test_get_my_company_not_found(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test get my company returns 404 when user has no company."""
     token = make_user_token()
     app_client.cookies.set("access_token", token)
 
@@ -114,7 +141,10 @@ async def test_get_my_company_not_found(app_client):
 # CREATE COMPANY - POST /api/v1/companies
 # =============================================================================
 @pytest.mark.asyncio
-async def test_create_company_unauthenticated(app_client):
+async def test_create_company_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test create company fails without authentication."""
     response = await app_client.post(
         "/api/v1/companies",
         data={
@@ -130,7 +160,10 @@ async def test_create_company_unauthenticated(app_client):
 
 
 @pytest.mark.asyncio
-async def test_create_company_unverified_email(app_client):
+async def test_create_company_unverified_email(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test create company is blocked for users with unverified email."""
     token = make_user_token(verified=False)
     csrf = "test-csrf"
 
@@ -160,7 +193,10 @@ async def test_create_company_unverified_email(app_client):
 # UPDATE MY COMPANY - PATCH /api/v1/companies/user/my-company
 # =============================================================================
 @pytest.mark.asyncio
-async def test_update_my_company_unauthenticated(app_client):
+async def test_update_my_company_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test update my company fails without authentication."""
     response = await app_client.patch(
         "/api/v1/companies/user/my-company", data={"name": "Updated Name"}
     )
@@ -168,7 +204,10 @@ async def test_update_my_company_unauthenticated(app_client):
 
 
 @pytest.mark.asyncio
-async def test_update_my_company_unverified_email(app_client):
+async def test_update_my_company_unverified_email(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test update my company is blocked for users with unverified email."""
     token = make_user_token(verified=False)
     csrf = "test-csrf"
 
@@ -189,13 +228,19 @@ async def test_update_my_company_unverified_email(app_client):
 # DELETE MY COMPANY - DELETE /api/v1/companies/user/my-company
 # =============================================================================
 @pytest.mark.asyncio
-async def test_delete_my_company_unauthenticated(app_client):
+async def test_delete_my_company_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test delete my company fails without authentication."""
     response = await app_client.delete("/api/v1/companies/user/my-company")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_delete_my_company_unverified_email(app_client):
+async def test_delete_my_company_unverified_email(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test delete my company is blocked for users with unverified email."""
     token = make_user_token(verified=False)
     csrf = "test-csrf"
 
@@ -215,13 +260,19 @@ async def test_delete_my_company_unverified_email(app_client):
 # ADMIN LIST COMPANIES - GET /api/v1/companies/admin/all-companies
 # =============================================================================
 @pytest.mark.asyncio
-async def test_admin_list_companies_unauthenticated(app_client):
+async def test_admin_list_companies_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin list companies fails without authentication."""
     response = await app_client.get("/api/v1/companies/admin/all-companies")
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_admin_list_companies_forbidden_for_user(app_client):
+async def test_admin_list_companies_forbidden_for_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin list companies is forbidden for regular users."""
     token = make_user_token()
     app_client.cookies.set("access_token", token)
 
@@ -232,7 +283,10 @@ async def test_admin_list_companies_forbidden_for_user(app_client):
 
 
 @pytest.mark.asyncio
-async def test_admin_list_companies_success(app_client):
+async def test_admin_list_companies_success(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin list companies succeeds for admin users."""
     token = make_admin_token()
     app_client.cookies.set("access_token", token)
 
@@ -247,7 +301,10 @@ async def test_admin_list_companies_success(app_client):
 # ADMIN DELETE COMPANY - DELETE /api/v1/companies/admin/companies/{uuid}
 # =============================================================================
 @pytest.mark.asyncio
-async def test_admin_delete_company_unauthenticated(app_client):
+async def test_admin_delete_company_unauthenticated(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin delete company fails without authentication."""
     response = await app_client.delete(
         f"/api/v1/companies/admin/companies/{uuid.uuid4()}"
     )
@@ -255,7 +312,10 @@ async def test_admin_delete_company_unauthenticated(app_client):
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_company_forbidden_for_user(app_client):
+async def test_admin_delete_company_forbidden_for_user(
+    app_client,
+):  # pylint: disable=redefined-outer-name
+    """Test admin delete company is forbidden for regular users."""
     token = make_user_token()
     csrf = "test-csrf"
 
@@ -275,7 +335,10 @@ async def test_admin_delete_company_forbidden_for_user(app_client):
 # ROLLBACK TEST
 # =============================================================================
 @pytest.mark.asyncio
-async def test_create_company_with_rollback(db_conn):
+async def test_create_company_with_rollback(
+    db_conn,
+):  # pylint: disable=redefined-outer-name,too-many-locals
+    """Test company + user creation rolls back cleanly without persisting data."""
     communes = await DB.get_all_communes(conn=db_conn)
     products = await DB.get_all_products(conn=db_conn)
 
@@ -289,12 +352,6 @@ async def test_create_company_with_rollback(db_conn):
     company_uuid = uuid.uuid4()
     unique_email = f"company_test_{uuid.uuid4().hex[:8]}@test.com"
     unique_name = f"Rollback Company {uuid.uuid4().hex[:8]}"
-
-    from app.database.transactions import transaction
-    from app.auth.jwt import get_password_hash
-    from app.auth.csrf import generate_csrf_token
-    from datetime import datetime, timezone
-    from app.config import settings
 
     async with transaction(db_conn, force_rollback=True):
         hashed_password = get_password_hash("TestPass123!")
