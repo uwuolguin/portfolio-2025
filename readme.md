@@ -12,7 +12,7 @@
 **Grafana demo credentials:**
 
 > **Username:** `demo`
-> **Password:** `password`
+> **Password:** `demo`
 
 **A few things to know before poking around:**
 - Email verification uses the Resend free tier, so only the email acos2014600836@gmail.com can receive the verification link. Company creation is restricted to admin-verified users for now, but you can still sign up.
@@ -169,7 +169,7 @@ Login and logout events publish to Redpanda, partitioned by language (`es -> 0`,
 Events are published via `asyncio.create_task` for sub-millisecond API response times. The HTTP response returns before Redpanda acknowledgment. For critical-path events where zero-loss is mandated over latency, `await` would be used to ensure delivery before responding. The rest of the wiring is production-grade: explicit partition routing, **manual offset commits** for **at-least-once delivery**, **deterministic workflow IDs** so duplicate Kafka delivery doesn't execute the workflow twice, fire-and-forget child workflows. Swap the mock email activity for a real one and the pipeline is production-ready.
 
 ### Live Pipeline Verification: Grafana
-Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials: username `demo`, password `password`. Then create an account on the demo site and log in. The event shows up in the dashboard within seconds -- if it doesn't, refresh the Grafana tab.
+Go to `https://testproveoportfolio.xyz/grafana` and log in with the demo credentials: username `demo`, password `demo`. Then create an account on the demo site and log in. The event shows up in the dashboard within seconds -- if it doesn't, refresh the Grafana tab.
 
 What you'll see:
 - `event_type`: login or logout
