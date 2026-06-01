@@ -50,7 +50,9 @@ class ImageValidator:
         try:
             logger.info("nsfw_model_loading_starting")
 
-            from opennsfw2 import predict_image
+            from opennsfw2 import (
+                predict_image,
+            )  # pylint: disable=import-outside-toplevel
 
             logger.info("nsfw_model_testing")
             test_img = Image.new("RGB", (224, 224), color="red")
@@ -79,7 +81,7 @@ class ImageValidator:
             cls._nsfw_available = False
             return False
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error("nsfw_model_load_failed", error=str(e), exc_info=True)
             cls._nsfw_available = False
             return False
@@ -96,7 +98,7 @@ class ImageValidator:
         }
 
     @classmethod
-    def validate_and_process_image(
+    def validate_and_process_image(  # pylint: disable=too-many-locals
         cls, image_stream: BytesIO, content_type: str, extension: str
     ) -> BytesIO:
         """
@@ -132,11 +134,14 @@ class ImageValidator:
                 img_copy = img.copy()
         except UnidentifiedImageError as exc:
             raise ValueError("Invalid or corrupted image file") from exc
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             raise ValueError(f"Image processing error: {str(e)}") from e
 
         expected_format = None
-        for format_name, ext in settings.ext_by_format.items():
+        for (
+            format_name,
+            ext,
+        ) in settings.ext_by_format.items():  # pylint: disable=no-member
             if ext == extension:
                 expected_format = format_name
                 break
@@ -158,7 +163,7 @@ class ImageValidator:
 
         if img_copy.mode in ("RGBA", "P", "LA"):
             background = Image.new("RGB", img_copy.size, (255, 255, 255))
-            if img_copy.mode == "P)":
+            if img_copy.mode == "P":
                 img_copy = img_copy.convert("RGBA")
             background.paste(img_copy, mask=img_copy.split()[-1])
             img_copy = background
@@ -212,7 +217,9 @@ class ImageValidator:
             return (0.0, False)
 
         try:
-            from opennsfw2 import predict_image
+            from opennsfw2 import (
+                predict_image,
+            )  # pylint: disable=import-outside-toplevel
 
             image_stream.seek(0)
             score = predict_image(image_stream)
@@ -227,7 +234,7 @@ class ImageValidator:
 
             return float(score), True
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error("nsfw_check_execution_failed", error=str(e), exc_info=True)
 
             if settings.nsfw_fail_closed:

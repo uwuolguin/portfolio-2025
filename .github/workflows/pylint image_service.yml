@@ -23,6 +23,7 @@ jobs:
           pip install --upgrade pip
           pip install pylint
           pip install fastapi uvicorn minio structlog python-multipart pydantic pydantic-settings Pillow
+          pip install opennsfw2
 
       - name: Run pylint
         run: |

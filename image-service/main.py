@@ -103,7 +103,7 @@ async def health_check():
 
 
 @app.post("/upload")
-async def upload_image(
+async def upload_image(  # pylint: disable=too-many-locals
     file: UploadFile = File(...),
     company_id: str = Form(...),
     extension: str = Form(...),
@@ -194,8 +194,10 @@ async def upload_image(
             )
 
         object_name = f"{company_id}{extension}"
-        upload_content_type = settings.content_type_map.get(
-            extension, "application/octet-stream"
+        upload_content_type = (
+            settings.content_type_map.get(  # pylint: disable=no-member
+                extension, "application/octet-stream"
+            )
         )
 
         processed_stream.seek(0, 2)
