@@ -25,9 +25,8 @@ class AuthEventWorkflow:  # pylint: disable=too-few-public-methods
     """
 
     @workflow.run
-    async def run(
-        self, payload: dict
-    ) -> None:  # pylint: disable=missing-function-docstring
+    async def run(self, payload: dict) -> None:
+        # pylint: disable=missing-function-docstring
         enriched = await workflow.execute_activity(
             log_event_activity,
             payload,

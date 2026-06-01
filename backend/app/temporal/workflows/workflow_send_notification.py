@@ -15,9 +15,8 @@ class SendNotificationWorkflow:  # pylint: disable=too-few-public-methods
     """
 
     @workflow.run
-    async def run(
-        self, payload: dict
-    ) -> None:  # pylint: disable=missing-function-docstring
+    async def run(self, payload: dict) -> None:
+        # pylint: disable=missing-function-docstring
         await workflow.execute_activity(
             send_mock_email_activity,
             payload,
