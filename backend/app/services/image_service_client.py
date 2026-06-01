@@ -189,21 +189,19 @@ class ImageServiceClient:
                 "nsfw_checked": result["nsfw_checked"],
             }
 
-        except CircuitBreakerOpen:
-            # Re-raise immediately - no cleanup needed
+        except CircuitBreakerOpen:  # pylint: disable=try-except-raise
+            # Re-raise immediately - circuit breaker is open
             raise
 
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
             await _circuit_breaker.record_failure()
             raise
 
-        except ImageServiceError:
-            # Re-raise immediately - no cleanup needed
+        except ImageServiceError:  # pylint: disable=try-except-raise
+            # Re-raise immediately - image service error already has context
             raise
 
-    async def delete_image(
-        self, filename: str
-    ) -> bool:
+    async def delete_image(self, filename: str) -> bool:
         """Delete an image from the storage service."""
         await _circuit_breaker.allow_call()
 
@@ -229,8 +227,8 @@ class ImageServiceClient:
             await _circuit_breaker.record_success()
             return False
 
-        except CircuitBreakerOpen:
-            # Re-raise immediately - no cleanup needed
+        except CircuitBreakerOpen:  # pylint: disable=try-except-raise
+            # Re-raise immediately - circuit breaker is open
             raise
 
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
@@ -245,17 +243,14 @@ class ImageServiceClient:
         # pylint: disable=no-member
         extension = settings.content_type_map.get(content_type)
         if not extension:
-            allowed_types = ', '.join(settings.content_type_map.keys())
+            allowed_types = ", ".join(settings.content_type_map.keys())
             raise ValueError(
-                f"Unsupported image type: {content_type}. "
-                f"Allowed: {allowed_types}"
+                f"Unsupported image type: {content_type}. " f"Allowed: {allowed_types}"
             )
         return extension
 
     @staticmethod
-    def build_image_url(
-        image_id: str, extension: str
-    ) -> str:
+    def build_image_url(image_id: str, extension: str) -> str:
         """Build the full URL for an image."""
         base = settings.api_base_url.rstrip("/")
         return f"{base}/images/{image_id}{extension}"
