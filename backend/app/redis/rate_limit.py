@@ -70,7 +70,12 @@ def rate_limit(
     Return a FastAPI dependency that enforces rate limiting on a route.
 
     Usage:
-        @router.get("/", dependencies=[Depends(rate_limit(route_name="list", ip_limit=10, global_limit=100))])
+        @router.get(
+                    "/",
+                    dependencies=[
+                        Depends(rate_limit(route_name="list", ip_limit=10, global_limit=100))
+                    ],
+                )
     """
     async def dependency(request: Request) -> None:
         await enforce_rate_limit(

@@ -1,14 +1,24 @@
-import sys
+"""
+Logging configuration and middleware for the Proveo API.
+
+Sets up structlog for structured JSON logging, installs handlers for
+uncaught sync/async exceptions, configures Temporal SDK log routing,
+and provides the LoggingMiddleware for per-request correlation IDs.
+"""
+
 import asyncio
-import time
-import logging
 import json
-import structlog
+import logging
+import sys
+import time
 from datetime import datetime, timezone
+
+import structlog
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
+from app.auth.jwt import decode_access_token
 from temporalio.runtime import (
     LogForwardingConfig,
     LoggingConfig,
@@ -68,7 +78,7 @@ def install_async_exception_handler() -> None:
     """
     _log = structlog.get_logger("exception.async")
 
-    def _async_exception_handler(loop, context):
+    def _async_exception_handler(_loop, context):
         exc = context.get("exception")
         if exc is not None:
             _log.error(
@@ -95,9 +105,12 @@ def install_async_exception_handler() -> None:
 
 class _SdkJsonFormatter(logging.Formatter):
     """For temporalio.* Python-side logs — includes timestamp."""
+
     def format(self, record: logging.LogRecord) -> str:
         log = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(),
             "level": record.levelname.lower(),
             "logger": record.name,
             "event": record.getMessage(),
@@ -109,6 +122,7 @@ class _SdkJsonFormatter(logging.Formatter):
 
 class _CoreJsonFormatter(logging.Formatter):
     """For Rust core logs — no timestamp, nothing non-deterministic."""
+
     def format(self, record: logging.LogRecord) -> str:
         log = {
             "level": record.levelname.lower(),
@@ -164,7 +178,7 @@ def configure_temporal_logging() -> None:
 logger = structlog.get_logger(__name__)
 
 
-class LoggingMiddleware(BaseHTTPMiddleware):
+class LoggingMiddleware(BaseHTTPMiddleware):  # pylint: disable=too-few-public-methods
     """
     Enhanced logging with security-focused information and contextvars.
 
@@ -195,53 +209,61 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         - Values for those headers are replaced with "***REDACTED***".
         """
         sanitized = {}
-
         for key, value in headers.items():
             key_lower = key.lower()
-
             if key_lower in LoggingMiddleware.SENSITIVE_HEADERS:
                 sanitized[key] = "***REDACTED***"
             else:
                 sanitized[key] = value
-
         return sanitized
 
     @staticmethod
     def _is_suspicious_path(path: str) -> bool:
         """Detect common attack patterns in URL paths."""
         suspicious_patterns = [
-            "..", "~", "/etc/", "/proc/", "/sys/",
-            "eval(", "exec(", "system(", "<script",
-            "select", "union", "drop", "insert",
-            ".php", ".asp", ".jsp", ".cgi",
-            "wp-admin", "wp-login", "phpmyadmin",
-            "xmlrpc", ".env", ".git",
+            "..",
+            "~",
+            "/etc/",
+            "/proc/",
+            "/sys/",
+            "eval(",
+            "exec(",
+            "system(",
+            "<script",
+            "select",
+            "union",
+            "drop",
+            "insert",
+            ".php",
+            ".asp",
+            ".jsp",
+            ".cgi",
+            "wp-admin",
+            "wp-login",
+            "phpmyadmin",
+            "xmlrpc",
+            ".env",
+            ".git",
         ]
-
         path_lower = path.lower()
         return any(pattern in path_lower for pattern in suspicious_patterns)
 
     @staticmethod
     def _extract_user_id(request: Request) -> str | None:
-        """
-        Extract user_id from JWT cookie if present.
-        """
+        """Extract user_id from JWT cookie if present."""
         try:
             token = request.cookies.get("access_token")
             if not token:
                 return None
-
-            from app.auth.jwt import decode_access_token
             payload = decode_access_token(token)
-
             if payload and "sub" in payload:
                 return payload["sub"]
-
             return None
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
 
     async def dispatch(self, request: Request, call_next):
+        """Log request start/end with timing, correlation ID, and user context."""
         if request.url.path in self.EXCLUDE_PATHS:
             return await call_next(request)
 
@@ -258,7 +280,6 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
         real_ip = request.headers.get("X-Real-IP", client_ip)
         user_agent = request.headers.get("user-agent", "unknown")
-
         user_id = self._extract_user_id(request)
 
         bind_contextvars(
@@ -284,7 +305,6 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         )
 
         response = await call_next(request)
-
         duration = time.time() - start_time
 
         if response.status_code >= 500:
@@ -306,5 +326,4 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         )
 
         response.headers["X-Correlation-ID"] = correlation_id
-
         return response

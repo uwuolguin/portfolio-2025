@@ -1,7 +1,11 @@
+"""Security middleware: HTTP headers hardening and HTTPS enforcement."""
+
+import structlog
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response, RedirectResponse
-import structlog
+from starlette.responses import RedirectResponse
+
+from app.config import settings
 
 logger = structlog.get_logger(__name__)
 
@@ -21,23 +25,20 @@ HTTPS_EXEMPT_PATHS = {"/api/v1/health", "/health"}
 HTTPS_EXEMPT_HOSTS = {"localhost", "127.0.0.1"}
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):  # pylint: disable=too-few-public-methods
     """
-    Enhanced security headers for production environment
-    Protects against common web vulnerabilities
+    Enhanced security headers for production environment.
+    Protects against common web vulnerabilities.
     """
-    
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        
-        response.headers["X-Frame-Options"] = "DENY"
 
+    async def dispatch(self, request: Request, call_next):
+        """Add security headers to every outgoing response."""
+        response = await call_next(request)
+
+        response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        
         response.headers["X-XSS-Protection"] = "1; mode=block"
-        
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        
         response.headers["Permissions-Policy"] = (
             "geolocation=(), "
             "microphone=(), "
@@ -48,38 +49,41 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "gyroscope=(), "
             "accelerometer=()"
         )
-        
+
         if not request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self'; "  
-                "style-src 'self' 'unsafe-inline'; " 
-                "img-src 'self' data: https:; " 
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
                 "font-src 'self'; "
-                "connect-src 'self'; "  
-                "frame-ancestors 'none'; " 
-                "base-uri 'self'; "  
-                "form-action 'self'; " 
-                "upgrade-insecure-requests;" 
+                "connect-src 'self'; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'; "
+                "upgrade-insecure-requests;"
             )
-        
-        from app.config import settings
+
         if not settings.debug:
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains; preload"
             )
-        
-        for header in ["Server", "X-Powered-By", "X-AspNet-Version", "X-AspNetMvc-Version"]:
+
+        for header in [
+            "Server",
+            "X-Powered-By",
+            "X-AspNet-Version",
+            "X-AspNetMvc-Version",
+        ]:
             if header in response.headers:
                 del response.headers[header]
-        
+
         return response
 
 
-class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+class HTTPSRedirectMiddleware(BaseHTTPMiddleware):  # pylint: disable=too-few-public-methods
     """
     Force HTTPS in production.
-    If debug is False, this middleware ensures that requests are served over HTTPS.
 
     Behavior:
     - In development (settings.debug=True): passthrough, no redirect.
@@ -92,10 +96,9 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     - If behind a reverse proxy that sets X-Forwarded-Proto=https: passthrough.
     - Otherwise: redirect to the same URL with scheme="https" using a 301.
     """
-    
+
     async def dispatch(self, request: Request, call_next):
-        from app.config import settings
-        
+        """Redirect plain-HTTP requests to HTTPS in production."""
         if settings.debug:
             return await call_next(request)
 
@@ -104,20 +107,21 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
 
         if request.url.hostname in HTTPS_EXEMPT_HOSTS:
             return await call_next(request)
-        
+
         if request.url.scheme == "https":
             return await call_next(request)
-        
+
         forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
         if forwarded_proto == "https":
             return await call_next(request)
-        
+
         https_url = request.url.replace(scheme="https")
         logger.warning(
             "https_redirect",
             original_url=str(request.url),
             redirect_url=str(https_url),
-            client_ip=request.client.host if request.client else None
+            client_ip=request.client.host if request.client else None,
         )
-        
+
         return RedirectResponse(url=str(https_url), status_code=301)
+    
