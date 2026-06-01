@@ -1,3 +1,5 @@
+"""Activity for sending mock emails."""  # pylint: disable=missing-module-docstring
+
 from temporalio import activity
 import structlog
 
@@ -5,7 +7,9 @@ logger = structlog.get_logger(__name__)
 
 
 @activity.defn(name="send_mock_email_activity")
-async def send_mock_email_activity(payload: dict) -> bool:
+async def send_mock_email_activity(
+    payload: dict,
+) -> bool:  # pylint: disable=missing-function-docstring
     info = activity.info()
 
     logger.info(

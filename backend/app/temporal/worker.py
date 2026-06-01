@@ -31,11 +31,13 @@ try:
         configure_temporal_logging,
         install_sync_exception_handler,
     )
+
     setup_logging()
-    configure_temporal_logging()      # must run before Client.connect()
+    configure_temporal_logging()  # must run before Client.connect()
     install_sync_exception_handler()  # sync crashes → structured JSON
-except Exception:
+except Exception:  # pylint: disable=broad-exception-caught
     import logging
+
     logging.basicConfig(level=logging.INFO)
 
 from app.config import settings
@@ -62,7 +64,7 @@ logger = structlog.get_logger(__name__)
 TASK_QUEUE = "auth-queue"
 
 
-async def run_worker() -> None:
+async def run_worker() -> None:  # pylint: disable=missing-function-docstring
     # Must be called inside the running loop — patches the live event loop
     install_async_exception_handler()
 

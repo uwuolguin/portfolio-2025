@@ -11,12 +11,13 @@ For sync exception testing run separately — it requires a direct process crash
     kubectl exec -n portfolio deployment/temporal-worker -- \
       python app/temporal/test_sync_exception_standalone.py
 """
+
 import asyncio
 from temporalio.client import Client
 from app.config import settings
 
 
-async def main():
+async def main():  # pylint: disable=missing-function-docstring
     client = await Client.connect(settings.temporal_host)
 
     await client.start_workflow(

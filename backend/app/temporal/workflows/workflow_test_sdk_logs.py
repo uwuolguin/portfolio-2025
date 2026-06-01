@@ -4,12 +4,13 @@ How: workflow.logger and activity.logger both route through
      logging.getLogger("temporalio.*") → hits _SdkJsonFormatter.
 Expected log: {"timestamp": "...", "level": "warning", "logger": "temporalio.workflow", ...}
 """
+
 from datetime import timedelta
 from temporalio import workflow, activity
 
 
 @activity.defn
-async def activity_sdk_log() -> str:
+async def activity_sdk_log() -> str:  # pylint: disable=missing-function-docstring
     activity.logger.warning(
         "test_activity_sdk_log — this should appear as JSON via _SdkJsonFormatter"
     )
@@ -17,9 +18,9 @@ async def activity_sdk_log() -> str:
 
 
 @workflow.defn
-class TestSdkLogsWorkflow:
+class TestSdkLogsWorkflow:  # pylint: disable=too-few-public-methods,missing-class-docstring
     @workflow.run
-    async def run(self) -> str:
+    async def run(self) -> str:  # pylint: disable=missing-function-docstring
         workflow.logger.warning(
             "test_workflow_sdk_log — this should appear as JSON via _SdkJsonFormatter"
         )

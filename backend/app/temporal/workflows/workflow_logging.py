@@ -1,14 +1,18 @@
+"""Workflow for handling auth events and triggering notifications."""  # pylint: disable=missing-module-docstring
+
+from datetime import timedelta
 from temporalio import workflow
 from temporalio.workflow import ParentClosePolicy
-from datetime import timedelta
 
 with workflow.unsafe.imports_passed_through():
     from app.temporal.activities.log_event_activity import log_event_activity
-    from app.temporal.workflows.workflow_send_notification import SendNotificationWorkflow
+    from app.temporal.workflows.workflow_send_notification import (
+        SendNotificationWorkflow,
+    )
 
 
 @workflow.defn(name="AuthEventWorkflow")
-class AuthEventWorkflow:
+class AuthEventWorkflow:  # pylint: disable=too-few-public-methods
     """
     Parent workflow.
     1. Runs log_event_activity
@@ -21,7 +25,9 @@ class AuthEventWorkflow:
     """
 
     @workflow.run
-    async def run(self, payload: dict) -> None:
+    async def run(
+        self, payload: dict
+    ) -> None:  # pylint: disable=missing-function-docstring
         enriched = await workflow.execute_activity(
             log_event_activity,
             payload,

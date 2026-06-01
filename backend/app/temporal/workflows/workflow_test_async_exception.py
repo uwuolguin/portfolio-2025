@@ -4,13 +4,16 @@ How: activity fires a task without awaiting it — the task raises,
      the loop exception handler catches it.
 Expected log: {"level": "error", "event": "uncaught_async_exception", ...}
 """
+
 import asyncio
 from datetime import timedelta
 from temporalio import workflow, activity
 
 
 @activity.defn
-async def activity_fire_and_forget_bad_task() -> str:
+async def activity_fire_and_forget_bad_task() -> (
+    str
+):  # pylint: disable=missing-function-docstring
     async def bad():
         raise RuntimeError("test async uncaught exception from activity task")
 
@@ -23,9 +26,9 @@ async def activity_fire_and_forget_bad_task() -> str:
 
 
 @workflow.defn
-class TestAsyncExceptionWorkflow:
+class TestAsyncExceptionWorkflow:  # pylint: disable=too-few-public-methods,missing-class-docstring
     @workflow.run
-    async def run(self) -> str:
+    async def run(self) -> str:  # pylint: disable=missing-function-docstring
         return await workflow.execute_activity(
             activity_fire_and_forget_bad_task,
             start_to_close_timeout=timedelta(seconds=10),

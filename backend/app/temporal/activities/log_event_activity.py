@@ -1,3 +1,5 @@
+"""Activity for logging auth events."""  # pylint: disable=missing-module-docstring
+
 from temporalio import activity
 import structlog
 
@@ -5,7 +7,9 @@ logger = structlog.get_logger(__name__)
 
 
 @activity.defn(name="log_event_activity")
-async def log_event_activity(payload: dict) -> dict:
+async def log_event_activity(
+    payload: dict,
+) -> dict:  # pylint: disable=missing-function-docstring
     info = activity.info()
 
     logger.info(
