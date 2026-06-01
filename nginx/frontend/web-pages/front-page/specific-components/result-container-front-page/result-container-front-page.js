@@ -133,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             grid.className = 'results-grid';
 
             companies.forEach(company => {
-                const card = buildBusinessCard(company, lang);
+                const card = buildBusinessCard(company);
                 grid.appendChild(card);
             });
 

@@ -10,7 +10,7 @@ export function getInternalUrl(path) {
     return `${BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-function notifyStateChange(_key) {
+function notifyStateChange() {
     document.dispatchEvent(new Event('stateChange'));
 }
 
@@ -21,7 +21,7 @@ export function initStorageListener() {
             case 'isLoggedIn':
             case 'hasCompany':
             case 'language':
-                notifyStateChange(e.key);
+                notifyStateChange();
                 break;
         }
     });
@@ -33,7 +33,7 @@ export function getLanguage() {
 
 export function setLanguage(lang) {
     localStorage.setItem('language', lang);
-    notifyStateChange('language');
+    notifyStateChange();
 }
 
 export function getLoginState() {
@@ -42,13 +42,13 @@ export function getLoginState() {
 
 export function setLoginState(isLoggedIn) {
     localStorage.setItem('isLoggedIn', isLoggedIn.toString());
-    notifyStateChange('isLoggedIn');
+    notifyStateChange();
 }
 
 export function logout() {
     localStorage.removeItem('isLoggedIn');
     localStorage.removeItem('hasCompany');
-    notifyStateChange('isLoggedIn');
+    notifyStateChange();
     window.location.href = '/front-page/front-page.html';
 }
 
@@ -58,7 +58,7 @@ export function getCompanyPublishState() {
 
 export function setCompanyPublishState(hasCompany) {
     localStorage.setItem('hasCompany', hasCompany.toString());
-    notifyStateChange('hasCompany');
+    notifyStateChange();
 }
 
 export function getCSRFToken() {
@@ -102,7 +102,7 @@ export async function checkAuthStatus() {
             setLoginState(isAuthenticated);
         }
         return isAuthenticated;
-    } catch (_error) {
+    } catch {
         const currentState = getLoginState();
         if (currentState) {
             setLoginState(false);
@@ -120,7 +120,7 @@ export async function checkCompanyStatus() {
             setCompanyPublishState(hasCompany);
         }
         return hasCompany;
-    } catch (_error) {
+    } catch {
         const currentState = getCompanyPublishState();
         if (currentState) {
             setCompanyPublishState(false);

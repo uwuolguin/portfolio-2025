@@ -181,7 +181,7 @@ export function buildDropdownOption(value, displayText) {
     return option;
 }
 
-export function buildBusinessCard(company, lang) {
+export function buildBusinessCard(company) {
     const card = document.createElement('div');
     card.className = 'business-card';
 
