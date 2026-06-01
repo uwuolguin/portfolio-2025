@@ -383,7 +383,7 @@
 #   │     ID back to its full label_set and uses it to find the chunk
 #   │     files that contain the actual log lines — the label_set is
 #   │     both the search result AND the pointer into storage.
-#   │  
+#   │
 #   │   This index is rebuilt from the WAL on restart — it is not persisted
 #   │   separately during normal operation.
 #   └── When a chunk reaches its size limit (~256KB uncompressed) or its
@@ -1133,9 +1133,9 @@ data:
 
 
     // =============================================================================
-    // STEP 3 — OPEN log streams for each surviving target 
-    77 Alloy receives each line and holds it in memory alongside the label set it built in step 2
-    77 Labels behave like an envelop and Logs can be seen as the message.
+    // STEP 3 — OPEN log streams for each surviving target
+    // Alloy receives each line and holds it in memory alongside the label set it built in step 2
+    // Labels behave like an envelop and Logs can be seen as the message.
     //
     // loki.source.kubernetes takes the filtered+relabeled target list and calls
     // the Kubernetes API to stream logs from each one — identical to running:
