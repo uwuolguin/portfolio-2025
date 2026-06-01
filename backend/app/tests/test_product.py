@@ -3,6 +3,8 @@ Products router tests with rollback for non-persistent test data.
 Run with: pytest app/tests/test_products.py -v
 """
 
+# pylint: disable=duplicate-code
+
 import uuid
 from datetime import timedelta
 
