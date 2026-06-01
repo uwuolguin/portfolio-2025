@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines,too-many-public-messages
+# pylint: disable=too-many-lines
 """
 Database Transactions Module with Read/Write Splitting
 
@@ -1041,6 +1041,7 @@ class DB:  # pylint: disable=too-many-public-methods
         commune_uuid: Optional[UUID] = None,
     ) -> CompanyRecord:
         """Update company (WRITE operation - uses primary)"""
+        # pylint: disable=too-many-locals
         async with transaction(
             conn, isolation=IsolationLevel.READ_COMMITTED, readonly=False
         ):
@@ -1141,6 +1142,7 @@ class DB:  # pylint: disable=too-many-public-methods
         conn: asyncpg.Connection, company_uuid: UUID, user_uuid: UUID
     ) -> CompanyDeleteResponse:
         """Delete company (WRITE operation - uses primary)"""
+        # pylint: disable=too-many-locals
         deleted_image: str | None = None
 
         async with transaction(
