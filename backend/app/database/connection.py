@@ -26,17 +26,17 @@ logger = structlog.get_logger(__name__)
 class DatabasePoolManager:
     """
     Manages separate connection pools for read and write operations.
-    
+
     Usage:
         # For writes (INSERT, UPDATE, DELETE, DDL)
         async with pool_manager.acquire_write() as conn:
             await conn.execute("INSERT INTO ...")
-        
+
         # For reads (SELECT)
         async with pool_manager.acquire_read() as conn:
             await conn.fetch("SELECT * FROM ...")
     """
-    
+
     write_pool: Optional[asyncpg.Pool] = None
     read_pool: Optional[asyncpg.Pool] = None
     _replica_available: bool = False
@@ -64,7 +64,7 @@ class DatabasePoolManager:
     async def init_pools(self) -> None:
         """Initialize both write and read connection pools"""
         ssl_context = self._create_ssl_context()
-        
+
         # Initialize WRITE pool (primary)
         try:
             self.write_pool = await asyncpg.create_pool(
@@ -88,7 +88,7 @@ class DatabasePoolManager:
                 pool_size=self.write_pool.get_size(),
                 host="postgres-primary",
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(
                 "write_pool_init_failed",
                 error=str(e),
@@ -114,7 +114,7 @@ class DatabasePoolManager:
                 ssl=ssl_context,
                 init=self._init_connection,
             )
-            
+
             # Verify replica is actually in recovery mode
             async with self.read_pool.acquire() as conn:
                 is_replica = await conn.fetchval("SELECT pg_is_in_recovery()")
@@ -129,11 +129,12 @@ class DatabasePoolManager:
                 else:
                     logger.warning(
                         "read_pool_not_replica",
-                        message="Read pool connected but target is not a replica. Using primary for reads.",
+                        message="Read pool connected but target is not a replica. "
+                        "Using primary for reads.",
                     )
                     self._replica_available = False
-                    
-        except Exception as e:
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.warning(
                 "read_pool_init_failed_using_primary",
                 error=str(e),
@@ -147,11 +148,11 @@ class DatabasePoolManager:
         if self.write_pool:
             await self.write_pool.close()
             self.write_pool = None
-            
+
         if self.read_pool:
             await self.read_pool.close()
             self.read_pool = None
-            
+
         self._replica_available = False
         logger.info("database_pools_closed")
 
@@ -169,7 +170,7 @@ class DatabasePoolManager:
             yield conn
         finally:
             await self.write_pool.release(conn)
-    
+
     @asynccontextmanager
     async def acquire_read(self) -> AsyncGenerator[asyncpg.Connection, None]:
         """
@@ -179,17 +180,16 @@ class DatabasePoolManager:
         """
         # Pick which pool to use
         pool = self.read_pool if self.read_pool else self.write_pool
-        
+
         if not pool:
             raise RuntimeError("No database pool available")
-        
+
         # Acquire and yield
         conn = await pool.acquire()
         try:
             yield conn
         finally:
             await pool.release(conn)
-
 
 
 # Global pool manager instance
@@ -210,7 +210,7 @@ async def get_db_write() -> AsyncGenerator[asyncpg.Connection, None]:
     """
     FastAPI dependency for WRITE operations.
     Use this for INSERT, UPDATE, DELETE, and any data modifications.
-    
+
     Example:
         @router.post("/items")
         async def create_item(db: asyncpg.Connection = Depends(get_db_write)):
@@ -224,7 +224,7 @@ async def get_db_read() -> AsyncGenerator[asyncpg.Connection, None]:
     """
     FastAPI dependency for READ operations.
     Use this for SELECT queries and read-only operations.
-    
+
     Example:
         @router.get("/items")
         async def list_items(db: asyncpg.Connection = Depends(get_db_read)):

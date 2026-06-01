@@ -1,4 +1,4 @@
-"""
+"""# pylint: disable=too-many-lines,too-many-public-messages
 Database Transactions Module with Read/Write Splitting
 
 This module provides transaction management with automatic routing:
@@ -11,28 +11,35 @@ Key changes from original:
 - Write transactions always use primary pool
 """
 
-import asyncpg
-import structlog
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional, List
 from enum import Enum
 from uuid import UUID
+import uuid
+from datetime import datetime, timedelta, timezone
+import asyncio
+
+import asyncpg
+import structlog
+
 from app.database.db_retry import db_retry
-from app.schemas.users import UserRecord, UserRecordHash, UserDeletionResponse, AdminUserResponse
+from app.schemas.users import (
+    UserRecord,
+    UserRecordHash,
+    UserDeletionResponse,
+    AdminUserResponse,
+)
 from app.schemas.communes import CommuneRecord
 from app.schemas.products import ProductRecord
 from app.auth.jwt import get_password_hash
 from app.config import settings
-import uuid
 from app.auth.csrf import generate_csrf_token
-from datetime import datetime, timedelta, timezone
 from app.services.image_service_client import image_service_client
-import asyncio
 from app.schemas.companies import (
-    CompanyRecord, 
-    CompanyWithRelations, 
+    CompanyRecord,
+    CompanyWithRelations,
     CompanyDeleteResponse,
-    CompanySearchResponse
+    CompanySearchResponse,
 )
 
 logger = structlog.get_logger(__name__)
@@ -53,13 +60,13 @@ async def transaction(
 ) -> AsyncGenerator[asyncpg.Connection, None]:
     """
     Clean asyncpg transaction wrapper with accurate commit/rollback logging.
-    
+
     Args:
         conn: Database connection (from write or read pool)
         isolation: Transaction isolation level
         readonly: If True, transaction is read-only (uses replica if available)
         force_rollback: If True, always rollback instead of commit (for testing)
-    
+
     Note: The `readonly` flag is informational for logging. The actual
     read/write routing is done at the pool level via get_db_read/get_db_write.
     """
@@ -86,16 +93,18 @@ async def transaction(
     )
 
     await tx.start()
-    
+
     try:
         yield conn
-        
+
         if force_rollback:
             await tx.rollback()
             logger.debug("transaction_forced_rollback", isolation=isolation.value)
         else:
             await tx.commit()
-            logger.debug("transaction_committed", isolation=isolation.value, readonly=readonly)
+            logger.debug(
+                "transaction_committed", isolation=isolation.value, readonly=readonly
+            )
 
     except Exception as e:
         await tx.rollback()
@@ -108,14 +117,14 @@ async def transaction(
         raise
 
 
-class DB:
+class DB:  # pylint: disable=too-many-public-methods
     """
     Database operations class with read/write separation.
-    
+
     Convention:
     - Methods that only SELECT data use `readonly=True` in transaction
     - Methods that INSERT/UPDATE/DELETE use `readonly=False` (default)
-    
+
     The actual pool selection (primary vs replica) is done in the router
     layer using get_db_read() or get_db_write() dependencies.
     """
@@ -123,13 +132,13 @@ class DB:
     # =========================================================================
     # USER OPERATIONS
     # =========================================================================
-    
+
     @staticmethod
     @db_retry()
     async def create_user(
-        conn: asyncpg.Connection, 
-        name: str, 
-        email: str, 
+        conn: asyncpg.Connection,
+        name: str,
+        email: str,
         password: str,
         force_rollback: bool = False,
     ) -> UserRecord:
@@ -137,26 +146,43 @@ class DB:
         hashed_password = get_password_hash(password)
         user_uuid = uuid.uuid4()
         verification_token = generate_csrf_token()
-        token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_email_time)
+        token_expires = datetime.now(timezone.utc) + timedelta(
+            hours=settings.verification_token_email_time
+        )
 
         async with transaction(conn, readonly=False, force_rollback=force_rollback):
             query = """
-                INSERT INTO proveo.users 
-                    (uuid, name, email, hashed_password, role, verification_token, verification_token_expires)
+                INSERT INTO proveo.users
+                    (uuid, name, email, hashed_password, role, verification_token,
+                     verification_token_expires)
                 VALUES ($1, $2, $3, $4, 'user', $5, $6)
                 ON CONFLICT (email) DO NOTHING
                 RETURNING uuid, name, email, role, email_verified, verification_token, created_at
             """
-            row = await conn.fetchrow(query, user_uuid, name, email, hashed_password, verification_token, token_expires)
+            row = await conn.fetchrow(
+                query,
+                user_uuid,
+                name,
+                email,
+                hashed_password,
+                verification_token,
+                token_expires,
+            )
             if not row:
                 raise ValueError(f"Email {email} is already registered")
 
-            logger.info("user_created_pending_verification", user_uuid=str(row["uuid"]), email=email)
+            logger.info(
+                "user_created_pending_verification",
+                user_uuid=str(row["uuid"]),
+                email=email,
+            )
             return UserRecord(**dict(row))
 
     @staticmethod
     @db_retry()
-    async def get_user_by_email(conn: asyncpg.Connection, email: str) -> Optional[UserRecordHash]:
+    async def get_user_by_email(
+        conn: asyncpg.Connection, email: str
+    ) -> Optional[UserRecordHash]:
         """Get user by email (READ operation - can use replica)"""
         async with transaction(conn, readonly=True):
             query = """
@@ -180,7 +206,7 @@ class DB:
             user = await conn.fetchrow(query, token)
             if not user:
                 raise ValueError("Invalid or expired verification token")
-            if user['verification_token_expires'] < datetime.now(timezone.utc):
+            if user["verification_token_expires"] < datetime.now(timezone.utc):
                 raise ValueError("Verification token has expired")
 
             update_query = """
@@ -191,23 +217,29 @@ class DB:
                 WHERE uuid = $1
                 RETURNING uuid, name, email, role, email_verified, verification_token, created_at
             """
-            verified_user = await conn.fetchrow(update_query, user['uuid'])
-            logger.info("email_verified", user_uuid=str(user['uuid']), email=user['email'])
+            verified_user = await conn.fetchrow(update_query, user["uuid"])
+            logger.info(
+                "email_verified", user_uuid=str(user["uuid"]), email=user["email"]
+            )
             return UserRecord(**dict(verified_user))
 
     @staticmethod
     @db_retry()
-    async def resend_verification_email(conn: asyncpg.Connection, email: str) -> UserRecord:
+    async def resend_verification_email(
+        conn: asyncpg.Connection, email: str
+    ) -> UserRecord:
         """Resend verification email (WRITE operation - uses primary)"""
         async with transaction(conn, readonly=False):
             query = "SELECT uuid, name, email, email_verified FROM proveo.users WHERE email = $1"
             user = await conn.fetchrow(query, email)
             if not user:
                 raise ValueError("User not found")
-            if user['email_verified']:
+            if user["email_verified"]:
                 raise ValueError("Email already verified")
             verification_token = generate_csrf_token()
-            token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.verification_token_email_time)
+            token_expires = datetime.now(timezone.utc) + timedelta(
+                hours=settings.verification_token_email_time
+            )
             update_query = """
                 UPDATE proveo.users
                 SET verification_token = $1,
@@ -215,18 +247,28 @@ class DB:
                 WHERE uuid = $3
                 RETURNING uuid, name, email, role, email_verified, verification_token, created_at
             """
-            updated_user = await conn.fetchrow(update_query, verification_token, token_expires, user['uuid'])
-            logger.info("verification_token_regenerated", user_uuid=str(user['uuid']), email=email)
+            updated_user = await conn.fetchrow(
+                update_query, verification_token, token_expires, user["uuid"]
+            )
+            logger.info(
+                "verification_token_regenerated",
+                user_uuid=str(user["uuid"]),
+                email=email,
+            )
             return UserRecord(**dict(updated_user))
 
     @staticmethod
     @db_retry()
-    async def delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> UserDeletionResponse:
+    async def delete_user_by_uuid(
+        conn: asyncpg.Connection, user_uuid: UUID
+    ) -> UserDeletionResponse:  # pylint: disable=too-many-locals
         """Delete user and cascade (WRITE operation - uses primary)"""
         company_uuid: Optional[str] = None
         deleted_image: Optional[str] = None
 
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
+        async with transaction(
+            conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False
+        ):
             user_query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
@@ -262,52 +304,108 @@ class DB:
                          created_at, updated_at)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 """
-                await conn.execute(insert_deleted_company,
-                                   company["uuid"], company["user_uuid"], company["product_uuid"],
-                                   company["commune_uuid"], company["name"], company["description_es"],
-                                   company["description_en"], company["address"], company["phone"],
-                                   company["email"], company["image_url"], company["image_extension"],
-                                   company["created_at"], company["updated_at"])
-                deleted_company = await conn.fetchrow("DELETE FROM proveo.companies WHERE uuid = $1 RETURNING uuid", company["uuid"])
+                await conn.execute(
+                    insert_deleted_company,
+                    company["uuid"],
+                    company["user_uuid"],
+                    company["product_uuid"],
+                    company["commune_uuid"],
+                    company["name"],
+                    company["description_es"],
+                    company["description_en"],
+                    company["address"],
+                    company["phone"],
+                    company["email"],
+                    company["image_url"],
+                    company["image_extension"],
+                    company["created_at"],
+                    company["updated_at"],
+                )
+                deleted_company = await conn.fetchrow(
+                    "DELETE FROM proveo.companies WHERE uuid = $1 RETURNING uuid",
+                    company["uuid"],
+                )
                 if not deleted_company:
-                    raise RuntimeError("Race condition detected during company deletion")
-                logger.info("user_company_deleted", user_uuid=str(user_uuid), company_uuid=company_uuid)
+                    raise RuntimeError(
+                        "Race condition detected during company deletion"
+                    )
+                logger.info(
+                    "user_company_deleted",
+                    user_uuid=str(user_uuid),
+                    company_uuid=company_uuid,
+                )
 
             insert_deleted_user = """
                 INSERT INTO proveo.users_deleted
                     (uuid, name, email, hashed_password, role, email_verified, created_at)
                 VALUES ($1,$2,$3,$4,$5,$6,$7)
             """
-            await conn.execute(insert_deleted_user,
-                               user["uuid"], user["name"], user["email"], user["hashed_password"],
-                               user["role"], user["email_verified"], user["created_at"])
-            deleted_user = await conn.fetchrow("DELETE FROM proveo.users WHERE uuid = $1 RETURNING uuid", user_uuid)
+            await conn.execute(
+                insert_deleted_user,
+                user["uuid"],
+                user["name"],
+                user["email"],
+                user["hashed_password"],
+                user["role"],
+                user["email_verified"],
+                user["created_at"],
+            )
+            deleted_user = await conn.fetchrow(
+                "DELETE FROM proveo.users WHERE uuid = $1 RETURNING uuid", user_uuid
+            )
             if not deleted_user:
                 raise RuntimeError("Race condition detected during user deletion")
-            logger.info("user_deleted_with_cascade", user_uuid=str(user_uuid), email=user["email"], company_deleted=1 if company else 0)
+            logger.info(
+                "user_deleted_with_cascade",
+                user_uuid=str(user_uuid),
+                email=user["email"],
+                company_deleted=1 if company else 0,
+            )
 
         if deleted_image:
             try:
-                success = await asyncio.wait_for(image_service_client.delete_image(deleted_image), timeout=15.0)
+                success = await asyncio.wait_for(
+                    image_service_client.delete_image(deleted_image), timeout=15.0
+                )
                 if success:
-                    logger.info("user_self_delete_image_removed", company_uuid=company_uuid, image_path=deleted_image)
+                    logger.info(
+                        "user_self_delete_image_removed",
+                        company_uuid=company_uuid,
+                        image_path=deleted_image,
+                    )
                 else:
-                    logger.warning("user_self_delete_image_not_found", company_uuid=company_uuid, image_path=deleted_image)
+                    logger.warning(
+                        "user_self_delete_image_not_found",
+                        company_uuid=company_uuid,
+                        image_path=deleted_image,
+                    )
             except asyncio.TimeoutError:
-                logger.warning("user_self_delete_image_timeout", company_uuid=company_uuid, image_path=deleted_image)
-            except Exception as e:
-                logger.error("user_self_delete_image_error", company_uuid=company_uuid, image_path=deleted_image, error=str(e), exc_info=True)
+                logger.warning(
+                    "user_self_delete_image_timeout",
+                    company_uuid=company_uuid,
+                    image_path=deleted_image,
+                )
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error(
+                    "user_self_delete_image_error",
+                    company_uuid=company_uuid,
+                    image_path=deleted_image,
+                    error=str(e),
+                    exc_info=True,
+                )
 
         return UserDeletionResponse(
             user_uuid=user_uuid,
             email=user["email"],
             company_deleted=1 if company else 0,
-            image_deleted=1 if deleted_image else 0
+            image_deleted=1 if deleted_image else 0,
         )
 
     @staticmethod
     @db_retry()
-    async def get_all_users_admin(conn: asyncpg.Connection, limit: int = 100, offset: int = 0) -> List[AdminUserResponse]:
+    async def get_all_users_admin(
+        conn: asyncpg.Connection, limit: int = 100, offset: int = 0
+    ) -> List[AdminUserResponse]:
         """Get all users for admin (READ operation - can use replica)"""
         async with transaction(conn, readonly=True):
             query = """
@@ -324,12 +422,16 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def admin_delete_user_by_uuid(conn: asyncpg.Connection, user_uuid: UUID) -> UserDeletionResponse:
+    async def admin_delete_user_by_uuid(
+        conn: asyncpg.Connection, user_uuid: UUID
+    ) -> UserDeletionResponse:  # pylint: disable=too-many-locals
         """Admin delete user (WRITE operation - uses primary)"""
         deleted_image_path: Optional[str] = None
         company_uuid: Optional[str] = None
 
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
+        async with transaction(
+            conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False
+        ):
             user_query = """
                 SELECT uuid, name, email, hashed_password, role, email_verified, created_at
                 FROM proveo.users
@@ -369,20 +471,36 @@ class DB:
                 """
                 await conn.execute(
                     insert_deleted_company,
-                    company["uuid"], company["user_uuid"], company["product_uuid"],
-                    company["commune_uuid"], company["name"], company["description_es"],
-                    company["description_en"], company["address"], company["phone"],
-                    company["email"], company["image_url"], company["image_extension"],
-                    company["created_at"], company["updated_at"]
+                    company["uuid"],
+                    company["user_uuid"],
+                    company["product_uuid"],
+                    company["commune_uuid"],
+                    company["name"],
+                    company["description_es"],
+                    company["description_en"],
+                    company["address"],
+                    company["phone"],
+                    company["email"],
+                    company["image_url"],
+                    company["image_extension"],
+                    company["created_at"],
+                    company["updated_at"],
                 )
 
                 deleted_company = await conn.fetchrow(
-                    "DELETE FROM proveo.companies WHERE uuid = $1 RETURNING uuid", company["uuid"]
+                    "DELETE FROM proveo.companies WHERE uuid = $1 RETURNING uuid",
+                    company["uuid"],
                 )
                 if not deleted_company:
-                    raise RuntimeError("Race condition detected during company deletion")
+                    raise RuntimeError(
+                        "Race condition detected during company deletion"
+                    )
 
-                logger.info("user_company_deleted", user_uuid=str(user_uuid), company_uuid=company_uuid)
+                logger.info(
+                    "user_company_deleted",
+                    user_uuid=str(user_uuid),
+                    company_uuid=company_uuid,
+                )
 
             insert_deleted_user = """
                 INSERT INTO proveo.users_deleted
@@ -391,8 +509,13 @@ class DB:
             """
             await conn.execute(
                 insert_deleted_user,
-                user["uuid"], user["name"], user["email"], user["hashed_password"],
-                user["role"], user["email_verified"], user["created_at"]
+                user["uuid"],
+                user["name"],
+                user["email"],
+                user["hashed_password"],
+                user["role"],
+                user["email_verified"],
+                user["created_at"],
             )
 
             deleted_user = await conn.fetchrow(
@@ -405,40 +528,59 @@ class DB:
                 "user_deleted_with_cascade",
                 user_uuid=str(user_uuid),
                 email=user["email"],
-                company_deleted=1 if company else 0
+                company_deleted=1 if company else 0,
             )
 
         if deleted_image_path:
             try:
                 success = await asyncio.wait_for(
-                    image_service_client.delete_image(deleted_image_path),
-                    timeout=15.0
+                    image_service_client.delete_image(deleted_image_path), timeout=15.0
                 )
                 if success:
-                    logger.info("user_image_removed", company_uuid=company_uuid, image_path=deleted_image_path)
+                    logger.info(
+                        "user_image_removed",
+                        company_uuid=company_uuid,
+                        image_path=deleted_image_path,
+                    )
                 else:
-                    logger.warning("user_image_not_found", company_uuid=company_uuid, image_path=deleted_image_path)
+                    logger.warning(
+                        "user_image_not_found",
+                        company_uuid=company_uuid,
+                        image_path=deleted_image_path,
+                    )
             except asyncio.TimeoutError:
-                logger.warning("user_image_timeout", company_uuid=company_uuid, image_path=deleted_image_path)
-            except Exception as e:
-                logger.error("user_image_error", company_uuid=company_uuid, image_path=deleted_image_path, error=str(e), exc_info=True)
+                logger.warning(
+                    "user_image_timeout",
+                    company_uuid=company_uuid,
+                    image_path=deleted_image_path,
+                )
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error(
+                    "user_image_error",
+                    company_uuid=company_uuid,
+                    image_path=deleted_image_path,
+                    error=str(e),
+                    exc_info=True,
+                )
 
         return UserDeletionResponse(
             user_uuid=user_uuid,
             email=user["email"],
             company_deleted=1 if company else 0,
-            image_deleted=1 if deleted_image_path else 0
+            image_deleted=1 if deleted_image_path else 0,
         )
 
     # =========================================================================
     # PRODUCT OPERATIONS
     # =========================================================================
-    
+
     @staticmethod
     @db_retry()
     async def get_all_products(conn: asyncpg.Connection) -> List[ProductRecord]:
         """Get all products (READ operation - can use replica)"""
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+        async with transaction(
+            conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True
+        ):
             query = """
                 SELECT uuid, name_es, name_en, created_at
                 FROM proveo.products
@@ -449,7 +591,12 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_product(conn: asyncpg.Connection, name_es: str, name_en: str, force_rollback: bool = False) -> ProductRecord:
+    async def create_product(
+        conn: asyncpg.Connection,
+        name_es: str,
+        name_en: str,
+        force_rollback: bool = False,
+    ) -> ProductRecord:
         """Create a product (WRITE operation - uses primary)"""
         product_uuid = str(uuid.uuid4())
 
@@ -469,8 +616,8 @@ class DB:
                 logger.info("product_created", product_uuid=str(row["uuid"]))
                 return ProductRecord(**dict(row))
 
-        except asyncpg.UniqueViolationError:
-            raise ValueError("Product with this name already exists")
+        except asyncpg.UniqueViolationError as e:
+            raise ValueError("Product with this name already exists") from e
 
     @staticmethod
     @db_retry()
@@ -527,59 +674,64 @@ class DB:
     @staticmethod
     @db_retry()
     async def delete_product_by_uuid(
-        conn: asyncpg.Connection, 
-        product_uuid: UUID
+        conn: asyncpg.Connection, product_uuid: UUID
     ) -> ProductRecord:
         """Delete product (WRITE operation - uses primary)"""
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
+        async with transaction(
+            conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False
+        ):
             product_query = """
-                SELECT uuid, name_es, name_en, created_at 
-                FROM proveo.products 
+                SELECT uuid, name_es, name_en, created_at
+                FROM proveo.products
                 WHERE uuid=$1
             """
             product = await conn.fetchrow(product_query, product_uuid)
-            
+
             if not product:
                 raise ValueError(f"Product with UUID {product_uuid} not found")
-            
+
             company_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM proveo.companies WHERE product_uuid=$1", 
-                product_uuid
+                "SELECT COUNT(*) FROM proveo.companies WHERE product_uuid=$1",
+                product_uuid,
             )
-            
+
             if company_count > 0:
                 raise ValueError(
                     f"Cannot delete product '{product['name_en']}'. "
                     f"{company_count} company(ies) are still using this product."
                 )
-            
+
             insert_deleted = """
-                INSERT INTO proveo.products_deleted (uuid, name_es, name_en, created_at) 
+                INSERT INTO proveo.products_deleted (uuid, name_es, name_en, created_at)
                 VALUES ($1, $2, $3, $4)
             """
             await conn.execute(
-                insert_deleted, 
-                product["uuid"], 
-                product["name_es"], 
-                product["name_en"], 
-                product["created_at"]
+                insert_deleted,
+                product["uuid"],
+                product["name_es"],
+                product["name_en"],
+                product["created_at"],
             )
-            
-            await conn.execute("DELETE FROM proveo.products WHERE uuid=$1", product_uuid)
-            
+
+            await conn.execute(
+                "DELETE FROM proveo.products WHERE uuid=$1", product_uuid
+            )
+
             logger.info("product_deleted", product_uuid=str(product_uuid))
-            
+
             return ProductRecord(**dict(product))
 
     # =========================================================================
     # COMMUNE OPERATIONS
     # =========================================================================
-    
+
     @staticmethod
     @db_retry()
     async def get_all_communes(conn: asyncpg.Connection) -> List[CommuneRecord]:
         """Get all communes (READ operation - can use replica)"""
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+        async with transaction(
+            conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True
+        ):
             query = """
                 SELECT uuid, name, created_at
                 FROM proveo.communes
@@ -590,53 +742,67 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_commune(conn: asyncpg.Connection, name: str, force_rollback: bool = False) -> CommuneRecord:
+    async def create_commune(
+        conn: asyncpg.Connection, name: str, force_rollback: bool = False
+    ) -> CommuneRecord:
         """Create a commune (WRITE operation - uses primary)"""
         commune_uuid = str(uuid.uuid4())
         async with transaction(conn, readonly=False, force_rollback=force_rollback):
             insert_query = """
-                INSERT INTO proveo.communes (name,uuid) 
-                VALUES ($1,$2) 
+                INSERT INTO proveo.communes (name,uuid)
+                VALUES ($1,$2)
                 ON CONFLICT (name) DO NOTHING
                 RETURNING uuid,name,created_at
             """
             row = await conn.fetchrow(insert_query, name, commune_uuid)
-            
+
             if row is None:
                 raise ValueError(f"Commune with name '{name}' already exists")
-            
+
             logger.info("commune_created", uuid=commune_uuid)
             return CommuneRecord(**dict(row))
 
     @staticmethod
     @db_retry()
-    async def update_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID, name: str) -> CommuneRecord:
+    async def update_commune_by_uuid(
+        conn: asyncpg.Connection, commune_uuid: UUID, name: str
+    ) -> CommuneRecord:
         """Update a commune (WRITE operation - uses primary)"""
         async with transaction(conn, readonly=False):
-            existing = await conn.fetchval("SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid)
+            existing = await conn.fetchval(
+                "SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid
+            )
             if not existing:
                 raise ValueError(f"Commune with UUID {commune_uuid} not found")
-            
+
             if name is None:
                 raise ValueError("Name is required for update")
             conflict = await conn.fetchval(
-                "SELECT 1 FROM proveo.communes WHERE name=$1 AND uuid!=$2", 
-                name, commune_uuid
+                "SELECT 1 FROM proveo.communes WHERE name=$1 AND uuid!=$2",
+                name,
+                commune_uuid,
             )
             if conflict:
                 raise ValueError(f"Another commune with name '{name}' already exists")
-            
-            update_query = "UPDATE proveo.communes SET name=$1 WHERE uuid=$2 RETURNING uuid,name,created_at"
+
+            update_query = """
+                UPDATE proveo.communes SET name=$1 WHERE uuid=$2
+                RETURNING uuid,name,created_at
+            """
             row = await conn.fetchrow(update_query, name, commune_uuid)
-            
+
             logger.info("commune_updated", commune_uuid=str(commune_uuid))
             return CommuneRecord(**dict(row))
 
     @staticmethod
     @db_retry()
-    async def delete_commune_by_uuid(conn: asyncpg.Connection, commune_uuid: UUID) -> CommuneRecord:
+    async def delete_commune_by_uuid(
+        conn: asyncpg.Connection, commune_uuid: UUID
+    ) -> CommuneRecord:
         """Delete commune (WRITE operation - uses primary)"""
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
+        async with transaction(
+            conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False
+        ):
             commune_query = """
                 SELECT uuid, name, created_at
                 FROM proveo.communes
@@ -652,7 +818,8 @@ class DB:
             )
             if company_count > 0:
                 raise ValueError(
-                    f"Cannot delete commune '{commune['name']}'. {company_count} company(ies) are still located in this commune."
+                    f"Cannot delete commune '{commune['name']}'. "
+                    f"{company_count} company(ies) are still located in this commune."
                 )
 
             await conn.execute(
@@ -672,26 +839,27 @@ class DB:
             return CommuneRecord(
                 uuid=str(commune["uuid"]),
                 name=commune["name"],
-                created_at=commune["created_at"]
+                created_at=commune["created_at"],
             )
 
     # =========================================================================
     # COMPANY OPERATIONS
     # =========================================================================
-    
+
     @staticmethod
     @db_retry()
     async def get_company_by_uuid(
-        conn: asyncpg.Connection, 
-        company_uuid: UUID
+        conn: asyncpg.Connection, company_uuid: UUID
     ) -> Optional[CompanyWithRelations]:
         """Get company by UUID (READ operation - can use replica)"""
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+        async with transaction(
+            conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True
+        ):
             query = """
-                SELECT 
-                    c.uuid, c.user_uuid, c.product_uuid, c.commune_uuid, 
+                SELECT
+                    c.uuid, c.user_uuid, c.product_uuid, c.commune_uuid,
                     c.name, c.description_es, c.description_en,
-                    c.address, c.phone, c.email, c.image_url, c.image_extension, 
+                    c.address, c.phone, c.email, c.image_url, c.image_extension,
                     c.created_at, c.updated_at,
                     u.name as user_name, u.email as user_email,
                     p.name_es as product_name_es, p.name_en as product_name_en,
@@ -703,23 +871,23 @@ class DB:
                 WHERE c.uuid = $1
             """
             row = await conn.fetchrow(query, company_uuid)
-            
+
             if not row:
                 return None
-                
+
             return CompanyWithRelations(**dict(row))
 
     @staticmethod
     @db_retry()
     async def get_all_companies(
-        conn: asyncpg.Connection, 
-        limit: int = 50, 
-        offset: int = 0
+        conn: asyncpg.Connection, limit: int = 50, offset: int = 0
     ) -> List[CompanyWithRelations]:
         """Get all companies (READ operation - can use replica)"""
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+        async with transaction(
+            conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True
+        ):
             query = """
-                SELECT 
+                SELECT
                     c.uuid, c.user_uuid, c.product_uuid, c.commune_uuid,
                     c.name, c.description_es, c.description_en,
                     c.address, c.phone, c.email, c.image_url, c.image_extension,
@@ -740,13 +908,14 @@ class DB:
     @staticmethod
     @db_retry()
     async def get_company_by_user_uuid(
-        conn: asyncpg.Connection, 
-        user_uuid: UUID
+        conn: asyncpg.Connection, user_uuid: UUID
     ) -> CompanyWithRelations | None:
         """Get company by user UUID (READ operation - can use replica)"""
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+        async with transaction(
+            conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True
+        ):
             query = """
-                SELECT 
+                SELECT
                     c.uuid, c.user_uuid, c.product_uuid, c.commune_uuid,
                     c.name, c.description_es, c.description_en,
                     c.address, c.phone, c.email, c.image_url, c.image_extension,
@@ -768,7 +937,7 @@ class DB:
 
     @staticmethod
     @db_retry()
-    async def create_company(
+    async def create_company(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         conn: asyncpg.Connection,
         company_uuid: UUID,
         user_uuid: UUID,
@@ -785,31 +954,33 @@ class DB:
         force_rollback: bool = False,
     ) -> CompanyRecord:
         """Create a company (WRITE operation - uses primary)"""
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=False, force_rollback=force_rollback):
+        async with transaction(
+            conn,
+            isolation=IsolationLevel.READ_COMMITTED,
+            readonly=False,
+            force_rollback=force_rollback,
+        ):
             existing_company = await conn.fetchval(
-                "SELECT 1 FROM proveo.companies WHERE user_uuid=$1",
-                user_uuid
+                "SELECT 1 FROM proveo.companies WHERE user_uuid=$1", user_uuid
             )
             if existing_company:
                 raise ValueError(
                     "Each user can only create one company. "
                     "Please update your existing company."
                 )
-            
+
             product_exists = await conn.fetchval(
-                "SELECT 1 FROM proveo.products WHERE uuid=$1", 
-                product_uuid
+                "SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid
             )
             if not product_exists:
                 raise ValueError(f"Product with UUID {product_uuid} does not exist")
-            
+
             commune_exists = await conn.fetchval(
-                "SELECT 1 FROM proveo.communes WHERE uuid=$1", 
-                commune_uuid
+                "SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid
             )
             if not commune_exists:
                 raise ValueError(f"Commune with UUID {commune_uuid} does not exist")
-            
+
             insert_query = """
                 INSERT INTO proveo.companies (
                     uuid, user_uuid, product_uuid, commune_uuid,
@@ -817,7 +988,7 @@ class DB:
                     address, phone, email, image_url, image_extension
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                RETURNING 
+                RETURNING
                     uuid, user_uuid, product_uuid, commune_uuid,
                     name, description_es, description_en,
                     address, phone, email, image_url, image_extension,
@@ -825,22 +996,31 @@ class DB:
             """
             row = await conn.fetchrow(
                 insert_query,
-                company_uuid, user_uuid, product_uuid, commune_uuid,
-                name, description_es, description_en,
-                address, phone, email, image_url, image_extension
+                company_uuid,
+                user_uuid,
+                product_uuid,
+                commune_uuid,
+                name,
+                description_es,
+                description_en,
+                address,
+                phone,
+                email,
+                image_url,
+                image_extension,
             )
 
             logger.info(
-                "company_created", 
-                company_uuid=str(company_uuid), 
-                user_uuid=str(user_uuid)
+                "company_created",
+                company_uuid=str(company_uuid),
+                user_uuid=str(user_uuid),
             )
 
             return CompanyRecord(**dict(row))
 
     @staticmethod
     @db_retry()
-    async def update_company_by_uuid(
+    async def update_company_by_uuid(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         conn: asyncpg.Connection,
         company_uuid: UUID,
         user_uuid: UUID,
@@ -853,13 +1033,14 @@ class DB:
         image_extension: Optional[str] = None,
         image_url: Optional[str] = None,
         product_uuid: Optional[UUID] = None,
-        commune_uuid: Optional[UUID] = None
+        commune_uuid: Optional[UUID] = None,
     ) -> CompanyRecord:
         """Update company (WRITE operation - uses primary)"""
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=False):
+        async with transaction(
+            conn, isolation=IsolationLevel.READ_COMMITTED, readonly=False
+        ):
             owner_check = await conn.fetchval(
-                "SELECT user_uuid FROM proveo.companies WHERE uuid=$1", 
-                company_uuid
+                "SELECT user_uuid FROM proveo.companies WHERE uuid=$1", company_uuid
             )
             if not owner_check:
                 raise ValueError(f"Company with UUID {company_uuid} not found")
@@ -880,7 +1061,7 @@ class DB:
                 ("address", address),
                 ("phone", phone),
                 ("image_url", image_url),
-                ("image_extension", image_extension)
+                ("image_extension", image_extension),
             ]
 
             for field_name, value in field_mapping:
@@ -899,8 +1080,7 @@ class DB:
 
             if product_uuid is not None:
                 product_exists = await conn.fetchval(
-                    "SELECT 1 FROM proveo.products WHERE uuid=$1", 
-                    product_uuid
+                    "SELECT 1 FROM proveo.products WHERE uuid=$1", product_uuid
                 )
                 if not product_exists:
                     raise ValueError(f"Product with UUID {product_uuid} does not exist")
@@ -910,8 +1090,7 @@ class DB:
 
             if commune_uuid is not None:
                 commune_exists = await conn.fetchval(
-                    "SELECT 1 FROM proveo.communes WHERE uuid=$1", 
-                    commune_uuid
+                    "SELECT 1 FROM proveo.communes WHERE uuid=$1", commune_uuid
                 )
                 if not commune_exists:
                     raise ValueError(f"Commune with UUID {commune_uuid} does not exist")
@@ -931,75 +1110,84 @@ class DB:
                 UPDATE proveo.companies
                 SET {', '.join(update_fields)}
                 WHERE uuid=${where_idx}
-                RETURNING 
+                RETURNING
                     uuid, user_uuid, product_uuid, commune_uuid,
                     name, description_es, description_en,
                     address, phone, email, image_url, image_extension,
                     created_at, updated_at
             """
             row = await conn.fetchrow(update_query, *params)
-            
+
             if not row:
                 raise RuntimeError("Failed to update company")
 
             logger.info(
-                "company_updated", 
-                company_uuid=str(company_uuid), 
+                "company_updated",
+                company_uuid=str(company_uuid),
                 user_uuid=str(user_uuid),
-                fields_updated=len(update_fields)
+                fields_updated=len(update_fields),
             )
-            
+
             return CompanyRecord(**dict(row))
 
     @staticmethod
     @db_retry()
-    async def delete_company_by_uuid(
-        conn: asyncpg.Connection, 
-        company_uuid: UUID, 
-        user_uuid: UUID
+    async def delete_company_by_uuid(  # pylint: disable=too-many-locals
+        conn: asyncpg.Connection, company_uuid: UUID, user_uuid: UUID
     ) -> CompanyDeleteResponse:
         """Delete company (WRITE operation - uses primary)"""
         deleted_image: str | None = None
-        
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
+
+        async with transaction(
+            conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False
+        ):
             company_query = """
-                SELECT 
+                SELECT
                     uuid, user_uuid, product_uuid, commune_uuid,
                     name, description_es, description_en,
                     address, phone, email, image_url, image_extension,
                     created_at, updated_at
-                FROM proveo.companies 
+                FROM proveo.companies
                 WHERE uuid = $1 AND user_uuid = $2
             """
             company = await conn.fetchrow(company_query, company_uuid, user_uuid)
-            
+
             if not company:
                 logger.warning(
                     "company_not_found_or_unauthorized",
                     company_uuid=str(company_uuid),
-                    user_uuid=str(user_uuid)
+                    user_uuid=str(user_uuid),
                 )
                 raise ValueError(
                     f"Company with UUID {company_uuid} not found or "
                     "you don't have permission to delete it"
                 )
-            
+
             insert_deleted = """
                 INSERT INTO proveo.companies_deleted (
                     uuid, user_uuid, product_uuid, commune_uuid,
                     name, description_es, description_en,
-                    address, phone, email, image_url, image_extension, 
+                    address, phone, email, image_url, image_extension,
                     created_at, updated_at
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             """
             await conn.execute(
                 insert_deleted,
-                company["uuid"], company["user_uuid"], company["product_uuid"],
-                company["commune_uuid"], company["name"], company["description_es"],
-                company["description_en"], company["address"], company["phone"],
-                company["email"], company["image_url"], company["image_extension"],
-                company["created_at"], company["updated_at"]
+                company["uuid"],
+                company["user_uuid"],
+                company["product_uuid"],
+                company["commune_uuid"],
+                company["name"],
+                company["description_es"],
+                company["description_en"],
+                company["address"],
+                company["phone"],
+                company["email"],
+                company["image_url"],
+                company["image_extension"],
+                company["created_at"],
+                company["updated_at"],
             )
 
             delete_query = "DELETE FROM proveo.companies WHERE uuid = $1 RETURNING uuid"
@@ -1007,15 +1195,14 @@ class DB:
 
             if not deleted_row:
                 logger.error(
-                    "company_delete_race_condition",
-                    company_uuid=str(company_uuid)
+                    "company_delete_race_condition", company_uuid=str(company_uuid)
                 )
                 raise RuntimeError("Race condition detected during company deletion")
-            
+
             logger.info(
                 "company_deleted_successfully",
                 company_uuid=str(company_uuid),
-                user_uuid=str(user_uuid)
+                user_uuid=str(user_uuid),
             )
 
             image_url = company.get("image_url")
@@ -1027,62 +1214,59 @@ class DB:
         if deleted_image:
             try:
                 success = await asyncio.wait_for(
-                    image_service_client.delete_image(deleted_image),
-                    timeout=15.0
+                    image_service_client.delete_image(deleted_image), timeout=15.0
                 )
                 if success:
                     logger.info(
                         "company_image_deleted",
                         company_uuid=str(company_uuid),
-                        image_path=deleted_image
+                        image_path=deleted_image,
                     )
                 else:
                     logger.warning(
                         "company_image_not_found",
                         company_uuid=str(company_uuid),
-                        image_path=deleted_image
+                        image_path=deleted_image,
                     )
             except asyncio.TimeoutError:
                 logger.warning(
                     "company_image_delete_timeout",
                     company_uuid=str(company_uuid),
-                    image_path=deleted_image
+                    image_path=deleted_image,
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error(
                     "company_image_delete_error",
                     company_uuid=str(company_uuid),
                     image_path=deleted_image,
                     error=str(e),
-                    exc_info=True
+                    exc_info=True,
                 )
 
-        return CompanyDeleteResponse(
-            uuid=company_uuid,
-            name=company["name"]
-        )
+        return CompanyDeleteResponse(uuid=company_uuid, name=company["name"])
 
     @staticmethod
     @db_retry()
-    async def admin_delete_company_by_uuid(
-        conn: asyncpg.Connection, 
-        company_uuid: UUID
+    async def admin_delete_company_by_uuid(  # pylint: disable=too-many-locals
+        conn: asyncpg.Connection, company_uuid: UUID
     ) -> CompanyDeleteResponse:
         """Admin delete company (WRITE operation - uses primary)"""
         deleted_image_path: Optional[str] = None
 
-        async with transaction(conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False):
+        async with transaction(
+            conn, isolation=IsolationLevel.SERIALIZABLE, readonly=False
+        ):
             company_query = """
-                SELECT 
+                SELECT
                     uuid, user_uuid, product_uuid, commune_uuid,
                     name, description_es, description_en,
                     address, phone, email, image_url, image_extension,
                     created_at, updated_at
-                FROM proveo.companies 
+                FROM proveo.companies
                 WHERE uuid=$1
             """
             company = await conn.fetchrow(company_query, company_uuid)
-            
+
             if not company:
                 raise ValueError(f"Company with UUID {company_uuid} not found")
 
@@ -1097,21 +1281,30 @@ class DB:
             """
             await conn.execute(
                 insert_deleted,
-                company["uuid"], company["user_uuid"], company["product_uuid"],
-                company["commune_uuid"], company["name"], company["description_es"],
-                company["description_en"], company["address"], company["phone"],
-                company["email"], company["image_url"], company["image_extension"],
-                company["created_at"], company["updated_at"]
+                company["uuid"],
+                company["user_uuid"],
+                company["product_uuid"],
+                company["commune_uuid"],
+                company["name"],
+                company["description_es"],
+                company["description_en"],
+                company["address"],
+                company["phone"],
+                company["email"],
+                company["image_url"],
+                company["image_extension"],
+                company["created_at"],
+                company["updated_at"],
             )
-            
+
             deleted_company = await conn.fetchrow(
-                "DELETE FROM proveo.companies WHERE uuid=$1 RETURNING uuid", 
-                company_uuid
+                "DELETE FROM proveo.companies WHERE uuid=$1 RETURNING uuid",
+                company_uuid,
             )
-            
+
             if not deleted_company:
                 raise RuntimeError("Race condition detected during company deletion")
-            
+
             logger.info("admin_deleted_company", company_uuid=str(company_uuid))
 
             image_url = company.get("image_url")
@@ -1123,60 +1316,58 @@ class DB:
         if deleted_image_path:
             try:
                 success = await asyncio.wait_for(
-                    image_service_client.delete_image(deleted_image_path),
-                    timeout=15.0
+                    image_service_client.delete_image(deleted_image_path), timeout=15.0
                 )
                 if success:
                     logger.info(
                         "admin_deleted_company_image",
                         company_uuid=str(company_uuid),
-                        image_path=deleted_image_path
+                        image_path=deleted_image_path,
                     )
                 else:
                     logger.warning(
                         "admin_delete_company_image_not_found",
                         company_uuid=str(company_uuid),
-                        image_path=deleted_image_path
+                        image_path=deleted_image_path,
                     )
             except asyncio.TimeoutError:
                 logger.warning(
                     "admin_delete_company_image_timeout",
                     company_uuid=str(company_uuid),
-                    image_path=deleted_image_path
+                    image_path=deleted_image_path,
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error(
                     "admin_delete_company_image_error",
                     company_uuid=str(company_uuid),
                     image_path=deleted_image_path,
                     error=str(e),
-                    exc_info=True
+                    exc_info=True,
                 )
 
-        return CompanyDeleteResponse(
-            uuid=company_uuid,
-            name=company["name"]
-        )
+        return CompanyDeleteResponse(uuid=company_uuid, name=company["name"])
 
     @staticmethod
     @db_retry()
-    async def search_companies(
+    async def search_companies(  # pylint: disable=too-many-locals,too-many-branches
         conn: asyncpg.Connection,
         query: str,
         lang: str = "es",
         commune: Optional[str] = None,
         product: Optional[str] = None,
         limit: int = 20,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[CompanySearchResponse]:
         """Search companies (READ operation - can use replica)"""
         search = (query or "").strip().lower()
         params: List = []
 
-        async with transaction(conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True):
+        async with transaction(
+            conn, isolation=IsolationLevel.READ_COMMITTED, readonly=True
+        ):
             if not search:
                 base_query = """
-                    SELECT 
+                    SELECT
                         company_id, company_name, company_description_es,
                         company_description_en, address, company_email,
                         product_name_es, product_name_en, phone, image_url,
@@ -1187,7 +1378,7 @@ class DB:
                 order_clause = " ORDER BY company_name ASC"
             elif len(search) < 4:
                 base_query = """
-                    SELECT 
+                    SELECT
                         company_id, company_name, company_description_es,
                         company_description_en, address, company_email,
                         product_name_es, product_name_en, phone, image_url,
@@ -1199,7 +1390,7 @@ class DB:
                 order_clause = " ORDER BY company_name ASC"
             else:
                 base_query = """
-                    SELECT 
+                    SELECT
                         company_id, company_name, company_description_es,
                         company_description_en, address, company_email,
                         product_name_es, product_name_en, phone, image_url,
@@ -1235,16 +1426,18 @@ class DB:
 
             results: List[CompanySearchResponse] = []
             for row in rows:
-                results.append(CompanySearchResponse(
-                    uuid=row["company_id"],
-                    name=row["company_name"],
-                    description=row[f"company_description_{lang}"],
-                    address=row["address"],
-                    email=row["company_email"],
-                    product_name=row[f"product_name_{lang}"],
-                    commune_name=row["commune_name"],
-                    phone=row["phone"],
-                    img_url=row["image_url"]
-                ))
+                results.append(
+                    CompanySearchResponse(
+                        uuid=row["company_id"],
+                        name=row["company_name"],
+                        description=row[f"company_description_{lang}"],
+                        address=row["address"],
+                        email=row["company_email"],
+                        product_name=row[f"product_name_{lang}"],
+                        commune_name=row["commune_name"],
+                        phone=row["phone"],
+                        img_url=row["image_url"],
+                    )
+                )
 
             return results
