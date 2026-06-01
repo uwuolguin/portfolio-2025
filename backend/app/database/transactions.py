@@ -959,7 +959,7 @@ class DB:  # pylint: disable=too-many-public-methods
         force_rollback: bool = False,
     ) -> CompanyRecord:
         """Create a company (WRITE operation - uses primary)"""
-        # pylint: disable=too-many-arguments,too-many-positional-arguments
+        # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         async with transaction(
             conn,
             isolation=IsolationLevel.READ_COMMITTED,
