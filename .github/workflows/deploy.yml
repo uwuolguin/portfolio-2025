@@ -1,5 +1,24 @@
 name: Deploy to Production
 
+# =============================================================================
+# ROLLBACK PROCEDURE
+#
+# If a deployment breaks production, DO NOT rebase or delete history.
+# Instead, restore the last known good commit and deploy it as a new prod-N.
+#
+#   1. Find the good commit hash in git log or GitHub Actions history.
+#
+#   2. Restore the tree to that state (no history lost):
+#        git restore --source=<good-commit-hash> .
+#
+#   3. Commit and push with the next prod- number to trigger this pipeline:
+#        git commit -am "prod-<N+1>: restore to prod-<good-N> state"
+#        git push
+#
+# GitHub Actions will pick it up, rebuild, and redeploy cleanly.
+# The broken deployment stays in history for forensics.
+# =============================================================================
+
 on:
   push:
     branches:
