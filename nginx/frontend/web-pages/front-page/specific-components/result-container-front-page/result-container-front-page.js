@@ -122,7 +122,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayResults(companies, page) {
-        const lang = getLanguage();
         const contentArea = getOrCreateContentArea();
         clearElement(contentArea);
 

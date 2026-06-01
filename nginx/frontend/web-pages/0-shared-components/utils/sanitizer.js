@@ -128,7 +128,6 @@ export function setHTML(element, html) {
     if (!(element instanceof HTMLElement)) {
         throw new TypeError('setHTML requires an HTMLElement');
     }
-    // eslint-disable-next-line no-undef
     element.innerHTML = DOMPurify.sanitize(String(html ?? ''), {
         ALLOWED_TAGS: [
             'p', 'br', 'strong', 'em', 'a', 'ul', 'ol', 'li',
