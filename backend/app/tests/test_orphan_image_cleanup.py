@@ -6,6 +6,9 @@ Tests that the orphan image detection correctly identifies images
 that exist in storage but are not referenced in the database.
 """
 
+from app.config import settings
+from app.services.image_service_client import image_service_client
+
 import base64
 import ssl
 import sys
@@ -19,8 +22,6 @@ import pytest
 
 sys.path.insert(0, "/app")
 
-from app.config import settings  # noqa: E402
-from app.services.image_service_client import image_service_client  # noqa: E402
 
 
 @asynccontextmanager

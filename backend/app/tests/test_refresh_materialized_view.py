@@ -5,6 +5,7 @@ Run with: pytest app/tests/test_refresh_materialized_view.py -v
 Tests that the company_search materialized view can be refreshed
 and reflects data from the companies table.
 """
+from app.config import settings
 
 import ssl
 import sys
@@ -15,7 +16,6 @@ import pytest
 
 sys.path.insert(0, "/app")
 
-from app.config import settings  # noqa: E402
 
 
 @asynccontextmanager
