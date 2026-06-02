@@ -7,7 +7,7 @@
 
 ## Prerequisites
 
-- DigitalOcean droplet with k3s installed, nothing else running
+- DigitalOcean droplet with k3s installed (Or something equivalent), nothing else running
 - Domain DNS configured:
   - **In DigitalOcean:** A records pointing `@` and `www` to your droplet IP
   - **In GoDaddy:** Nameservers set to `ns1.digitalocean.com`, `ns2.digitalocean.com`, `ns3.digitalocean.com`
@@ -112,126 +112,264 @@ The TLS secret is in the cluster. Run your normal deploy script:
 
 ---
 
-## Step 7 — Code Changes Required
+## 7 — Required Production Configuration
 
-This step documents every file that must change when moving to HTTPS and flipping
-`DEBUG=false`. There are three areas: nginx, the configmap, and the deploy script.
-The backend source files are also reviewed — most need no changes, just an
-explanation of what their existing conditional logic does in production mode.
+This section documents the configuration elements that must be present when the
+application is deployed with HTTPS enabled and `DEBUG=false`.
+
+The purpose of this section is to describe the required production state.
+
+The required configuration consists of three primary areas:
+
+1. nginx configuration
+2. application configuration
+3. deployment configuration
+
+The backend source code is also reviewed below. Most files already contain the
+necessary production logic and satisfy the requirements without modification.
 
 ---
 
 ### 7.1 — `k8s/10-nginx.yaml`
 
-Replace the entire file with the provided `10-nginx.yaml`. Three things changed:
+The nginx configuration must satisfy the following requirements.
 
-**ConfigMap** — The single `server` block is replaced with two. The HTTP server
-(port 80) now only handles Let's Encrypt ACME challenge paths and redirects
-everything else to HTTPS with a 301. The HTTPS server (port 443) has TLS
-configured and contains every location block that was previously in the HTTP
-server, unchanged.
+#### ACME challenge endpoint on port 80
 
-The certs are read from `/etc/nginx/certs/tls.crt` and `tls.key` — that path is
-where the `tls-certs` volume is mounted (see Deployment below).
+The nginx configuration must contain a dedicated ACME challenge location on
+port 80 for Let's Encrypt certificate issuance and renewal.
 
-**Service** — Port 443 added alongside port 80.
+Example:
 
-**Deployment** — `containerPort: 443` added. Two volumes added:
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com;
 
-- `tls-certs`: a `secret` volume backed by `tls-secret`, mounted at
-  `/etc/nginx/certs`. This is how nginx gets the cert files — Kubernetes injects
-  the secret data as files into the container's filesystem at the mount path.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
 
-- `acme-challenge`: a `hostPath` volume pointing at `/var/www/certbot` on the
-  node, mounted at `/var/www/certbot` inside the container. This is how certbot
-  (running on the host) and nginx (running inside the pod) share the same
-  directory. When certbot writes a challenge file to `/var/www/certbot` on the
-  host, nginx serves it from the same path inside the container — no copy needed.
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+```
+
+The ACME endpoint must remain accessible via plain HTTP because Let's Encrypt
+validates domain ownership using requests similar to:
+
+```text
+http://yourdomain.com/.well-known/acme-challenge/<token>
+```
+
+All non-ACME traffic on port 80 must be redirected to HTTPS.
+
+#### ConfigMap requirements
+
+The nginx ConfigMap must contain two server blocks.
+
+##### HTTP server (port 80)
+
+Responsibilities:
+
+* Serve `/.well-known/acme-challenge/`
+* Redirect all other requests to HTTPS using HTTP 301
+
+##### HTTPS server (port 443)
+
+Responsibilities:
+
+* Load TLS certificates
+* Serve all application traffic
+* Preserve all existing proxy locations
+
+TLS certificates must be loaded from:
+
+```text
+/etc/nginx/certs/tls.crt
+/etc/nginx/certs/tls.key
+```
+
+These files must be provided through a Kubernetes Secret mounted into the nginx
+container.
+
+#### Service requirements
+
+The Service must expose:
+
+* Port 80
+* Port 443
+
+#### Deployment requirements
+
+The nginx Deployment must expose:
+
+```yaml
+containerPort: 443
+```
+
+The Deployment must include the following volume mounts:
 
 ```yaml
 volumeMounts:
   - name: nginx-config
     mountPath: /etc/nginx/nginx.conf
     subPath: nginx.conf
+
   - name: tls-certs
     mountPath: /etc/nginx/certs
     readOnly: true
+
   - name: acme-challenge
     mountPath: /var/www/certbot
+```
 
+The Deployment must include the following volumes:
+
+```yaml
 volumes:
   - name: nginx-config
     configMap:
       name: nginx-config
+
   - name: tls-certs
     secret:
       secretName: tls-secret
+
   - name: acme-challenge
     hostPath:
       path: /var/www/certbot
       type: DirectoryOrCreate
 ```
 
+##### Volume purpose
+
+**tls-certs**
+
+Provides nginx access to:
+
+* `tls.crt`
+* `tls.key`
+
+from the Kubernetes Secret named `tls-secret`.
+
+**acme-challenge**
+
+Provides a shared filesystem path between:
+
+* certbot running on the host
+* nginx running inside Kubernetes
+
+Certbot writes challenge files into:
+
+```text
+/var/www/certbot
+```
+
+and nginx serves those same files through the mounted volume.
+
 ---
 
 ### 7.2 — `k8s/01-configmap.yaml`
 
-Flip `DEBUG` to false:
+The production configuration must define:
 
 ```yaml
 DEBUG: "false"
 ```
 
-That single change cascades into every conditional block in the backend that
-checks `settings.debug` (cookies, HSTS, error detail stripping, HTTPS redirect —
-all covered below in 7.4).
+This enables production behaviour throughout the application, including:
+
+* HTTPS-only cookies
+* HSTS headers
+* Production error handling
+* HTTPS redirect enforcement
 
 ---
 
-### 7.3 — `k8s scripts/deploy-k3s-local.sh`
+### 7.3 — `k8s/scripts/deploy-k3s-local.sh`
 
-Two values need updating: `API_BASE_URL` and `ALLOWED_ORIGINS` must both use
-`https://`. Find these two lines and change them:
+The production deployment configuration must use HTTPS URLs for:
+
+* `API_BASE_URL`
+* `ALLOWED_ORIGINS`
+
+Required examples:
 
 ```bash
-# In the kubectl create secret block, change API_BASE_URL:
---from-literal=API_BASE_URL="https://yourdomain.com" \
+--from-literal=API_BASE_URL="https://yourdomain.com"
+```
 
-# Change the ALLOWED_ORIGINS patch (currently uses http://):
+```bash
 kubectl patch configmap portfolio-config -n portfolio --type merge \
   -p "{\"data\":{\"ALLOWED_ORIGINS\":\"[\\\"https://yourdomain.com\\\",\\\"https://www.yourdomain.com\\\"]\"}}"
 ```
+
+HTTP origins should not be used in the production configuration.
 
 ---
 
 ### 7.4 — Backend source files
 
-These files all have conditional logic on `settings.debug`. When `DEBUG=false`
-each one activates behaviour that was previously skipped. No code changes are
-required — this section explains what happens automatically.
+The following files contain production-aware logic controlled by
+`settings.debug`.
+
+The listed requirements are already satisfied by the existing implementation
+unless otherwise noted.
 
 ---
 
 #### `backend/app/middleware/security.py` — `HTTPSRedirectMiddleware`
 
-No change needed. When `settings.debug = False` the middleware redirects plain
-HTTP to HTTPS. It also checks `X-Forwarded-Proto: https` and passes through when
-the header is present, which is exactly what happens when nginx terminates TLS and
-forwards to the backend. Your nginx config already sets this on every proxy block:
+The application must redirect HTTP requests to HTTPS when `DEBUG=false`.
+
+The middleware must respect:
+
+```text
+X-Forwarded-Proto: https
+```
+
+which nginx forwards using:
 
 ```nginx
 proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
-So traffic flow is: browser → nginx (TLS) → backend (plain HTTP with
-X-Forwarded-Proto: https) → middleware sees the header → no redirect loop.
-**No change required.**
+Expected traffic flow:
+
+```text
+Browser
+  ↓ HTTPS
+nginx
+  ↓ HTTP + X-Forwarded-Proto=https
+Backend
+```
+
+This prevents redirect loops when TLS is terminated by nginx.
+
+---
+
+#### `backend/app/middleware/security.py` — health probe handling
+
+If Kubernetes liveness or readiness probes access the backend directly over
+HTTP, health endpoints must be exempt from HTTPS redirection.
+
+Example endpoints:
+
+```text
+/health
+/livez
+/readyz
+```
+
+Probe behaviour should be verified before deployment.
 
 ---
 
 #### `backend/app/middleware/security.py` — `SecurityHeadersMiddleware`
 
-No change needed. The `Strict-Transport-Security` header activates automatically:
+When `DEBUG=false`, the application must emit the following HSTS header:
 
 ```python
 if not settings.debug:
@@ -240,114 +378,93 @@ if not settings.debug:
     )
 ```
 
-Once `DEBUG=false`, every response will carry the HSTS header telling browsers to
-always use HTTPS for this domain for one year. **No change required.**
+This instructs browsers to use HTTPS for future requests.
 
 ---
 
 #### `backend/app/middleware/cors.py`
 
-No change needed. The allowed origins list is injected from the configmap. The
-only action is the deploy script change in 7.3 — switching the origin values from
-`http://` to `https://`. The middleware code itself is already correct. **No
-change required.**
+Allowed origins must be supplied through configuration.
+
+Production origins must use HTTPS URLs.
 
 ---
 
-#### `backend/app/routers/users.py` — cookie `secure` flag
+#### `backend/app/routers/users.py`
 
-No change needed. Both cookies already use `secure=not settings.debug`:
+Authentication and CSRF cookies must use secure transmission when
+`DEBUG=false`.
+
+Current implementation:
 
 ```python
-response.set_cookie(
-    key="access_token",
-    ...
-    secure=not settings.debug,   # True when debug=False → HTTPS-only cookies
-    samesite="lax",
-    ...
-)
-response.set_cookie(
-    key="csrf_token",
-    ...
-    secure=not settings.debug,
-    ...
-)
+secure=not settings.debug
 ```
 
-Same flag is used in logout and delete_me for `delete_cookie`. When `DEBUG=false`
-the browser will refuse to send these cookies over plain HTTP — which is what you
-want. Note: this also means you cannot test the login flow over plain HTTP after
-the switch. **No change required.**
+This ensures cookies become HTTPS-only in production.
 
 ---
 
-#### `backend/app/main.py` — Swagger docs
+#### `backend/app/main.py`
 
-When `DEBUG=false`, `/docs` and `/redoc` return 404:
+Swagger documentation is disabled automatically when `DEBUG=false`.
+
+Current behaviour:
 
 ```python
 docs_url="/docs" if settings.debug else None,
 redoc_url="/redoc" if settings.debug else None,
 ```
 
-The nginx location block for `/docs` will still proxy to the backend, which will
-return 404. That is the correct production behaviour. If you want to keep the docs
-accessible (useful for a portfolio demo), change both to:
+If API documentation is intended to remain available in production, documentation
+endpoints must be explicitly enabled.
 
-```python
-docs_url="/docs",
-redoc_url="/redoc",
+---
+
+#### `backend/app/utils/exceptions.py`
+
+Production error responses must not expose internal exception details or
+tracebacks.
+
+The current implementation satisfies this requirement when `DEBUG=false`.
+
+---
+
+#### `backend/app/config.py`
+
+Runtime configuration must provide the `DEBUG` value through environment
+configuration.
+
+The ConfigMap-provided value overrides the class default.
+
+---
+
+### 7.5 — Production Configuration Summary
+
+| Component                      | Required Element                     |
+| ------------------------------ | ------------------------------------ |
+| `k8s/10-nginx.yaml` ConfigMap  | HTTP server on port 80               |
+| `k8s/10-nginx.yaml` ConfigMap  | ACME challenge endpoint present      |
+| `k8s/10-nginx.yaml` ConfigMap  | HTTP-to-HTTPS redirect present       |
+| `k8s/10-nginx.yaml` ConfigMap  | HTTPS server on port 443             |
+| `k8s/10-nginx.yaml` ConfigMap  | TLS certificate loading configured   |
+| `k8s/10-nginx.yaml` Service    | Port 80 exposed                      |
+| `k8s/10-nginx.yaml` Service    | Port 443 exposed                     |
+| `k8s/10-nginx.yaml` Deployment | Container port 443 exposed           |
+| `k8s/10-nginx.yaml` Deployment | TLS secret mounted                   |
+| `k8s/10-nginx.yaml` Deployment | ACME challenge volume mounted        |
+| `k8s/01-configmap.yaml`        | `DEBUG=false` defined                |
+| `deploy-k3s-local.sh`          | HTTPS URLs configured                |
+| `middleware/security.py`       | HTTPS enforcement enabled            |
+| `middleware/security.py`       | Health probes handled correctly      |
+| `middleware/security.py`       | HSTS enabled                         |
+| `middleware/cors.py`           | HTTPS origins configured             |
+| `routers/users.py`             | Secure cookies enabled               |
+| `main.py`                      | Documentation behaviour defined      |
+| `utils/exceptions.py`          | Internal error details suppressed    |
+| `app/config.py`                | Runtime DEBUG configuration supplied |
+
 ```
-
-**Decision required, no change strictly needed.**
-
----
-
-#### `backend/app/utils/exceptions.py` — error response detail
-
-No change needed. Internal error details and tracebacks are already stripped when
-`debug=False`:
-
-```python
-if settings.debug:
-    message = f"Internal error: {type(exc).__name__}: {str(exc)}"
-    details = {"error_type": ..., "traceback": ...}
-else:
-    message = "An unexpected error occurred. Please try again later."
-    details = None
-```
-
-**No change required.**
-
----
-
-#### `backend/app/config.py` — `debug` default
-
-The class default is `debug: bool = True`. In production this is overridden by the
-environment variable injected from the configmap (`DEBUG=false`). As long as the
-configmap has `DEBUG: "false"`, no code change is needed here. **No change
-required.**
-
----
-
-### 7.5 — Summary table
-
-| File | Change required | What changes |
-|---|---|---|
-| `k8s/10-nginx.yaml` ConfigMap | **Yes** | HTTP redirect server block + HTTPS server block with TLS |
-| `k8s/10-nginx.yaml` Service | **Yes** | Add port 443 |
-| `k8s/10-nginx.yaml` Deployment | **Yes** | Add container port 443, mount `tls-secret` and `acme-challenge` volumes |
-| `k8s/01-configmap.yaml` | **Yes** | `DEBUG: "false"` |
-| `deploy-k3s-local.sh` | **Yes** | `API_BASE_URL` and `ALLOWED_ORIGINS` use `https://` |
-| `middleware/security.py` | **Yes** | Exempt health endpoints from HTTPS redirect — k8s probes hit backend directly over HTTP and would loop without this |
-| `middleware/cors.py` | No | Origins driven by configmap value — change is in deploy script |
-| `routers/users.py` cookies | No | `secure=not settings.debug` already correct |
-| `main.py` docs | Optional | Docs are disabled when `debug=false` — change if you want them on |
-| `utils/exceptions.py` | No | Detail stripping already conditional on `debug` |
-| `app/config.py` | No | Default overridden by configmap env var |
-
----
-
 ## Step 8 — Auto-Renewal
 
 Certs expire every 90 days. This cron job renews them automatically.
