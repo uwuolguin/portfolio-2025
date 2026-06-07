@@ -58,7 +58,7 @@ nginx on port 80 ─────────────────────
    v
 nginx on port 443 ──────────────────────────────────────────────────────────────────
    |
-   |  ~/\.  (dot-files) (www.domain.com/\.git)
+   |  ~/\.  (dot-files: www.domain.com/\.git)
    |    → blocked immediately, nobody should be hitting .git or .env
    |
    |  ~/api/v1/users/(login|signup|resend-verification)
