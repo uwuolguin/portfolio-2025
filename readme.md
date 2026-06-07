@@ -37,24 +37,116 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 > Every service runs inside a single Kubernetes namespace (portfolio) on k3s, connected via ClusterIP. Nothing reaches the internet except through nginx.
 
 ```
-Browser
+Internet
    |
+   |
+   |  port 80 (HTTP)
    v
-nginx (TLS - HTTP->HTTPS - rate limiting - security headers)
+nginx on port 80 ───────────────────────────────────────────────────────────────────
    |
-   |---> /api/*        FastAPI backend
-   |                     |-- PostgreSQL primary           writes, DDL, pg_cron, WAL streaming
-   |                     |-- PostgreSQL replica           reads, hot standby
-   |                     |-- Redis                        cache (allkeys-LRU, 64 MB) + rate limiting
-   |                     |-- MinIO                        object storage
-   |                     |-- Image Service                content moderation via TensorFlow
-   |                     |-- LibreTranslate               self-hosted translation (en <-> es)
-   |                     +-- Redpanda/ Temporal/ Grafana  async event pipeline, fully observable
+   |  /.well-known/acme-challenge/
+   |    → serves Let's Encrypt challenge files so the SSL cert can renew itself
+   |    → the only reason port 80 exists at all
    |
-   |---> /images/*     Image Service (direct, backend bypassed)
+   |  everything else on port 80
+   |    → hard redirect to HTTPS, no exceptions
    |
-   +---> /grafana/*    Grafana UI (HTTPS, static demo credentials)
+   |────────────────────────────────────────────────────────────────────────────────
+   |
+   |
+   |  port 443 (HTTPS — the only port where real traffic flows)
+   v
+nginx on port 443 ──────────────────────────────────────────────────────────────────
+   |
+   |  ~/\.  (dot-files) (www.domain.com/\.git)
+   |    → blocked immediately, nobody should be hitting .git or .env
+   |
+   |  ~/api/v1/users/(login|signup|resend-verification)
+   |    → goes to the FastAPI backend
+   |    → auth gets its own stricter rules before the general /api/ block
+   |    → smaller body limit, longer timeout (bcrypt hashing + email sending is slow)
+   |
+   |  /api/
+   |    → goes to the FastAPI backend — this is where everything happens:
+   |    →   database reads/writes, image uploads, search, user management
+   |    →   the backend then talks to postgres, redis, minio, image-service, libretranslate
+   |    → trailing slash stripped here to avoid FastAPI redirect stripping your cookies
+   |
+   |  /images/
+   |    → goes straight to the image service, backend never sees this request
+   |    → fetching a company photo: browser → nginx → image-service → MinIO → back
+   |    → note: frontend appends ?v=timestamp on every render, so no browser caching
+   |
+   |  /docs  and  /openapi.json
+   |    → goes to the FastAPI backend
+   |    → just the Swagger UI, only available when DEBUG=true
+   |
+   |  /grafana/
+   |    → goes to Grafana, which connects to Loki for logs
+   |    → Loki gets logs from Alloy, which tails the temporal-worker pod
+   |    → so: browser → nginx → grafana → loki → (logs from the event pipeline)
+   |    → WebSocket kept alive so the dashboard updates in real time
+   |
+   |  /files/logos/  and  /files/test_pictures/
+   |    → served directly from inside the nginx container, no service involved
+   |    → logos: 30-day immutable cache, filename rename required to bust it
+   |    → test pictures: 1-day cache, browser revalidates after expiry
+   |    → no automated cache busting — manual filename rename on update
+   |
+   |  /health
+   |    → nginx answers this itself, no upstream
+   |    → Kubernetes hits this to know if nginx is alive
+   |
+   |  /  (everything else)
+   |    → served directly from inside the nginx container
+   |    → this is the entire frontend: HTML, CSS, vanilla JS
+   |    → once the browser has these files, it starts calling /api/ on its own
+   |
+   |────────────────────────────────────────────────────────────────────────────────
 ```
+
+---
+
+### What the Backend Actually Talks To
+
+> When a request reaches `/api/`, the FastAPI backend is the coordinator. It does not do everything itself — it delegates to specialized services depending on what the request needs.
+
+```
+FastAPI backend
+   |
+   |  every write (INSERT, UPDATE, DELETE)
+   |    → PostgreSQL primary
+   |    → the only node that accepts writes
+   |    → also runs pg_cron to refresh the search materialized view every minute
+   |
+   |  every read (SELECT, search)
+   |    → PostgreSQL replica
+   |    → hot standby, streaming WAL from primary in real time
+   |    → falls back to primary automatically if replica is unavailable
+   |
+   |  caching + rate limiting
+   |    → Redis
+   |    → products and communes cached for 3 days (they rarely change)
+   |    → rate limiting counters also live here, per-IP sliding window
+   |
+   |  company image upload
+   |    → Image Service (separate microservice)
+   |    → validates format, dimensions, runs NSFW detection via TensorFlow
+   |    → if it passes, stores the file in MinIO (S3-compatible object storage)
+   |    → backend never buffers the file — streams directly through
+   |
+   |  company description translation
+   |    → LibreTranslate (self-hosted, ES <-> EN only)
+   |    → if you submit a description in Spanish, the backend translates to English
+   |    → both versions stored in the database so search works in either language
+   |
+   |  login / logout events (fire-and-forget, does not block the response)
+   |    → Redpanda (Kafka-compatible broker)
+   |    → handed off to the async event pipeline
+   |    → see the Auth Event Pipeline diagram below
+```
+
+---
 
 ### End-to-End Event Flow: Auth Event Pipeline
 
@@ -200,8 +292,8 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 - `force_rollback` on DB methods is a testing convenience, not a production pattern.
 - **Single-namespace monitoring**: Grafana, Loki, and Alloy run inside the `portfolio` namespace alongside the application. In a real multi-tenant environment, observability infrastructure lives in a dedicated `monitoring` namespace - the same Grafana/Loki stack then serves `portfolio`, `staging`, `payments`, or any other namespace without being coupled to one application. The mechanics: Alloy's `ClusterRole` grants `get/watch/list` on pods cluster-wide, and the `ClusterRoleBinding` maps that role to the `alloy` ServiceAccount in `monitoring`, so it can tail logs from every namespace while running in its own. Keeping them separate also means you can wipe `kubectl delete namespace portfolio` during a clean deploy cycle without taking down observability. For this single-environment demo the separation adds DNS complexity (`loki.monitoring.svc.cluster.local` vs `loki.portfolio.svc.cluster.local`) with no operational benefit, so everything lives in `portfolio`.
 
-
 ---
+
 ## Pod Breakdown (4GB Droplet)
 
 | Pod | Manifest | Actual RAM |
@@ -239,6 +331,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 | **Add one more heavy service** | **8GB** is recommended. buff/cache will compete for the remaining available RAM under any meaningful load. |
 | **Production with real traffic** | **8GB minimum**, ideally **16GB**. Traffic spikes cause PostgreSQL and Redpanda to buffer aggressively, and the kernel cache needs room to stay warm rather than get evicted. |
 | **Could this run on 2GB?** | No. Process usage alone is ~3.0GB under low traffic; the system would be deep in swap and performance would degrade badly. |
+
 ---
 
 ## Quick Local Preview
