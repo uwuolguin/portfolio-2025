@@ -84,6 +84,22 @@ cat /etc/ssh/sshd_config                       # SSH daemon config
 #   it no longer matters because passwords are rejected completely.
 #
 #
+# WHERE TO FIND AUTHORIZED KEYS ON THE DROPLET
+# -----------------------------------------------------------------------------
+# The authorized_keys file lives in the .ssh directory of the user's home folder.
+# To inspect it on the droplet:
+#
+#   cd ~/.ssh/
+#   cat authorized_keys
+#
+# To inspect it on windows generally the directory is:
+#
+#   C:\Users\<youruser>\.ssh\
+#
+# Each line is one public key that is allowed to SSH in as that user.
+# If your key is not here, you cannot log in with key auth.
+#
+#
 # SSH KEY BASICS
 # -----------------------------------------------------------------------------
 #
