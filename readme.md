@@ -107,6 +107,12 @@ nginx on port 443 ────────────────────�
 
 ---
 
+This project runs 15 microservices by Peter Rodgers' original 2005 definition: a fine-grained service that does one thing, is network-accessible, and is independently deployable. Regardless of what any academic paper or industry guru says, if you go with this approach be ready to chase a bug across at least 16 containers instead of reading one stack trace in a monolith, which is why correlation IDs and structured JSON logging exist here.
+
+> **Note:** the stack counts as 15 not 16 because postgres-replica is the same PostgreSQL process as the primary running in standby mode, a real-time mirror with no independent capability, not a separate service, just high availability infrastructure for the primary.
+
+---
+
 ### What the Backend Actually Talks To
 
 > When a request reaches `/api/`, the FastAPI backend is the coordinator. It does not do everything itself — it delegates to specialized services depending on what the request needs.
