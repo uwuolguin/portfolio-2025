@@ -288,7 +288,7 @@ Vanilla ES6+, no framework, no build step. Components rebuild on state change by
 
 ---
 
-## Known Gaps
+## Architectural Trade-offs & Future Roadmap
 
 - One environment. No dev/staging split.
 - CI/CD is scoped to `prod-*` commit prefixes via GitHub Actions: not a full pipeline.
@@ -383,11 +383,11 @@ For HTTPS first: **[SSL Setup Guide](./SSL_SETUP.md)**.
 ```
 proveo/
 |-- .github/
-|    |-- workflows/
-|    |   |-- deploy.yml           # Triggers on prod-* commits, SSHs into droplet and runs deploy scripts
-|    |   |-- eslint.yml           # Triggers on prod-* or dopkp commits, runs ESLint on frontend JS
-|    |   |-- pylint_backend.yml   # Triggers on prod-* or dopkp commits, runs pylint on backend/app
-|    +-- +-- pylint_image_service.yml  # Triggers on prod-* or dopkp commits, runs pylint on image-service
+|   |-- workflows/
+|   |   |-- deploy.yml           # Triggers on prod-* commits, SSHs into droplet and runs deploy scripts
+|   |   |-- eslint.yml           # Triggers on prod-* or dopkp commits, runs ESLint on frontend JS
+|   |   |-- pylint_backend.yml   # Triggers on prod-* or dopkp commits, runs pylint on backend/app
+|   |   +-- pylint_image_service.yml  # Triggers on prod-* or dopkp commits, runs pylint on image-service
 |
 |-- backend/                      # FastAPI application
 |   |-- app/
