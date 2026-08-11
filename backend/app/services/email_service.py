@@ -2,6 +2,7 @@
 
 import resend
 from app.config import settings
+from starlette.concurrency import run_in_threadpool 
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -71,13 +72,18 @@ class EmailService:  # pylint: disable=too-few-public-methods
         """
 
         try:
-            response = resend.Emails.send(
+            # BLOCKING: the Resend SDK wraps `requests`, which blocks on a raw
+            # socket and never yields — despite this method being `async def`.
+            # Unbounded delay: a hanging Resend freezes the whole backend.
+            # See backend/CONCURRENCY.md. Function passed, not called.
+            response = await run_in_threadpool(
+                resend.Emails.send,
                 {
                     "from": settings.email_from,
                     "to": to_email,
                     "subject": " Verify Your Proveo Account",
                     "html": html_content,
-                }
+                },
             )
 
             logger.info(

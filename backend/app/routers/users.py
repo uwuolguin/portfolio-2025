@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query, Body
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 from typing import List
 import asyncpg
 from datetime import timedelta
@@ -127,7 +128,15 @@ async def login(
 ):
     user = await DB.get_user_by_email(conn=db, email=user_data.email)
 
-    if not user or not verify_password(user_data.password, user.hashed_password):
+    # BLOCKING: bcrypt at 12 rounds is ~300ms of CPU. Run on the event
+    # loop it stalled EVERY concurrent request, not just logins.
+    # bcrypt 5.x is Rust and releases the GIL, so on a worker thread the
+    # main thread runs in true parallel. See backend/CONCURRENCY.md.
+    if not user or not await run_in_threadpool(
+        verify_password,
+        user_data.password,
+        user.hashed_password,
+    ):
         logger.warning("login_failed", email=user_data.email, reason="invalid_credentials")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

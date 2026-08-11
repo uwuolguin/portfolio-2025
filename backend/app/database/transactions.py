@@ -12,6 +12,7 @@ Key changes from original:
 - Write transactions always use primary pool
 """
 
+from starlette.concurrency import run_in_threadpool
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional, List
 from enum import Enum
@@ -146,7 +147,8 @@ class DB:  # pylint: disable=too-many-public-methods
         force_rollback: bool = False,
     ) -> UserRecord:
         """Create a new user (WRITE operation - uses primary)"""
-        hashed_password = get_password_hash(password)
+        # BLOCKING: same as login, signup path. See backend/CONCURRENCY.md.
+        hashed_password = await run_in_threadpool(get_password_hash, password)
         user_uuid = uuid.uuid4()
         verification_token = generate_csrf_token()
         token_expires = datetime.now(timezone.utc) + timedelta(
