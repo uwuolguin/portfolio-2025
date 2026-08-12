@@ -93,6 +93,148 @@ callback on the Future and walks away with the ticket. The worker calls
 `set_result()`, the callback fires, and the coroutine resumes on the exact next
 line with all its locals intact.
 
+### The suspension protocol — what those two lines actually do
+
+Note that if the Future is **already done**, `__await__` skips the `yield`
+entirely and returns immediately. The coroutine never suspends. Suspension only
+happens when there is genuinely something to wait for.
+
+When it does suspend, the yielded Future travels up the generator chain and
+lands in `Task.__step()` — the loop's driver — which has to work out what it
+just received. Roughly:
+
+```python
+result = coro.send(None)        # the coroutine yielded something
+
+blocking = getattr(result, '_asyncio_future_blocking', None)
+if blocking is not None:
+    if blocking:                                  # True -> a real suspension
+        result._asyncio_future_blocking = False   # reset immediately (one-shot)
+        result.add_done_callback(self.__wakeup)   # park: resume me later
+        # __step returns. The loop moves on to other tasks.
+    else:
+        raise RuntimeError("yield was used instead of yield from ...")
+else:
+    raise RuntimeError(f"Task got bad yield: {result!r}")
+```
+
+So `_asyncio_future_blocking` does three jobs:
+
+1. **Duck-typed identification.** `__step` checks for this attribute instead of
+   `isinstance(result, Future)`. That is deliberate: any third-party class can
+   act as a Future without inheriting from asyncio's. It is how `uvloop` and
+   C-implemented futures interoperate. **The attribute is the interface.**
+2. **"I genuinely suspend."** `True` means *park this task, I will wake you.*
+3. **Catching a specific misuse.** `__step` resets it to `False` right after
+   consuming it, so a Future yielded again outside `__await__` raises a clear
+   `RuntimeError` instead of breaking silently. It is a one-shot token.
+
+The line after it is the one that matters operationally:
+
+```python
+result.add_done_callback(self.__wakeup)
+```
+
+That is the **ticket** — the coroutine is registered as a callback on the
+Future. When the worker thread calls `set_result()`, the callback fires and the
+Task resumes.
+
+> Together those two lines are the entire suspension protocol:
+> **`_asyncio_future_blocking` says "I am a real suspension point."
+> `add_done_callback` says "here is how to wake me."**
+> Everything else in asyncio is built on top of them.
+
+### Resuming is a method on the object, not a new call
+
+A common mix-up: after a `yield`, you do **not** call the function again.
+Calling it again builds a brand new generator that starts from the top.
+
+```python
+def gen():
+    yield 1
+    yield 2
+
+g = gen()      # nothing has run yet — just an object holding a paused frame
+next(g)        # runs to the first yield -> 1
+next(g)        # RESUMES from there  -> 2
+next(g)        # StopIteration
+```
+
+`g` holds the frame: locals, instruction pointer, everything. `next(g)` means
+*unpause*. Same object, different point in time.
+
+**And yield is a two-way channel, not just an exit.** `send()` resumes the
+generator *and* passes a value in, which becomes the result of the `yield`
+expression inside:
+
+```python
+def echo():
+    while True:
+        received = yield          # yield is on the RIGHT of =
+        print("got", received)
+
+g = echo()
+next(g)          # prime it — run to the first yield
+g.send("hello")  # got hello
+```
+
+| Method | Effect |
+|---|---|
+| `next(g)` / `g.send(None)` | resume, pass in nothing |
+| `g.send(x)` | resume, the `yield` expression evaluates to `x` |
+| `g.throw(exc)` | resume by raising `exc` **at the yield point** |
+
+`throw()` is how `asyncio.CancelledError` reaches a coroutine — raised at the
+exact line it is paused on, so `try/finally` and `async with` cleanup runs
+normally. Not a bolted-on feature; just the generator protocol.
+
+This is why `__step` says `coro.send(None)`. The loop is not calling anything
+again — it is **resuming a paused frame**. Outbound, the coroutine yields a
+Future ("here is what I am waiting on"); inbound, the loop later sends the
+result back in, and that becomes the value of the `await` expression. That is
+the whole reason `result = await something()` works.
+
+### The worker never touches the coroutine
+
+The worker thread does **not** resume anything. It cannot — it is a different
+thread, and asyncio is not thread-safe. Its entire job is to hand the value
+across the thread boundary and go away:
+
+```
+worker thread                          main thread (event loop)
+─────────────                          ────────────────────────
+verify_password() returns True
+      |
+loop.call_soon_threadsafe(...)  ---->  [queued]
+      |
+back to the pool, sleeps               ...still serving other requests...
+                                              |
+                                       future.set_result(True)
+                                              |
+                                       fires __wakeup callback
+                                              |
+                                       Task.__step()
+                                              |
+                                       coro.send(True)   <- the resume
+                                              |
+                                       the `await` evaluates to True
+```
+
+`call_soon_threadsafe` drops a message in a thread-safe queue and writes a byte
+to the loop's self-pipe to wake it out of `epoll`. The loop picks it up on its
+next iteration and does the rest **itself**.
+
+> **The worker produces the value. The loop delivers it.**
+
+Two consequences:
+
+- **Resumption is queued, not instant.** The Future completes at t=300ms, but
+  the coroutine resumes whenever the loop next reaches that callback. Usually
+  sub-millisecond, but it is scheduled, not preemptive.
+- **Everything after the `await` runs on the main thread** — the 401 check, the
+  JWT, the cookie, the Redpanda publish. The worker computed one bool and left.
+  The expensive thing was isolated; the request logic stayed where it belongs.
+
 ---
 
 ## What we win

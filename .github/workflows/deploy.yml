@@ -24,6 +24,12 @@ on:
     branches:
       - main
 
+# Never let two deployments touch the droplet at once. Queue instead of
+# cancelling: a half-finished k3s rollout is worse than a slow one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     # Only run deployments when the commit message starts with "prod-".
@@ -32,118 +38,208 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    # Hard limit for the entire deployment job.
-    # Prevents a stuck deployment from running forever.
+    # Hard limit for the entire deployment job. Deliberately larger than
+    # REMOTE_TIMEOUT so the remote script hits its own limit first and reports a
+    # real error, instead of GitHub killing the runner mid-stream.
     timeout-minutes: 180
 
+    env:
+      # Public IP or hostname of the production droplet.
+      DEPLOY_HOST: ${{ secrets.DROPLET_HOST }}
+
+      # Linux user used for deployments.
+      DEPLOY_USER: deploy
+
+      # Maximum runtime for the remote script itself.
+      REMOTE_TIMEOUT: 170m
+
     steps:
-      - name: Deploy to Droplet via SSH
-        uses: appleboy/ssh-action@master
-
-        with:
-          # Public IP or hostname of the production droplet.
-          host: ${{ secrets.DROPLET_HOST }}
-
-          # Linux user used for deployments.
-          username: deploy
-
+      # -----------------------------------------------------------------------
+      # Write the SSH key and a config entry named "production".
+      # Everything after this step is plain `ssh production ...`.
+      #
+      # The key is passed through env: rather than interpolated into the script
+      # body, so its contents can never be parsed as shell.
+      # -----------------------------------------------------------------------
+      - name: Configure SSH
+        env:
           # SSH private key stored in GitHub Secrets.
-          key: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
 
-          # Maximum time allowed to establish the SSH connection.
-          timeout: 60s
+          umask 077
+          mkdir -p ~/.ssh
 
-          # Maximum runtime for the remote script itself.
-          command_timeout: 180m
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
 
-          # Disable PTY allocation.
-          # CI/CD is non-interactive and PTYs are a common source
-          # of hanging Docker builds and deployment scripts.
-          request_pty: false
+          # ssh refuses to connect to a host it can't verify, so fetch the
+          # droplet's host key. Note this trusts whatever answers on port 22 at
+          # scan time. To close that hole, save the output of
+          # `ssh-keyscan -H <droplet-ip>` as a secret and write it here instead.
+          ssh-keyscan -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            echo "::error::ssh-keyscan returned nothing. Droplet down, wrong DROPLET_HOST, or port 22 firewalled?"
+            exit 1
+          fi
 
-          # Stop immediately when any command fails.
-          # Prevents continuing a deployment after an earlier error.
-          script_stop: true
+          cat > ~/.ssh/config <<EOF
+          Host production
+            HostName ${DEPLOY_HOST}
+            User ${DEPLOY_USER}
+            IdentityFile ~/.ssh/deploy_key
+            UserKnownHostsFile ~/.ssh/known_hosts
 
-          script: |
-            # -e  : exit immediately on command failure
-            # -E  : preserve ERR traps in functions/subshells
-            # -u  : fail on undefined variables
-            # -o pipefail : fail pipelines if any command fails
-            set -Eeuo pipefail
+            # Only offer the deploy key. Otherwise ssh burns through default
+            # identities first and can hit MaxAuthTries before trying ours.
+            IdentitiesOnly yes
 
-            # Disable interactive package manager prompts.
-            export DEBIAN_FRONTEND=noninteractive
+            # Never prompt for anything. CI has nobody to answer.
+            BatchMode yes
 
-            # Move to project root.
-            cd /home/deploy/portfolio-2025
+            # Maximum time allowed to establish the SSH connection.
+            ConnectTimeout 60
 
-            echo "=== $(date) FETCH ==="
+            # Docker builds go quiet for long stretches. Keepalives stop NAT and
+            # idle timeouts from dropping the session mid-build.
+            ServerAliveInterval 30
+            ServerAliveCountMax 20
 
-            # Download latest Git metadata from origin.
-            git fetch origin main
+            # Disable PTY allocation.
+            # CI/CD is non-interactive and PTYs are a common source
+            # of hanging Docker builds and deployment scripts.
+            RequestTTY no
+          EOF
 
-            echo "=== $(date) RESET ==="
+          chmod 700 ~/.ssh
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts ~/.ssh/config
 
-            # Force local checkout to exactly match origin/main.
-            # Removes any drift caused by manual server changes.
-            git reset --hard origin/main
+      # -----------------------------------------------------------------------
+      # The deployment itself.
+      #
+      # The script is fed to a remote `bash -s`, which reads it from stdin.
+      # ssh exits with the remote command's status, so a failing step fails the
+      # job with no extra plumbing. (255 means ssh itself failed to connect;
+      # 124 means the local `timeout` fired.)
+      #
+      # Note: `timeout` kills the local ssh client, not the remote process. A
+      # runaway build keeps running on the droplet until it finishes or is
+      # killed by hand.
+      # -----------------------------------------------------------------------
+      - name: Deploy to Droplet via SSH
+        run: |
+          set -Eeuo pipefail
 
+          timeout --signal=TERM --kill-after=60s "$REMOTE_TIMEOUT" \
+            ssh -T production 'bash -s' <<'REMOTE_SCRIPT'
+          # -e  : exit immediately on command failure
+          # -E  : preserve ERR traps in functions/subshells
+          # -u  : fail on undefined variables
+          # -o pipefail : fail pipelines if any command fails
+          set -Eeuo pipefail
 
+          # Disable interactive package manager prompts.
+          export DEBIAN_FRONTEND=noninteractive
 
-            # Enter deployment scripts directory.
-            cd "k8s scripts"
+          # Move to project root.
+          cd /home/deploy/portfolio-2025
 
-            # Ensure all deployment scripts are executable.
-            chmod +x *.sh
+          echo "=== $(date) FETCH ==="
 
-            echo "=== $(date) BUILD START ==="
+          # Download latest Git metadata from origin.
+          git fetch origin main
 
-            # Rebuild every Docker image from scratch.
-            NO_CACHE=true ./build-and-import-k3s.sh
+          echo "=== $(date) RESET ==="
 
-            echo "=== $(date) BUILD END ==="
+          # Force local checkout to exactly match origin/main.
+          # Removes any drift caused by manual server changes.
+          git reset --hard origin/main
 
-            echo "=== $(date) DEPLOY START ==="
+          # Enter deployment scripts directory.
+          cd "k8s scripts"
 
-            # Apply Kubernetes manifests and perform deployment.
-            ./deploy-k3s-local.sh
+          # Ensure all deployment scripts are executable.
+          chmod +x *.sh
 
-            echo "=== $(date) DEPLOY END ==="
+          echo "=== $(date) BUILD START ==="
 
-            # Wait until the backend deployment is fully rolled out.
-            # Fails if Kubernetes cannot make the deployment healthy.
-            kubectl rollout status deployment/backend \
-              -n portfolio \
-              --timeout=300s
+          # Rebuild every Docker image from scratch.
+          #
+          # </dev/null because this script is itself arriving on stdin — without
+          # it, anything inside the build that reads stdin would swallow the
+          # rest of the deployment.
+          NO_CACHE=true ./build-and-import-k3s.sh </dev/null
 
-            # Seed demo/test data after deployment.
-            #
-            # 2>&1 merges stderr into stdout so both streams pass through
-            # the same filtering pipeline.
-            #
-            # The seed script is idempotent. Re-running it can produce
-            # expected duplicate-entry messages for records that already
-            # exist in the database.
-            #
-            # grep -v removes known non-fatal messages to keep the CI log
-            # readable while still showing real errors and tracebacks.
-            #
-            # The final grep removes empty lines left behind by filtering.
-            kubectl exec -n portfolio deployment/backend -- \
-              python -m scripts.database.seed_test_data 2>&1 \
-              | grep -v "already registered\|already exists\|UniqueViolationError\|transaction_\|╭\|│\|╰\|❱" \
-              | grep .
+          echo "=== $(date) BUILD END ==="
 
-            # Execute backend test suite inside the running container.
-            # Final verification that the deployed application is healthy.
-            kubectl exec -n portfolio deployment/backend -- \
-              pytest app/tests/ -v
-            # Rolling restart all deployments (zero downtime, one pod at a time)
-            kubectl rollout restart deployment -n portfolio
+          echo "=== $(date) DEPLOY START ==="
 
-            # Rolling restart all statefulsets
-            kubectl rollout restart statefulset -n portfolio
+          # Apply Kubernetes manifests and perform deployment.
+          ./deploy-k3s-local.sh </dev/null
 
-            # Rolling restart all daemonsets
-            kubectl rollout restart daemonset -n portfolio
+          echo "=== $(date) DEPLOY END ==="
+
+          # Wait until the backend deployment is fully rolled out.
+          # Fails if Kubernetes cannot make the deployment healthy.
+          kubectl rollout status deployment/backend \
+            -n portfolio \
+            --timeout=300s
+
+          echo "=== $(date) SEED ==="
+
+          # Seed demo/test data after deployment.
+          #
+          # The seed script is idempotent. Re-running it produces expected
+          # duplicate-entry messages for records that already exist.
+          #
+          # Output is captured to a file first so kubectl's own exit status is
+          # checked directly. On failure the full unfiltered log is printed,
+          # tracebacks included. Filtering only happens on success.
+          seed_log="$(mktemp)"
+          if ! kubectl exec -n portfolio deployment/backend -- \
+                 python -m scripts.database.seed_test_data >"$seed_log" 2>&1; then
+            echo "--- seed failed, full output follows ---"
+            cat "$seed_log"
+            rm -f "$seed_log"
+            exit 1
+          fi
+
+          # Strip known non-fatal messages and the blank lines left behind, to
+          # keep the CI log readable.
+          #
+          # `|| true` matters: under pipefail, grep exits non-zero when nothing
+          # matches, so a clean idempotent re-run — where every line is
+          # "already exists" noise and the filter empties the log — would
+          # otherwise fail the deploy before the tests ever ran.
+          grep -v "already registered\|already exists\|UniqueViolationError\|transaction_\|╭\|│\|╰\|❱" "$seed_log" \
+            | grep . || true
+          rm -f "$seed_log"
+
+          echo "=== $(date) TESTS ==="
+
+          # Execute backend test suite inside the running container.
+          # Final verification that the deployed application is healthy.
+          kubectl exec -n portfolio deployment/backend -- \
+            pytest app/tests/ -v
+
+          echo "=== $(date) RESTART ==="
+
+          # Rolling restart all deployments (zero downtime, one pod at a time)
+          kubectl rollout restart deployment -n portfolio
+
+          # Rolling restart all statefulsets
+          kubectl rollout restart statefulset -n portfolio
+
+          # Rolling restart all daemonsets
+          kubectl rollout restart daemonset -n portfolio
+
+          echo "=== $(date) DONE ==="
+          REMOTE_SCRIPT
+
+      # -----------------------------------------------------------------------
+      # Runners are ephemeral, but don't leave the key on disk for the rest of
+      # the job either.
+      # -----------------------------------------------------------------------
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
