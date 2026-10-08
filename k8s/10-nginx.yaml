@@ -173,8 +173,8 @@ data:
         # If the client can't receive data for longer than this, nginx closes the connection.
         send_timeout 10s;
 
-        # Gzip is a compression algorithm. When nginx sends a response 
-        # back to the client, instead of sending the raw bytes it compresses them first — the client receives 
+        # Gzip is a compression algorithm. When nginx sends a response
+        # back to the client, instead of sending the raw bytes it compresses them first — the client receives
         # a smaller payload, decompresses it, and renders it.
         gzip on;
 
@@ -308,7 +308,6 @@ data:
 
             # Block access to dot-files (.git, .env, .htaccess, etc.).
             location ~ /\. {
-                deny all;
                 return 404;
             }
 
