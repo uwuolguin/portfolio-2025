@@ -306,7 +306,11 @@ data:
             # nothing for HTTP->HTTPS downgrades.
             add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
-            # Block access to dot-files (.git, .env, .htaccess, etc.).
+            # Block dot-files and dot-dirs (.env, .git/, .htaccess).
+            # Regex: /\.  = a slash immediately followed by a literal dot.
+            #   \.  escaped dot -> matches only a real "."
+            #   .   unescaped   -> would match ANY character (wildcard)
+            # Unanchored, so it matches "/." anywhere in the URI.
             location ~ /\. {
                 return 404;
             }
