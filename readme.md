@@ -10,6 +10,14 @@ Runs on a single DigitalOcean droplet (4GB RAM, 2 AMD vCPUs, 60GB SSD). No dev/s
 
 ---
 
+## Video Walkthrough & Series Roadmap
+
+> **🚧 Work in Progress:** Right now, only the introduction video is available. Moving forward, I plan to roll out the full series step by step, covering everything from the GitHub Actions deployment pipelines all the way down to the vanilla JavaScript UI.
+
+Check out the introductory video on YouTube: **[Enterprise-Style Fullstack App: Python, PostgreSQL & Microservices](https://www.youtube.com/watch?v=Ai0jQaKIhJk)**.
+
+---
+
 ## Live Demo
 
 | URL | What |
